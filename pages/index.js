@@ -38,6 +38,17 @@ export default function BendemenPOS() {
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [isSearching, setIsSearching] = useState(false);
 
+  // --- VEILIGE LOCALSTORAGE HELPER ---
+  const getSafeLocalStorage = (key) => {
+    try {
+      const item = localStorage.getItem(key);
+      if (!item || item === 'undefined' || item === 'null') return null;
+      return JSON.parse(item);
+    } catch (e) {
+      return null;
+    }
+  };
+
   // --- LIFECYCLE ---
   useEffect(() => {
     const token = localStorage.getItem('pos_token');
@@ -45,8 +56,17 @@ export default function BendemenPOS() {
       router.push('/login');
       return;
     }
-    setCurrentUser(JSON.parse(localStorage.getItem('pos_user')));
-    setActiveStore(JSON.parse(localStorage.getItem('pos_active_store')));
+
+    const user = getSafeLocalStorage('pos_user');
+    const store = getSafeLocalStorage('pos_active_store');
+
+    if (!user) {
+      router.push('/login');
+      return;
+    }
+
+    setCurrentUser(user);
+    setActiveStore(store || { id: 'store_ons_winkeltje', name: 'Ons Winkeltje', category_name: 'POS Ons Winkeltje' });
 
     setIsOnline(navigator.onLine);
     window.addEventListener('online', () => setIsOnline(true));
@@ -67,6 +87,11 @@ export default function BendemenPOS() {
       return;
     }
     
+    if (!activeStore || !activeStore.id) {
+      alert("Geen actieve winkel geselecteerd.");
+      return;
+    }
+
     setIsSyncingProducts(true);
     try {
       const response = await axios.get(`/api/woocommerce/products?storeId=${activeStore.id}`);
@@ -173,8 +198,8 @@ export default function BendemenPOS() {
     const orderData = { 
       orderItems: cart, 
       paymentMethod: isPin ? 'sumup' : 'cash',
-      storeId: activeStore.id,
-      cashierId: currentUser.id,
+      storeId: activeStore?.id || 'store_ons_winkeltje',
+      cashierId: currentUser?.id || 1,
       customerId: selectedCustomer ? selectedCustomer.id : 0,
       totals: { subtotal, discountAmount, pointsDiscount: pointsDiscount, total, pointsUsed: finalPointsToUse }
     };
