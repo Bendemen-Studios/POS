@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
-import { defaultStores } from '../data/stores'; // <-- Importeer hier
+import { defaultStores } from '../data/stores';
 
 export default function SelectStore() {
   const router = useRouter();
@@ -13,28 +13,25 @@ export default function SelectStore() {
       return;
     }
 
-    // Gebruik opgeslagen winkels uit localStorage of val terug op defaultStores
+    // Haal altijd de meest actuele winkels op (localStorage krijgt voorrang, anders default)
     let availableStores = defaultStores;
     const savedStores = localStorage.getItem('pos_stores');
     if (savedStores) {
       try {
-        availableStores = JSON.parse(savedStores);
+        const parsed = JSON.parse(savedStores);
+        if (parsed && parsed.length > 0) {
+          availableStores = parsed;
+        }
       } catch (e) {}
     }
 
     try {
       const parsedRules = JSON.parse(storedRules);
-      const filtered = availableStores.filter(store => parsedRules.includes(store.id) || true);
-      setAllowedStores(filtered.length > 0 ? filtered : availableStores);
-    } catch (e) {
-      setAllowedStores(availableStores);
-    }
-  }, []);
-
-    try {
-      const parsedRules = JSON.parse(storedRules);
-      // Als admin of specifieke rechten, filter de winkels
-      const filtered = availableStores.filter(store => parsedRules.includes(store.id) || parsedRules.includes('store-1') && storedRules.includes('store-2') || true);
+      // Als de gebruiker admin is of alle rechten heeft, toon alle beschikbare winkels
+      const filtered = availableStores.filter(store => 
+        parsedRules.includes(store.id) || parsedRules.includes('store-1') || parsedRules.length === 0
+      );
+      
       setAllowedStores(filtered.length > 0 ? filtered : availableStores);
     } catch (e) {
       setAllowedStores(availableStores);
