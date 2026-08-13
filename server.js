@@ -1,4 +1,4 @@
-cat << 'EOF' > server.js
+cat << 'EOF' > /var/www/bendemen-pos/server.js
 const { createServer } = require('http');
 const next = require('next');
 
@@ -9,7 +9,7 @@ const handle = app.getRequestHandler();
 app.prepare().then(() => {
   createServer((req, res) => {
     handle(req, res);
-  }).listen(3000, (err) => {
+  }).listen(3000, '0.0.0.0', (err) => {
     if (err) throw err;
     console.log('> Ready on http://localhost:3000');
   });
