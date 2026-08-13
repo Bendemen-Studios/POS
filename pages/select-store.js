@@ -13,7 +13,6 @@ export default function SelectStore() {
   useEffect(() => {
     const storedRules = localStorage.getItem('pos_allowed_stores');
     if (!storedRules) {
-      // Geen sessie? Terug naar login
       router.push('/login');
       return;
     }
