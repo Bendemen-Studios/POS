@@ -34,9 +34,11 @@ export default async function handler(req, res) {
     const finalProducts = [];
 
     for (const product of allProducts) {
+      // Slimme categorie selectie: geef prioriteit aan subcategorieën (waarbij parent > 0 is)
       let mainCategory = 'Overig';
       if (product.categories && product.categories.length > 0) {
-        mainCategory = product.categories[0].name || 'Overig';
+        const specificCategory = product.categories.find(cat => cat.parent && cat.parent > 0) || product.categories[0];
+        mainCategory = specificCategory.name || specificCategory.slug || 'Overig';
       }
 
       let imageUrl = null;
@@ -50,7 +52,6 @@ export default async function handler(req, res) {
           let varPage = 1;
           let varTotalPages = 1;
 
-          // --- LOOP DOOR ALLE PAGINA'S VOOR VARIATIES ---
           do {
             const varRes = await api.get(`products/${product.id}/variations`, { 
               per_page: 100, 
