@@ -18,6 +18,11 @@ export default function BendemenPOS() {
   const [isSyncingProducts, setIsSyncingProducts] = useState(false);
   const [isWaitingForPin, setIsWaitingForPin] = useState(false);
   
+  // Open Prijs / Bedrag Scherm State
+  const [openPriceModal, setOpenPriceModal] = useState(false);
+  const [activeOpenProduct, setActiveOpenProduct] = useState(null);
+  const [customPriceInput, setCustomPriceInput] = useState('');
+
   // Authenticatie state
   const [currentUser, setCurrentUser] = useState(null);
   const [activeStore, setActiveStore] = useState(null);
@@ -96,16 +101,39 @@ export default function BendemenPOS() {
     }
   };
 
-  // --- WINKELWAGEN LOGICA ---
-  const addToCart = (product) => {
-    const existingItem = cart.find(item => item.id === product.id);
+  // --- WINKELWAGEN LOGICA & OPEN PRIJS ---
+  const handleProductClick = (product) => {
+    // Als de prijs 0 is in WooCommerce, beschouwen we dit als een Open Prijs / Bedrag product
+    if (product.price === 0) {
+      setActiveOpenProduct(product);
+      setCustomPriceInput('');
+      setOpenPriceModal(true);
+    } else {
+      addToCartWithPrice(product, product.price);
+    }
+  };
+
+  const addToCartWithPrice = (product, unitPrice) => {
+    const existingItem = cart.find(item => item.id === product.id && item.price === unitPrice);
     if (existingItem) {
       setCart(cart.map(item => 
-        item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
+        (item.id === product.id && item.price === unitPrice) ? { ...item, quantity: item.quantity + 1 } : item
       ));
     } else {
-      setCart([...cart, { ...product, quantity: 1 }]);
+      setCart([...cart, { ...product, price: unitPrice, quantity: 1 }]);
     }
+  };
+
+  const confirmCustomPrice = () => {
+    const price = parseFloat(customPriceInput);
+    if (isNaN(price) || price <= 0) {
+      alert('Vul alstublieft een geldig bedrag in.');
+      return;
+    }
+    addToCartWithPrice(activeOpenProduct, price);
+    setOpenPriceModal(false);
+    setActiveOpenProduct(null);
+    setCustomPriceInput('');
   };
 
   const updateQuantity = (id, delta) => {
@@ -148,7 +176,6 @@ export default function BendemenPOS() {
         alert("Pinnen is niet mogelijk zonder internetverbinding!");
         return;
       }
-      // OFFLINE OPSLAAN (Contant)
       await saveOfflineOrder(orderData);
       alert('Offline modus: Order is lokaal opgeslagen en wordt automatisch verstuurd zodra er internet is.');
       checkUnsyncedOrders();
@@ -156,7 +183,6 @@ export default function BendemenPOS() {
       return;
     }
 
-    // ONLINE AFREKENEN
     try {
       if (isPin) {
         setIsWaitingForPin(true);
@@ -197,7 +223,7 @@ export default function BendemenPOS() {
   if (!currentUser || !activeStore) return null; 
 
   return (
-    <div style={{ display: 'flex', height: '100vh', fontFamily: 'Arial' }}>
+    <div style={{ display: 'flex', height: '100vh', fontFamily: 'Arial', position: 'relative' }}>
       
       {/* LINKER KANT: Producten */}
       <div style={{ flex: '2', padding: '20px', borderRight: '1px solid #ddd', overflowY: 'auto' }}>
@@ -210,9 +236,11 @@ export default function BendemenPOS() {
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '15px' }}>
           {products.length === 0 ? <p>Geen producten. Druk op Sync.</p> : products.map(product => (
-            <div key={product.id} onClick={() => addToCart(product)} style={{ border: '1px solid #ccc', borderRadius: '8px', padding: '15px', cursor: 'pointer', textAlign: 'center', background: '#f9f9f9' }}>
+            <div key={product.id} onClick={() => handleProductClick(product)} style={{ border: '1px solid #ccc', borderRadius: '8px', padding: '15px', cursor: 'pointer', textAlign: 'center', background: product.price === 0 ? '#fffbe6' : '#f9f9f9' }}>
               <div style={{ fontWeight: 'bold', marginBottom: '10px' }}>{product.name}</div>
-              <div style={{ color: '#0070f3' }}>€{product.price.toFixed(2)}</div>
+              <div style={{ color: '#0070f3' }}>
+                {product.price === 0 ? 'Vrij Bedrag' : `€${product.price.toFixed(2)}`}
+              </div>
             </div>
           ))}
         </div>
@@ -315,7 +343,7 @@ export default function BendemenPOS() {
         {/* Winkelwagen Lijst */}
         <div style={{ flexGrow: 1, overflowY: 'auto', background: '#fff', padding: '15px', borderRadius: '8px', border: '1px solid #ddd', marginBottom: '15px' }}>
           {cart.length === 0 ? <p style={{ color: '#888', textAlign: 'center' }}>Winkelmandje is leeg</p> : cart.map(item => (
-            <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #eee', paddingBottom: '10px', marginBottom: '10px' }}>
+            <div key={`${item.id}-${item.price}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #eee', paddingBottom: '10px', marginBottom: '10px' }}>
               <div style={{ flex: '1' }}>
                 <div style={{ fontWeight: 'bold' }}>{item.name}</div>
                 <div style={{ color: '#666', fontSize: '14px' }}>€{item.price.toFixed(2)} per stuk</div>
@@ -412,6 +440,44 @@ export default function BendemenPOS() {
           </button>
         </div>
       </div>
+
+      {/* --- OPEN PRIJS MODAL SCHERM --- */}
+      {openPriceModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+          <div style={{ background: '#fff', padding: '30px', borderRadius: '10px', width: '350px', boxShadow: '0 4px 15px rgba(0,0,0,0.2)', textAlign: 'center' }}>
+            <h3 style={{ margin: '0 0 10px 0', fontSize: '20px' }}>{activeOpenProduct?.name}</h3>
+            <p style={{ color: '#666', fontSize: '14px', marginBottom: '20px' }}>Voer het gewenste bedrag in voor dit product.</p>
+            
+            <input 
+              type="number" 
+              step="0.01"
+              min="0"
+              autoFocus
+              placeholder="0.00"
+              value={customPriceInput}
+              onChange={(e) => setCustomPriceInput(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && confirmCustomPrice()}
+              style={{ width: '100%', padding: '12px', fontSize: '22px', textAlign: 'center', boxSizing: 'border-box', marginBottom: '20px', border: '2px solid #0070f3', borderRadius: '6px' }}
+            />
+
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button 
+                onClick={() => setOpenPriceModal(false)}
+                style={{ flex: 1, padding: '12px', background: '#ccc', border: 'none', borderRadius: '5px', cursor: 'pointer', fontSize: '16px' }}
+              >
+                Annuleren
+              </button>
+              <button 
+                onClick={confirmCustomPrice}
+                style={{ flex: 1, padding: '12px', background: '#0070f3', color: '#fff', border: 'none', borderRadius: '5px', cursor: 'pointer', fontSize: '16px', fontWeight: 'bold' }}
+              >
+                Toevoegen
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

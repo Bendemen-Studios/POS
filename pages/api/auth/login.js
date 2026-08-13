@@ -1,53 +1,45 @@
 // pages/api/auth/login.js
+import axios from 'axios';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ message: 'Method not allowed' });
 
   const { username, password } = req.body;
 
-  // Mock database: Hier koppel je later je echte database aan (bijv. MariaDB)
-  const users = [
-    { 
-      id: 1, 
-      username: 'ben', 
-      password: 'password123', // In productie gebruik je hier bcrypt hashes
-      name: 'Ben',
-      role: 'admin',
-      allowed_stores: ['store_hq', 'store_ons_winkeltje']
-    },
-    { 
-      id: 2, 
-      username: 'kassa_medewerker', 
-      password: 'pin', 
-      name: 'Kassa 1',
-      role: 'cashier',
-      allowed_stores: ['store_ons_winkeltje']
+  try {
+    // 1. Authenticatie via het WordPress login endpoint
+    const wpResponse = await axios.post(`${process.env.WOO_SITE_URL}/wp-json/bendemen/v1/login`, {
+      username: username,
+      password: password
+    });
+
+    const user = wpResponse.data;
+
+    // 2. Haal alle actieve winkels en toegewezen winkels van deze gebruiker op uit WP
+    const storesRes = await axios.get(`${process.env.WOO_SITE_URL}/wp-json/bendemen/v1/stores`);
+    const allStores = storesRes.data;
+
+    // Haal user details op voor user_meta (optioneel via admin credentials of direct)
+    // Voor nu filteren we op basis van rol: Administrators krijgen alle winkels, personeel alleen hun toegewezen winkels
+    let userStores = allStores;
+    if (user.role !== 'administrator' && user.role !== 'shop_manager') {
+      // Standaard regel voor medewerkers (kun je uitbreiden met WP user meta call)
+      userStores = allStores.filter(s => s.id === 'store_ons_winkeltje');
     }
-  ];
 
-  const stores = [
-    { id: 'store_hq', name: 'Bendemen HQ' },
-    { id: 'store_ons_winkeltje', name: 'Ons Winkeltje' }
-  ];
+    res.status(200).json({
+      success: true,
+      token: 'wp_verified_token',
+      user: {
+        id: user.id,
+        name: user.name,
+        role: user.role,
+        stores: userStores
+      }
+    });
 
-  const user = users.find(u => u.username === username && u.password === password);
-
-  if (!user) {
-    return res.status(401).json({ success: false, message: 'Ongeldige inloggegevens' });
+  } catch (error) {
+    console.error("WordPress Login Error:", error.response?.data || error.message);
+    res.status(401).json({ success: false, message: 'Onjuiste gebruikersnaam of wachtwoord' });
   }
-
-  // Filter de winkels waar deze gebruiker toegang toe heeft
-  const userStores = stores.filter(store => user.allowed_stores.includes(store.id));
-
-  // Geef een token en de gebruikersdata terug
-  res.status(200).json({
-    success: true,
-    token: 'simulated_jwt_token_12345', // Vervang later door echte JWT
-    user: {
-      id: user.id,
-      name: user.name,
-      role: user.role,
-      stores: userStores
-    }
-  });
 }
