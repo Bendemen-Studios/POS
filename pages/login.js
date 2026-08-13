@@ -16,25 +16,37 @@ export default function Login() {
     setError('');
 
     try {
-      // Haal winkels op en log in via de WordPress REST API
       const loginRes = await axios.post('/api/auth/login', { username, password });
 
-      if (loginRes.data.success) {
+      if (loginRes.data && loginRes.data.success) {
         localStorage.setItem('pos_token', 'active_session');
-        localStorage.setItem('pos_user', JSON.stringify(loginRes.data.user));
+        localStorage.setItem('pos_user', JSON.stringify(loginRes.data));
 
-        // Haal beschikbare winkels op
-        const storesRes = await axios.get('/api/admin/stores');
-        const stores = storesRes.data;
+        let stores = [];
+        try {
+          const storesRes = await axios.get('/api/admin/stores');
+          stores = storesRes.data || [];
+        } catch (e) {
+          console.error("Kon winkels niet ophalen", e);
+        }
 
         if (stores.length > 0) {
           localStorage.setItem('pos_active_store', JSON.stringify(stores[0]));
+        } else {
+          localStorage.setItem('pos_active_store', JSON.stringify({
+            id: 'store_ons_winkeltje',
+            name: 'Ons Winkeltje',
+            category_name: 'POS Ons Winkeltje'
+          }));
         }
 
         router.push('/');
+      } else {
+        setError(loginRes.data?.error || 'Inloggen mislukt. Controleer je gebruikersnaam en wachtwoord.');
       }
     } catch (err) {
-      setError('Inloggen mislukt. Controleer je gegevens of de verbinding met de server.');
+      const errorMsg = err.response?.data?.error || 'Inloggen mislukt. Controleer je gegevens of de verbinding met de server.';
+      setError(errorMsg);
     } finally {
       setLoading(false);
     }

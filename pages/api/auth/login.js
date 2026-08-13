@@ -3,21 +3,24 @@ import axios from 'axios';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
-    return res.status(405).json({ message: 'Method not allowed' });
+    return res.status(405).json({ success: false, message: 'Method not allowed' });
   }
 
   const { username, password } = req.body;
 
   try {
-    // Stuur de inloggegevens door naar het WordPress REST API endpoint
     const wpResponse = await axios.post(`${process.env.WOO_SITE_URL}/wp-json/bendemen/v1/login`, {
       username,
       password
+    }, {
+      validateStatus: function (status) {
+        return status < 500; // Accepteer ook 401/403 statussen zodat we ze netjes als JSON kunnen doorsturen
+      }
     });
 
-    res.status(200).json(wpResponse.data);
+    return res.status(wpResponse.status).json(wpResponse.data || { success: false, error: 'Inloggen mislukt' });
   } catch (error) {
-    console.error("Login API Error:", error.response?.data || error.message);
-    res.status(401).json({ success: false, error: 'Inloggen mislukt' });
+    console.error("Login API Error:", error.message);
+    return res.status(500).json({ success: false, error: 'Serverfout bij verbinden met WordPress' });
   }
 }
