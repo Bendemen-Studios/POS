@@ -13,28 +13,33 @@ export default async function handler(req, res) {
   try {
     let allProducts = [];
     let page = 1;
-    let totalPages = 1;
 
-    // --- LOOP DOOR ALLE PAGINA'S VOOR PRODUCTEN ---
-    do {
+    // --- ROBUUSTE PAGINERING LOOP (Blijft doorgaan tot de API leeg is) ---
+    while (true) {
       const response = await api.get("products", { 
         per_page: 100,
         page: page,
         status: 'any' 
       });
 
-      if (response.data && response.data.length > 0) {
-        allProducts.push(...response.data);
+      if (!response.data || response.data.length === 0) {
+        break; // Geen producten meer, klaar met loopen
       }
 
-      totalPages = parseInt(response.headers['x-wp-totalpages']) || 1;
+      allProducts.push(...response.data);
+
+      // Als deze pagina minder dan 100 items bevat, is dit sowieso de laatste pagina
+      if (response.data.length < 100) {
+        break;
+      }
+
       page++;
-    } while (page <= totalPages);
+    }
 
     const finalProducts = [];
 
     for (const product of allProducts) {
-      // Slimme categorie selectie: geef prioriteit aan subcategorieën (waarbij parent > 0 is)
+      // Prioriteit voor subcategorieën (zoals Barks)
       let mainCategory = 'Overig';
       if (product.categories && product.categories.length > 0) {
         const specificCategory = product.categories.find(cat => cat.parent && cat.parent > 0) || product.categories[0];
@@ -50,22 +55,27 @@ export default async function handler(req, res) {
         try {
           let allVariations = [];
           let varPage = 1;
-          let varTotalPages = 1;
 
-          do {
+          // --- ROBUUSTE VARIATIE LOOP ---
+          while (true) {
             const varRes = await api.get(`products/${product.id}/variations`, { 
               per_page: 100, 
               page: varPage,
               status: 'any' 
             });
 
-            if (varRes.data && varRes.data.length > 0) {
-              allVariations.push(...varRes.data);
+            if (!varRes.data || varRes.data.length === 0) {
+              break;
             }
 
-            varTotalPages = parseInt(varRes.headers['x-wp-totalpages']) || 1;
+            allVariations.push(...varRes.data);
+
+            if (varRes.data.length < 100) {
+              break;
+            }
+
             varPage++;
-          } while (varPage <= varTotalPages);
+          }
 
           const variations = allVariations.map(variation => {
             const attrString = (variation.attributes || []).map(a => a.option).join(', ');
