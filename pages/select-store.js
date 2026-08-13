@@ -6,7 +6,6 @@ import { fetcher } from '../lib/fetcher';
 export default function SelectStore() {
   const router = useRouter();
 
-  // Haal direct op uit localStorage als directe cache (0ms laadtijd)
   const [cachedStores, setCachedStores] = useState(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('cached_pos_stores');
@@ -17,7 +16,6 @@ export default function SelectStore() {
     return [{ id: 'store_ons_winkeltje', name: 'Ons Winkeltje', location: 'Hoofdvestiging' }];
   });
 
-  // SWR haalt op de achtergrond de meest recente database-data op
   const { data } = useSWR('/api/stores', fetcher, {
     fallbackData: { success: true, stores: cachedStores },
     revalidateOnFocus: false,
@@ -38,8 +36,15 @@ export default function SelectStore() {
   }, [data, router]);
 
   const selectStore = (store) => {
-    localStorage.setItem('selectedStore', JSON.stringify(store));
-    router.push('/');
+    const storeData = {
+      id: store.id || 'store_ons_winkeltje',
+      name: store.name || 'Ons Winkeltje',
+      location: store.location || 'Hoofdvestiging'
+    };
+    localStorage.setItem('selectedStore', JSON.stringify(storeData));
+    
+    // Harde navigatie zodat de app direct doorlaadt naar de kassa
+    window.location.href = '/';
   };
 
   return (
@@ -53,9 +58,9 @@ export default function SelectStore() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
           {stores.map(store => (
             <div 
-              key={store.id}
+              key={store.id || store.name}
               onClick={() => selectStore(store)}
-              style={{ padding: '20px', background: '#FFFFFF', border: '1px solid #E0E0E0', borderRadius: '12px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+              style={{ padding: '20px', background: '#FFFFFF', border: '1px solid #E0E0E0', borderRadius: '12px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', transition: 'border-color 0.2s' }}
             >
               <div>
                 <h3 style={{ margin: '0 0 5px 0', fontSize: '16px', fontWeight: '700', color: '#111' }}>{store.name}</h3>
@@ -69,7 +74,7 @@ export default function SelectStore() {
         <button 
           onClick={() => {
             localStorage.clear();
-            router.push('/login');
+            window.location.href = '/login';
           }}
           style={{ marginTop: '25px', background: 'none', border: 'none', color: '#888', cursor: 'pointer', fontSize: '13px', width: '100%', textAlign: 'center' }}
         >
