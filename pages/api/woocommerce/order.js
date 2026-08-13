@@ -33,19 +33,25 @@ export default async function handler(req, res) {
       });
     }
 
-    // 2. Bouw de complete order data op
+    // 2. Bouw de complete order data op met ondersteuning voor variaties
     const orderData = {
       payment_method: paymentMethod, // 'cash' of 'sumup'
       payment_method_title: paymentMethod === 'cash' ? 'Contant (Kassa)' : 'Pin (SumUp)',
       set_paid: true,
-      status: 'completed', // Bestelling is direct afgerond
+      status: 'completed',
       customer_id: customerId || 0,
       
-      // Voeg de producten toe
-      line_items: orderItems.map(item => ({
-        product_id: item.id,
-        quantity: item.quantity
-      })),
+      // Voeg de producten en eventuele variaties correct toe
+      line_items: orderItems.map(item => {
+        const lineItem = {
+          product_id: item.product_id || item.id,
+          quantity: item.quantity
+        };
+        if (item.variation_id && item.variation_id > 0) {
+          lineItem.variation_id = item.variation_id;
+        }
+        return lineItem;
+      }),
       
       // Voeg de kortingen toe
       fee_lines: feeLines,
@@ -62,17 +68,15 @@ export default async function handler(req, res) {
     const response = await api.post("orders", orderData);
     const createdOrder = response.data;
 
-    // 4. Punten afschrijven bij de klant
-    if (customerId > 0 && totals.pointsDiscount > 0) {
+    // 4. Punten afschrijven bij de klant (met veilige validatie)
+    if (customerId > 0 && totals.pointsDiscount > 0 && totals.pointsUsed > 0) {
       const customerRes = await api.get(`customers/${customerId}`);
       const customer = customerRes.data;
       
       const pointsMeta = customer.meta_data.find(meta => meta.key === 'wc_points_balance');
       let currentPoints = pointsMeta ? parseInt(pointsMeta.value) : 0;
       
-      const pointsDeducted = Math.round(totals.pointsDiscount / 0.05);
-      let newPointsBalance = currentPoints - pointsDeducted;
-      
+      let newPointsBalance = currentPoints - totals.pointsUsed;
       if (newPointsBalance < 0) newPointsBalance = 0;
 
       await api.put(`customers/${customerId}`, {
