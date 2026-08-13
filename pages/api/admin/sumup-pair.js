@@ -1,4 +1,4 @@
-import { pool } from '../../../lib/db';
+import db from '../../../lib/db';
 import axios from 'axios';
 
 export default async function handler(req, res) {
@@ -16,7 +16,7 @@ export default async function handler(req, res) {
     const sumupApiKey = process.env.SUMUP_API_KEY;
     const merchantCode = process.env.SUMUP_MERCHANT_CODE;
 
-    // Optioneel: Als je SumUp API keys hebt ingesteld in je .env, koppelt hij direct via de SumUp Cloud API
+    // Optioneel: SumUp API koppeling als de keys in .env staan
     if (sumupApiKey && merchantCode) {
       await axios.post(
         `https://api.sumup.com/v0.1/merchants/${merchantCode}/readers`,
@@ -33,15 +33,11 @@ export default async function handler(req, res) {
       );
     }
 
-    // Sla de gekoppelde reader status op in de database
-    const connection = await pool.getConnection();
-    
-    // Controleer of de kolom bestaat, zo niet kun je deze toevoegen of opslaan
-    await connection.execute(
+    // Sla de reader ID op in de database via de algemene db-verbinding
+    await db.execute(
       'UPDATE stores SET sumup_reader_id = ? WHERE id = ?',
       [pairingCode, storeId]
     );
-    connection.release();
 
     return res.status(200).json({ success: true, message: 'Pinapparaat succesvol gekoppeld aan de winkel!' });
   } catch (error) {
