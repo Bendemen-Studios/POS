@@ -14,8 +14,14 @@ export default function POS() {
 
   useEffect(() => {
     const savedStore = localStorage.getItem('selectedStore');
-    if (savedStore) {
-      try { setStore(JSON.parse(savedStore)); } catch (e) {}
+    if (!savedStore) {
+      router.push('/select-store');
+      return;
+    }
+    try { 
+      setStore(JSON.parse(savedStore)); 
+    } catch (e) {
+      router.push('/select-store');
     }
     fetchProducts();
   }, []);
@@ -104,19 +110,29 @@ export default function POS() {
     }
   };
 
+  const handleLogout = () => {
+    localStorage.clear();
+    router.push('/login');
+  };
+
   return (
     <div style={{ background: '#FFFFFF', color: '#111111', minHeight: '100vh', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
       
       {/* Header */}
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px 30px', borderBottom: '1px solid #EAEAEA', background: '#FFFFFF', position: 'sticky', top: 0, zIndex: 10 }}>
+        
+        {/* Links: Logo & Titel */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-          <div style={{ background: '#000', color: '#FFF', padding: '6px 10px', fontWeight: '900', borderRadius: '4px', fontSize: '16px' }}>BOM</div>
-          <div>
-            <h1 style={{ margin: 0, fontSize: '16px', fontWeight: '800' }}>BENDEMEN POS</h1>
-            <span style={{ fontSize: '11px', color: '#C3110C', fontWeight: '700' }}>📍 {store.name}</span>
-          </div>
+          <div style={{ background: '#000', color: '#FFF', padding: '6px 10px', fontWeight: '900', borderRadius: '4px', fontSize: '16px' }}>BDM</div>
+          <h1 style={{ margin: 0, fontSize: '16px', fontWeight: '800' }}>BENDEMEN POS</h1>
         </div>
 
+        {/* Midden: Geselecteerde Winkel */}
+        <div style={{ background: '#FAFAFA', padding: '6px 16px', borderRadius: '20px', border: '1px solid #EAEAEA', fontSize: '13px', fontWeight: '700', color: '#C3110C' }}>
+          📍 {store.name}
+        </div>
+
+        {/* Rechts: Actie knoppen */}
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
           <button 
             onClick={() => router.push('/admin')}
@@ -137,6 +153,13 @@ export default function POS() {
             title="Winkel wisselen"
           >
             🏪
+          </button>
+          <button 
+            onClick={handleLogout}
+            style={{ padding: '8px 12px', background: '#C3110C', color: '#FFFFFF', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', fontSize: '13px' }}
+            title="Uitloggen"
+          >
+            🚪 Uitloggen
           </button>
         </div>
       </header>

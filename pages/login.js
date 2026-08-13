@@ -1,97 +1,89 @@
-// pages/login.js
 import { useState } from 'react';
 import { useRouter } from 'next/router';
-import axios from 'axios';
 
 export default function Login() {
-  const router = useRouter();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const router = useRouter();
 
-  const handleLogin = async (e) => {
+  // Dummy toegangsrechten per gebruiker (kun je later koppelen aan een database)
+  const userAccessRules = {
+    'admin': ['store-1', 'store-2'], // Admin heeft toegang tot alle winkels
+    'bendemen': ['store-1'],         // Flagship hellevoetsluis
+    'rotterdam': ['store-2']         // Pop-up rotterdam
+  };
+
+  const handleLogin = (e) => {
     e.preventDefault();
-    setLoading(true);
-    setError('');
+    const cleanUser = username.trim().toLowerCase();
 
-    try {
-      const loginRes = await axios.post('/api/auth/login', { username, password });
-
-      if (loginRes.data && loginRes.data.success) {
-        localStorage.setItem('pos_token', 'active_session');
-        localStorage.setItem('pos_user', JSON.stringify(loginRes.data));
-
-        let stores = [];
-        try {
-          const storesRes = await axios.get('/api/admin/stores');
-          stores = storesRes.data || [];
-        } catch (e) {
-          console.error("Kon winkels niet ophalen", e);
-        }
-
-        localStorage.setItem('pos_available_stores', JSON.stringify(stores));
-
-        if (stores.length > 1) {
-          router.push('/select-store');
-        } else if (stores.length === 1) {
-          localStorage.setItem('pos_active_store', JSON.stringify(stores[0]));
-          router.push('/');
-        } else {
-          localStorage.setItem('pos_active_store', JSON.stringify({
-            id: 'store_ons_winkeltje',
-            name: 'Ons Winkeltje'
-          }));
-          router.push('/');
-        }
-      } else {
-        setError(loginRes.data?.error || 'Inloggen mislukt. Controleer je gebruikersnaam en wachtwoord.');
-      }
-    } catch (err) {
-      const errorMsg = err.response?.data?.error || 'Inloggen mislukt. Controleer je gegevens of de verbinding met de server.';
-      setError(errorMsg);
-    } finally {
-      setLoading(false);
+    if (!cleanUser || !password) {
+      setError('Vul alle velden in.');
+      return;
     }
+
+    if (!userAccessRules[cleanUser]) {
+      setError('Onbekende gebruikersnaam of geen toegang.');
+      return;
+    }
+
+    // Sla de gebruikersrechten op voor de volgende pagina's
+    localStorage.setItem('pos_user', cleanUser);
+    localStorage.setItem('pos_allowed_stores', JSON.stringify(userAccessRules[cleanUser]));
+    
+    // Verwijder eventuele oude actieve winkelkeuze zodat ze áltijd moeten kiezen
+    localStorage.removeItem('selectedStore');
+
+    router.push('/select-store');
   };
 
   return (
-    <div style={{ display: 'flex', height: '100vh', justifyContent: 'center', alignItems: 'center', background: '#f5f5f5', fontFamily: 'Arial' }}>
-      <form onSubmit={handleLogin} style={{ background: '#fff', padding: '40px', borderRadius: '8px', boxShadow: '0 4px 15px rgba(0,0,0,0.1)', width: '300px' }}>
-        <h2 style={{ marginBottom: '20px', textAlign: 'center' }}>Bendemen POS</h2>
-        
-        {error && <div style={{ color: 'red', marginBottom: '15px', fontSize: '14px', textAlign: 'center' }}>{error}</div>}
-
-        <div style={{ marginBottom: '15px' }}>
-          <label style={{ display: 'block', marginBottom: '5px', fontSize: '14px', fontWeight: 'bold' }}>Gebruikersnaam</label>
-          <input 
-            type="text" 
-            value={username} 
-            onChange={(e) => setUsername(e.target.value)} 
-            style={{ width: '100%', padding: '10px', boxSizing: 'border-box', borderRadius: '4px', border: '1px solid #ccc' }}
-            required 
-          />
+    <div style={{ background: '#FFFFFF', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+      <div style={{ width: '100%', maxWidth: '400px', padding: '40px', background: '#FAFAFA', borderRadius: '16px', border: '1px solid #EAEAEA', boxShadow: '0 10px 30px rgba(0,0,0,0.03)' }}>
+        <div style={{ textAlign: 'center', marginBottom: '30px' }}>
+          <div style={{ display: 'inline-block', background: '#000000', color: '#FFFFFF', padding: '10px 16px', fontWeight: '900', fontSize: '22px', borderRadius: '6px', letterSpacing: '1px', marginBottom: '15px' }}>
+            BOM
+          </div>
+          <h1 style={{ fontSize: '22px', fontWeight: '800', margin: '0 0 5px 0', color: '#111' }}>BENDEMEN POS</h1>
+          <p style={{ fontSize: '13px', color: '#666', fontStyle: 'italic', margin: 0 }}>Met zorg gemaakt!</p>
         </div>
 
-        <div style={{ marginBottom: '20px' }}>
-          <label style={{ display: 'block', marginBottom: '5px', fontSize: '14px', fontWeight: 'bold' }}>Wachtwoord</label>
-          <input 
-            type="password" 
-            value={password} 
-            onChange={(e) => setPassword(e.target.value)} 
-            style={{ width: '100%', padding: '10px', boxSizing: 'border-box', borderRadius: '4px', border: '1px solid #ccc' }}
-            required 
-          />
-        </div>
+        {error && (
+          <div style={{ padding: '12px', background: '#FCE8E6', color: '#C3110C', borderRadius: '8px', fontSize: '13px', marginBottom: '20px', fontWeight: '600', border: '1px solid #FAD2D1' }}>
+            ⚠️ {error}
+          </div>
+        )}
 
-        <button 
-          type="submit" 
-          disabled={loading} 
-          style={{ width: '100%', padding: '12px', background: '#0070f3', color: '#fff', border: 'none', borderRadius: '4px', fontSize: '16px', cursor: 'pointer', fontWeight: 'bold' }}
-        >
-          {loading ? 'Bezig...' : 'Inloggen'}
-        </button>
-      </form>
+        <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+          <div>
+            <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '6px', color: '#333', textTransform: 'uppercase' }}>Gebruikersnaam</label>
+            <input 
+              type="text" 
+              value={username} 
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="Bijv. admin of bendemen"
+              style={{ width: '100%', padding: '12px 15px', borderRadius: '8px', border: '1px solid #DDD', fontSize: '14px', outline: 'none', boxSizing: 'border-box' }}
+            />
+          </div>
+          <div>
+            <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '6px', color: '#333', textTransform: 'uppercase' }}>Wachtwoord</label>
+            <input 
+              type="password" 
+              value={password} 
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+              style={{ width: '100%', padding: '12px 15px', borderRadius: '8px', border: '1px solid #DDD', fontSize: '14px', outline: 'none', boxSizing: 'border-box' }}
+            />
+          </div>
+          <button 
+            type="submit" 
+            style={{ marginTop: '10px', padding: '14px', background: '#000000', color: '#FFFFFF', border: 'none', borderRadius: '8px', fontWeight: '700', fontSize: '15px', cursor: 'pointer' }}
+          >
+            Inloggen & Kies Winkel
+          </button>
+        </form>
+      </div>
     </div>
   );
 }
