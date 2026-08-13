@@ -21,54 +21,66 @@ export default async function handler(req, res) {
     const variationPromises = [];
 
     for (const product of response.data) {
-      const productCategories = product.categories || [];
-      const mainCategory = productCategories.length > 0 ? (productCategories[0].name || 'Overig') : 'Overig';
-      const imageUrl = (product.images && product.images.length > 0 && product.images[0].src) ? product.images[0].src : null;
+      // 1. Veilige categorie extractie
+      let mainCategory = 'Overig';
+      if (product.categories && Array.isArray(product.categories) && product.categories.length > 0) {
+        mainCategory = product.categories[0].name || product.categories[0].slug || 'Overig';
+      }
+
+      // 2. Veilige hoofdafbeelding extractie
+      let imageUrl = null;
+      if (product.images && Array.isArray(product.images) && product.images.length > 0) {
+        imageUrl = product.images[0].src || null;
+      }
 
       if (product.type === 'variable') {
         const promise = api.get(`products/${product.id}/variations`, { per_page: 100, status: 'any' })
           .then(varRes => {
-            const variations = varRes.data.map(variation => {
-              const attrString = variation.attributes.map(a => a.option).join(', ');
-              const varImage = (variation.image && variation.image.src) ? variation.image.src : imageUrl;
+            return (varRes.data || []).map(variation => {
+              const attrString = (variation.attributes || []).map(a => a.option).join(', ');
+              
+              // Variatie foto of fallback naar hoofdproduct foto
+              let varImage = imageUrl;
+              if (variation.image && variation.image.src) {
+                varImage = variation.image.src;
+              }
               
               return {
                 id: variation.id,
                 product_id: product.id,
                 variation_id: variation.id,
-                name: attrString || variation.name,
+                name: `${product.name} ${attrString ? `- ${attrString}` : ''}`.trim(),
                 sku: variation.sku || product.sku,
                 price: parseFloat(variation.price) || 0,
                 image: varImage,
+                categoryName: mainCategory
               };
             });
-
-            return {
-              id: product.id,
-              product_id: product.id,
-              variation_id: 0,
-              name: product.name,
-              sku: product.sku,
-              price: parseFloat(product.price) || 0,
-              image: imageUrl,
-              categoryName: mainCategory,
-              type: 'variable',
-              variations: variations
-            };
           })
-          .catch(err => ({
-            id: product.id,
-            product_id: product.id,
-            variation_id: 0,
-            name: product.name,
-            sku: product.sku,
-            price: parseFloat(product.price) || 0,
-            image: imageUrl,
-            categoryName: mainCategory,
-            type: 'simple',
-            variations: []
-          }));
-        variationPromises.push(promise);
+          .catch(err => {
+            console.error(`Fout bij variaties van product ${product.id}:`, err.message);
+            return [];
+          });
+        
+        variationPromises.push(
+          promise.then(variations => {
+            if (variations.length > 0) {
+              finalProducts.push(...variations);
+            } else {
+              // Fallback als variaties falen
+              finalProducts.push({
+                id: product.id,
+                product_id: product.id,
+                variation_id: 0,
+                name: product.name,
+                sku: product.sku,
+                price: parseFloat(product.price) || 0,
+                image: imageUrl,
+                categoryName: mainCategory
+              });
+            }
+          })
+        );
       } else {
         finalProducts.push({
           id: product.id,
@@ -78,17 +90,14 @@ export default async function handler(req, res) {
           sku: product.sku,
           price: parseFloat(product.price) || 0,
           image: imageUrl,
-          categoryName: mainCategory,
-          type: 'simple',
-          variations: []
+          categoryName: mainCategory
         });
       }
     }
 
-    const resolvedVariables = await Promise.all(variationPromises);
-    resolvedVariables.forEach(prod => finalProducts.push(prod));
+    await Promise.all(variationPromises);
 
-    res.status(200).json({ success: true, products: finalProducts });
+    res.status(200).json({ success: true, count: finalProducts.length, products: finalProducts });
   } catch (error) {
     console.error("WooCommerce API Error:", error.response?.data || error.message);
     res.status(500).json({ success: false, error: 'Fout bij ophalen van producten uit WooCommerce' });
