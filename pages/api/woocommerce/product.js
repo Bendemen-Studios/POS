@@ -23,15 +23,18 @@ export default async function handler(req, res) {
 
     for (const product of response.data) {
       const productCategories = product.categories || [];
-      const mainCategory = productCategories.length > 0 ? productCategories[0].name : 'Overig';
-      const imageUrl = (product.images && product.images[0]?.src) || null;
+      const mainCategory = productCategories.length > 0 ? (productCategories[0].name || 'Overig') : 'Overig';
+      
+      // Hoofdafbeelding ophalen
+      const imageUrl = (product.images && product.images.length > 0 && product.images[0].src) ? product.images[0].src : null;
 
       if (product.type === 'variable') {
         const promise = api.get(`products/${product.id}/variations`, { per_page: 100, status: 'any' })
           .then(varRes => {
             return varRes.data.map(variation => {
               const attrString = variation.attributes.map(a => a.option).join(', ');
-              const varImage = variation.image?.src || imageUrl;
+              // Pak variatie afbeelding, of anders de hoofdproduct afbeelding
+              const varImage = (variation.image && variation.image.src) ? variation.image.src : imageUrl;
               
               return {
                 id: variation.id,

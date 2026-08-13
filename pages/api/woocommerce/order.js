@@ -14,7 +14,6 @@ export default async function handler(req, res) {
   const { orderItems, paymentMethod, storeId, cashierId, customerId, totals } = req.body;
 
   try {
-    // 1. Bouw de kassabonnen-regels op voor korting en punten (Fee Lines)
     const feeLines = [];
 
     if (totals.discountAmount > 0) {
@@ -33,15 +32,17 @@ export default async function handler(req, res) {
       });
     }
 
-    // 2. Bouw de complete order data op met ondersteuning voor variaties
+    let paymentTitle = 'Contant (Kassa)';
+    if (paymentMethod === 'sumup') paymentTitle = 'Pin (SumUp)';
+    if (paymentMethod === 'manual_pin') paymentTitle = 'Pin (Handmatig)';
+
     const orderData = {
-      payment_method: paymentMethod, // 'cash' of 'sumup'
-      payment_method_title: paymentMethod === 'cash' ? 'Contant (Kassa)' : 'Pin (SumUp)',
+      payment_method: paymentMethod === 'manual_pin' ? 'pin' : paymentMethod,
+      payment_method_title: paymentTitle,
       set_paid: true,
       status: 'completed',
       customer_id: customerId || 0,
       
-      // Voeg de producten en eventuele variaties correct toe
       line_items: orderItems.map(item => {
         const lineItem = {
           product_id: item.product_id || item.id,
@@ -53,10 +54,8 @@ export default async function handler(req, res) {
         return lineItem;
       }),
       
-      // Voeg de kortingen toe
       fee_lines: feeLines,
       
-      // Extra Bendemen POS metadata
       meta_data: [
         { key: '_pos_store_id', value: storeId },
         { key: '_pos_cashier_id', value: cashierId },
@@ -64,11 +63,9 @@ export default async function handler(req, res) {
       ]
     };
 
-    // 3. Stuur de order naar WooCommerce
     const response = await api.post("orders", orderData);
     const createdOrder = response.data;
 
-    // 4. Punten afschrijven bij de klant (met veilige validatie)
     if (customerId > 0 && totals.pointsDiscount > 0 && totals.pointsUsed > 0) {
       const customerRes = await api.get(`customers/${customerId}`);
       const customer = customerRes.data;

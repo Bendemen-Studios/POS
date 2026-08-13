@@ -58,7 +58,7 @@ export default function BendemenPOS() {
     }
 
     setCurrentUser(user);
-    setActiveStore(store || { id: 'store_ons_winkeltje', name: 'Ons Winkeltje', category_name: 'POS Ons Winkeltje' });
+    setActiveStore(store || { id: 'store_ons_winkeltje', name: 'Ons Winkeltje' });
 
     setIsOnline(navigator.onLine);
     window.addEventListener('online', () => setIsOnline(true));
@@ -176,10 +176,10 @@ export default function BendemenPOS() {
   const pointsDiscount = finalPointsToUse > 0 ? finalPointsToUse * pointsConversionRate : 0;
   const total = Math.max(0, subtotal - discountAmount - pointsDiscount);
 
-  const handleCheckout = async (isPin = false) => {
+  const handleCheckout = async (paymentMethod) => {
     const orderData = { 
       orderItems: cart, 
-      paymentMethod: isPin ? 'sumup' : 'cash',
+      paymentMethod: paymentMethod, // 'cash', 'manual_pin', or 'sumup'
       storeId: activeStore?.id || 'store_ons_winkeltje',
       cashierId: currentUser?.id || 1,
       customerId: selectedCustomer ? selectedCustomer.id : 0,
@@ -187,19 +187,19 @@ export default function BendemenPOS() {
     };
 
     if (!isOnline) {
-      if (isPin) {
-        alert("Pinnen is niet mogelijk zonder internetverbinding!");
+      if (paymentMethod === 'sumup') {
+        alert("Pinnen via SumUp is niet mogelijk zonder internetverbinding!");
         return;
       }
       await saveOfflineOrder(orderData);
-      alert('Offline modus: Order is lokaal opgeslagen en wordt automatisch verstuurd zodra er internet is.');
+      alert(`Offline modus: Order opgeslagen via ${paymentMethod === 'manual_pin' ? 'Handmatige PIN' : 'Contant'}.`);
       checkUnsyncedOrders();
       resetCart();
       return;
     }
 
     try {
-      if (isPin) {
+      if (paymentMethod === 'sumup') {
         setIsWaitingForPin(true);
         const sumupRes = await axios.post('/api/sumup/checkout', {
           totalAmount: total,
@@ -213,7 +213,8 @@ export default function BendemenPOS() {
       }
 
       await axios.post('/api/woocommerce/order', orderData);
-      alert(`Bendemen POS: Order succesvol afgerekend via ${isPin ? 'Pin' : 'Contant'}!`);
+      const methodName = paymentMethod === 'sumup' ? 'Pin (SumUp)' : paymentMethod === 'manual_pin' ? 'Handmatige PIN' : 'Contant';
+      alert(`Bendemen POS: Order succesvol afgerekend via ${methodName}!`);
       resetCart();
     } catch (error) {
       setIsWaitingForPin(false);
@@ -235,7 +236,6 @@ export default function BendemenPOS() {
     router.push('/login');
   };
 
-  // Groepeer producten per hoofdcategorie voor de weergave
   const groupedProducts = products.reduce((acc, product) => {
     const cat = product.categoryName || 'Overig';
     if (!acc[cat]) acc[cat] = [];
@@ -248,7 +248,6 @@ export default function BendemenPOS() {
   return (
     <div style={{ display: 'flex', height: '100vh', fontFamily: 'Arial', position: 'relative' }}>
       
-      {/* LINKER KANT: Producten gegroepeerd per categorie */}
       <div style={{ flex: '2', padding: '20px', borderRight: '1px solid #ddd', overflowY: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
           <h2>Producten</h2>
@@ -298,7 +297,6 @@ export default function BendemenPOS() {
         )}
       </div>
 
-      {/* RECHTER KANT: Winkelwagen Geavanceerd */}
       <div style={{ flex: '1.5', padding: '20px', display: 'flex', flexDirection: 'column', background: '#f5f5f5' }}>
         
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
@@ -473,19 +471,27 @@ export default function BendemenPOS() {
           <button onClick={resetCart} style={{ flex: 1, padding: '15px', background: '#fff', color: 'red', border: '1px solid red', borderRadius: '5px', cursor: 'pointer' }}>Leegmaken</button>
           
           <button 
-            onClick={() => handleCheckout(false)} 
+            onClick={() => handleCheckout('cash')} 
             disabled={cart.length === 0} 
-            style={{ flex: 2, padding: '15px', background: cart.length === 0 ? '#ccc' : '#0070f3', color: 'white', border: 'none', borderRadius: '5px', fontSize: '18px', cursor: cart.length === 0 ? 'not-allowed' : 'pointer' }}
+            style={{ flex: 2, padding: '15px', background: cart.length === 0 ? '#ccc' : '#0070f3', color: 'white', border: 'none', borderRadius: '5px', fontSize: '16px', cursor: cart.length === 0 ? 'not-allowed' : 'pointer' }}
           >
             Contant
           </button>
+
+          <button 
+            onClick={() => handleCheckout('manual_pin')} 
+            disabled={cart.length === 0} 
+            style={{ flex: 2, padding: '15px', background: cart.length === 0 ? '#ccc' : '#17a2b8', color: 'white', border: 'none', borderRadius: '5px', fontSize: '16px', cursor: cart.length === 0 ? 'not-allowed' : 'pointer' }}
+          >
+            Pin (Handmatig)
+          </button>
           
           <button 
-            onClick={() => handleCheckout(true)} 
+            onClick={() => handleCheckout('sumup')} 
             disabled={cart.length === 0 || isWaitingForPin} 
-            style={{ flex: 2, padding: '15px', background: cart.length === 0 ? '#ccc' : '#28a745', color: 'white', border: 'none', borderRadius: '5px', fontSize: '18px', cursor: cart.length === 0 || isWaitingForPin ? 'not-allowed' : 'pointer' }}
+            style={{ flex: 2, padding: '15px', background: cart.length === 0 ? '#ccc' : '#28a745', color: 'white', border: 'none', borderRadius: '5px', fontSize: '16px', cursor: cart.length === 0 || isWaitingForPin ? 'not-allowed' : 'pointer' }}
           >
-            {isWaitingForPin ? '⏳ Wachten op terminal...' : 'PIN (SumUp)'}
+            {isWaitingForPin ? '⏳ Wachten...' : 'PIN (SumUp)'}
           </button>
         </div>
       </div>
