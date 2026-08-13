@@ -24,9 +24,19 @@ export default function CashRegister() {
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [redeemPoints, setRedeemPoints] = useState(false);
   
-  // Modal voor nieuwe klant aanmaken
+  // Modals state
   const [showNewCustomerModal, setShowNewCustomerModal] = useState(false);
   const [newCustomer, setNewCustomer] = useState({ firstName: '', lastName: '', email: '', phone: '' });
+
+  // Open Bedrag Modal state
+  const [showOpenPriceModal, setShowOpenPriceModal] = useState(false);
+  const [openPriceProduct, setOpenPriceProduct] = useState(null);
+  const [customPriceInput, setCustomPriceInput] = useState('');
+
+  // Variatie Modal state
+  const [showVariationModal, setShowVariationModal] = useState(false);
+  const [selectedVariableProduct, setSelectedVariableProduct] = useState(null);
+  const [selectedAttributes, setSelectedAttributes] = useState({});
 
   const { data: productsData, mutate: mutateProducts } = useSWR('/api/woocommerce/products', fetcher, { 
     revalidateOnFocus: false,
@@ -64,7 +74,7 @@ export default function CashRegister() {
       const res = await axios.post('/api/woocommerce/sync-products');
       if (res.data.success) {
         alert('Producten succesvol gesynchroniseerd!');
-        mutateProducts(); // Herlaad productlijst direct
+        mutateProducts();
       } else {
         alert('Fout bij synchroniseren van producten.');
       }
@@ -75,18 +85,79 @@ export default function CashRegister() {
     }
   };
 
+  const handleProductClick = (product) => {
+    // 1. Check of het een variabel product is en variaties heeft
+    if (product.type === 'variable' && product.variations && product.variations.length > 0) {
+      setSelectedVariableProduct(product);
+      setSelectedAttributes({});
+      setShowVariationModal(true);
+      return;
+    }
+
+    // 2. Check of het een open bedrag product is (prijs 0 of leeg)
+    const priceNum = parseFloat(product.price);
+    if (isNaN(priceNum) || priceNum === 0) {
+      setOpenPriceProduct(product);
+      setCustomPriceInput('');
+      setShowOpenPriceModal(true);
+      return;
+    }
+
+    // 3. Standaard product direct toevoegen
+    addToCart({ ...product, price: priceNum, cartItemId: product.id });
+  };
+
+  const handleAddOpenPriceToCart = () => {
+    const price = parseFloat(customPriceInput);
+    if (isNaN(price) || price <= 0) {
+      alert('Vul een geldig bedrag in.');
+      return;
+    }
+    addToCart({ 
+      ...openPriceProduct, 
+      price: price, 
+      name: `${openPriceProduct.name} (Open Bedrag)`,
+      cartItemId: `${openPriceProduct.id}_${Date.now()}`
+    });
+    setShowOpenPriceModal(false);
+    setOpenPriceProduct(null);
+  };
+
+  const handleAddVariationToCart = () => {
+    // Zoek de juiste variatie op basis van geselecteerde attributen
+    const matchedVariation = selectedVariableProduct.variations.find(v => {
+      return Object.entries(selectedAttributes).every(([key, val]) => {
+        return v.attributes.some(attr => attr.name.toLowerCase() === key.toLowerCase() && attr.option === val);
+      });
+    }) || selectedVariableProduct.variations[0]; // Fallback naar eerste variatie indien niet exact gematcht
+
+    const varPrice = parseFloat(matchedVariation.price || selectedVariableProduct.price);
+    const varName = `${selectedVariableProduct.name} - ${Object.values(selectedAttributes).join(', ')}`;
+
+    addToCart({
+      id: selectedVariableProduct.id,
+      variation_id: matchedVariation.id,
+      name: varName,
+      price: varPrice,
+      cartItemId: `${selectedVariableProduct.id}_var_${matchedVariation.id}`
+    });
+
+    setShowVariationModal(false);
+    setSelectedVariableProduct(null);
+  };
+
   const addToCart = (product) => {
     setCart((prev) => {
-      const existing = prev.find((item) => item.id === product.id);
+      const existing = prev.find((item) => item.cartItemId === product.cartItemId);
       if (existing) {
-        return prev.map((item) => item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item);
+        return prev.map((item) => item.cartItemId === product.cartItemId ? { ...item, quantity: item.quantity + 1 } : item);
       }
       return [...prev, { ...product, quantity: 1 }];
     });
   };
 
-  const removeFromCart = (id) => {
-    setCart((prev) => prev.filter((item) => item.id !== id));
+  const removeFromCart = (cartItemId) => {
+    setCart((prev) => prev.filter((item) => item.cartItemId !== cartItemId));
   };
 
   const subtotal = cart.reduce((sum, item) => sum + (parseFloat(item.price || 0) * item.quantity), 0);
@@ -214,9 +285,11 @@ export default function CashRegister() {
             />
             <div style={{ overflowY: 'auto', flex: 1, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '15px', alignContent: 'flex-start' }}>
               {filteredProducts.map((p) => (
-                <div key={p.id} onClick={() => addToCart(p)} style={{ background: '#fff', border: '1px solid #EAEAEA', borderRadius: '8px', padding: '15px', cursor: 'pointer', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                <div key={p.id} onClick={() => handleProductClick(p)} style={{ background: '#fff', border: '1px solid #EAEAEA', borderRadius: '8px', padding: '15px', cursor: 'pointer', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
                   <div style={{ fontWeight: '600', fontSize: '14px', marginBottom: '10px' }}>{p.name}</div>
-                  <div style={{ fontWeight: '700', fontSize: '15px', color: '#C3110C' }}>€{p.price}</div>
+                  <div style={{ fontWeight: '700', fontSize: '15px', color: '#C3110C' }}>
+                    {parseFloat(p.price) > 0 ? `€${p.price}` : 'Open Bedrag'}
+                  </div>
                 </div>
               ))}
             </div>
@@ -231,12 +304,12 @@ export default function CashRegister() {
                   <p style={{ color: '#666', fontSize: '14px' }}>Winkelmand is leeg.</p>
                 ) : (
                   cart.map((item) => (
-                    <div key={item.id} style={{ background: '#fff', padding: '10px 15px', borderRadius: '8px', border: '1px solid #EAEAEA', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div key={item.cartItemId} style={{ background: '#fff', padding: '10px 15px', borderRadius: '8px', border: '1px solid #EAEAEA', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <div>
                         <div style={{ fontWeight: '600', fontSize: '13px' }}>{item.name}</div>
                         <div style={{ fontSize: '12px', color: '#666' }}>{item.quantity}x €{item.price}</div>
                       </div>
-                      <button onClick={() => removeFromCart(item.id)} style={{ background: '#FCE8E6', color: '#C3110C', border: 'none', borderRadius: '4px', padding: '5px 8px', cursor: 'pointer', fontSize: '12px', fontWeight: '600' }}>✕</button>
+                      <button onClick={() => removeFromCart(item.cartItemId)} style={{ background: '#FCE8E6', color: '#C3110C', border: 'none', borderRadius: '4px', padding: '5px 8px', cursor: 'pointer', fontSize: '12px', fontWeight: '600' }}>✕</button>
                     </div>
                   ))
                 )}
@@ -326,6 +399,62 @@ export default function CashRegister() {
             </div>
           </div>
         </div>
+
+        {/* Modal voor Open Bedrag */}
+        {showOpenPriceModal && (
+          <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+            <div style={{ background: '#fff', padding: '25px', borderRadius: '12px', width: '350px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+              <h3 style={{ marginTop: 0, marginBottom: '10px', fontSize: '18px', fontWeight: '800' }}>Open Bedrag Invoeren</h3>
+              <p style={{ fontSize: '13px', color: '#666', marginBottom: '15px' }}>{openPriceProduct?.name}</p>
+              <input 
+                type="number" 
+                step="0.01" 
+                placeholder="Bedrag in €" 
+                value={customPriceInput} 
+                onChange={(e) => setCustomPriceInput(e.target.value)} 
+                style={{ width: '100%', padding: '10px', border: '1px solid #DDD', borderRadius: '6px', fontSize: '15px', marginBottom: '20px', boxSizing: 'border-box', outline: 'none' }} 
+                autoFocus
+              />
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button onClick={handleAddOpenPriceToCart} style={{ flex: 1, padding: '10px', background: '#000', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: '600', cursor: 'pointer' }}>Toevoegen</button>
+                <button onClick={() => setShowOpenPriceModal(false)} style={{ padding: '10px 15px', background: '#F1F3F4', color: '#333', border: 'none', borderRadius: '6px', fontWeight: '600', cursor: 'pointer' }}>Annuleren</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal voor Product Variaties */}
+        {showVariationModal && selectedVariableProduct && (
+          <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+            <div style={{ background: '#fff', padding: '25px', borderRadius: '12px', width: '400px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+              <h3 style={{ marginTop: 0, marginBottom: '10px', fontSize: '18px', fontWeight: '800' }}>Selecteer Opties</h3>
+              <p style={{ fontSize: '13px', color: '#666', marginBottom: '15px' }}>{selectedVariableProduct.name}</p>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', marginBottom: '20px' }}>
+                {selectedVariableProduct.attributes?.map((attr) => (
+                  <div key={attr.name}>
+                    <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '5px', textTransform: 'uppercase', color: '#555' }}>{attr.name}</label>
+                    <select 
+                      value={selectedAttributes[attr.name] || ''}
+                      onChange={(e) => setSelectedAttributes({ ...selectedAttributes, [attr.name]: e.target.value })}
+                      style={{ width: '100%', padding: '10px', border: '1px solid #DDD', borderRadius: '6px', fontSize: '13px', background: '#fff', outline: 'none' }}
+                    >
+                      <option value="">Kies {attr.name}...</option>
+                      {attr.options?.map((opt) => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button onClick={handleAddVariationToCart} style={{ flex: 1, padding: '10px', background: '#000', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: '600', cursor: 'pointer' }}>Toevoegen aan Mand</button>
+                <button onClick={() => setShowVariationModal(false)} style={{ padding: '10px 15px', background: '#F1F3F4', color: '#333', border: 'none', borderRadius: '6px', fontWeight: '600', cursor: 'pointer' }}>Annuleren</button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Modal voor Nieuwe Klant */}
         {showNewCustomerModal && (
