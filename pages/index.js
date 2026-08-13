@@ -1,32 +1,50 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
+import useSWR from 'swr';
+import { fetcher } from '../lib/fetcher';
 
 export default function Home() {
   const router = useRouter();
-  const [selectedStore, setSelectedStore] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
+  const [selectedStore, setSelectedStore] = useState(null);
+
+  // Haal winkels op via SWR zodat we altijd een geldige winkel kunnen selecteren
+  const { data: storesData } = useSWR('/api/stores', fetcher, { revalidateOnFocus: false });
+  const stores = storesData?.stores || [];
 
   useEffect(() => {
     const rawUser = localStorage.getItem('pos_user');
-    const store = localStorage.getItem('selectedStore');
-
     if (!rawUser) {
       router.push('/login');
       return;
     }
 
-    if (!store) {
-      router.push('/select-store');
+    try {
+      setCurrentUser(JSON.parse(rawUser));
+    } catch (e) {
+      router.push('/login');
       return;
     }
 
-    try {
-      setCurrentUser(JSON.parse(rawUser));
-      setSelectedStore(JSON.parse(store));
-    } catch (e) {
+    // Controleer of er al een winkel is geselecteerd
+    const store = localStorage.getItem('selectedStore');
+    if (store) {
+      try {
+        setSelectedStore(JSON.parse(store));
+        return;
+      } catch (e) {}
+    }
+
+    // Automatische fallback: Als er geen winkel geselecteerd is maar er zijn winkels, pak de eerste
+    if (stores.length > 0) {
+      const defaultStore = stores[0];
+      localStorage.setItem('selectedStore', JSON.stringify(defaultStore));
+      setSelectedStore(defaultStore);
+    } else {
+      // Als er echt geen winkels bekend zijn, stuur door naar select-store
       router.push('/select-store');
     }
-  }, [router]);
+  }, [router, stores]);
 
   return (
     <div style={{ background: '#FFFFFF', color: '#111111', minHeight: '100vh', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', padding: '30px' }}>
@@ -66,7 +84,7 @@ export default function Home() {
         {/* Kassascherm Inhoud */}
         <div style={{ background: '#FAFAFA', padding: '40px', borderRadius: '12px', border: '1px solid #EAEAEA', textAlign: 'center' }}>
           <h2 style={{ fontSize: '22px', fontWeight: '800', marginBottom: '10px' }}>Kassa Systeem Actief</h2>
-          <p style={{ color: '#666', fontSize: '14px' }}>Welkom, {currentUser?.firstName || currentUser?.username}. Systeem draait lokaal en is gekoppeld aan de database.</p>
+          <p style={{ color: '#666', fontSize: '14px' }}>Welkom, {currentUser?.firstName || currentUser?.username}. Actieve vestiging: <strong>{selectedStore?.name || 'Onbekend'}</strong> ({selectedStore?.location || 'Geen locatie'})</p>
         </div>
 
       </div>
