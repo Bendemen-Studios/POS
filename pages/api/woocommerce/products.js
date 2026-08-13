@@ -8,22 +8,24 @@ const api = new WooCommerceRestApi({
 });
 
 export default async function handler(req, res) {
-  if (req.method !== 'GET') return res.status(405).json({ message: 'Method not allowed' });
+  if (req.method !== 'GET') {
+    return res.status(405).json({ message: 'Method not allowed' });
+  }
 
   try {
     let allProducts = [];
     let page = 1;
     let keepFetching = true;
 
-    // FASE 1: Alle producten ophalen
+    // FASE 1: Alle producten ophalen in batches
     while (keepFetching) {
       console.log(`[Sync] Pagina ${page} ophalen...`);
       
       const response = await api.get("products", { 
-        per_page: 20, // Iets grotere batch, maar met minimale fields
+        per_page: 20,
         page: page,
         status: 'any', 
-        _fields: 'id,name,price,sku,type,categories,images' 
+        _fields: 'id,name,price,sku,type,categories,images,stock_status,stock_quantity' 
       });
 
       if (response.data && response.data.length > 0) {
@@ -48,7 +50,7 @@ export default async function handler(req, res) {
           // Variaties ophalen
           const varRes = await api.get(`products/${product.id}/variations`, { 
             per_page: 50,
-            _fields: 'id,attributes,sku,price,image'
+            _fields: 'id,attributes,sku,price,image,stock_status,stock_quantity'
           });
 
           const variations = (varRes.data || []).map(variation => ({
@@ -59,6 +61,8 @@ export default async function handler(req, res) {
             sku: variation.sku || product.sku,
             price: parseFloat(variation.price) || 0,
             image: variation.image?.src || imageUrl,
+            stock_status: variation.stock_status,
+            stock_quantity: variation.stock_quantity
           }));
 
           finalProducts.push({
@@ -71,6 +75,8 @@ export default async function handler(req, res) {
             image: imageUrl,
             categoryName: mainCategory,
             type: 'variable',
+            stock_status: product.stock_status,
+            stock_quantity: product.stock_quantity,
             variations: variations
           });
         } else {
@@ -84,12 +90,13 @@ export default async function handler(req, res) {
             image: imageUrl,
             categoryName: mainCategory,
             type: 'simple',
+            stock_status: product.stock_status,
+            stock_quantity: product.stock_quantity,
             variations: []
           });
         }
       } catch (err) {
         console.error(`[Sync Fout] Product ${product.id} mislukt:`, err.message);
-        // We gaan gewoon door met het volgende product
       }
     }
 

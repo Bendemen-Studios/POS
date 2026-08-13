@@ -10,6 +10,10 @@ export default function POS() {
   const [amountGiven, setAmountGiven] = useState('');
   const [paymentSuccess, setPaymentSuccess] = useState(false);
   const [store, setStore] = useState({ name: 'Bendemen POS' });
+  
+  // State voor de voorraad pop-up waarschuwing
+  const [stockModal, setStockModal] = useState({ show: false, item: null, variation: null });
+
   const router = useRouter();
 
   useEffect(() => {
@@ -44,7 +48,20 @@ export default function POS() {
     }
   };
 
-  const addToCart = (item, variation = null) => {
+  const checkAndAddToCart = (item, variation = null) => {
+    const target = variation || item;
+    const isOutOfStock = target.stock_status === 'outofstock' || (target.stock_quantity !== null && target.stock_quantity <= 0);
+
+    if (isOutOfStock) {
+      // Toon pop-up als het product niet op voorraad is
+      setStockModal({ show: true, item, variation });
+    } else {
+      // Direct toevoegen als het wel op voorraad is
+      executeAddToCart(item, variation);
+    }
+  };
+
+  const executeAddToCart = (item, variation = null) => {
     const cartItem = {
       uniqueId: variation ? `${item.id}-${variation.id}` : `${item.id}-single`,
       id: item.id,
@@ -56,6 +73,7 @@ export default function POS() {
       image: variation?.image || item.image
     };
     setCart([...cart, cartItem]);
+    setStockModal({ show: false, item: null, variation: null });
   };
 
   const removeFromCart = (index) => {
@@ -118,21 +136,44 @@ export default function POS() {
   return (
     <div style={{ background: '#FFFFFF', color: '#111111', minHeight: '100vh', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
       
+      {/* Voorraad Waarschuwing Pop-up */}
+      {stockModal.show && (
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ background: '#FFF', padding: '30px', borderRadius: '12px', maxWidth: '400px', width: '90%', textAlign: 'center', boxShadow: '0 10px 25px rgba(0,0,0,0.1)' }}>
+            <h3 style={{ margin: '0 0 15px 0', fontSize: '18px', fontWeight: '800', color: '#C3110C' }}>⚠️ Voorraad Waarschuwing</h3>
+            <p style={{ fontSize: '14px', color: '#333', marginBottom: '25px', lineHeight: '1.5' }}>
+              Weet je zeker dat dit product op voorraad is?
+            </p>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button 
+                onClick={() => setStockModal({ show: false, item: null, variation: null })}
+                style={{ flex: 1, padding: '12px', background: '#F0F0F0', color: '#333', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'pointer' }}
+              >
+                Nee, Annuleren
+              </button>
+              <button 
+                onClick={() => executeAddToCart(stockModal.item, stockModal.variation)}
+                style={{ flex: 1, padding: '12px', background: '#C3110C', color: '#FFF', border: 'none', borderRadius: '8px', fontWeight: '700', cursor: 'pointer' }}
+              >
+                Ja, Toevoegen
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px 30px', borderBottom: '1px solid #EAEAEA', background: '#FFFFFF', position: 'sticky', top: 0, zIndex: 10 }}>
         
-        {/* Links: Logo & Titel */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
           <div style={{ background: '#000', color: '#FFF', padding: '6px 10px', fontWeight: '900', borderRadius: '4px', fontSize: '16px' }}>BDM</div>
           <h1 style={{ margin: 0, fontSize: '16px', fontWeight: '800' }}>BENDEMEN POS</h1>
         </div>
 
-        {/* Midden: Geselecteerde Winkel */}
         <div style={{ background: '#FAFAFA', padding: '6px 16px', borderRadius: '20px', border: '1px solid #EAEAEA', fontSize: '13px', fontWeight: '700', color: '#C3110C' }}>
           📍 {store.name}
         </div>
 
-        {/* Rechts: Actie knoppen */}
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
           <button 
             onClick={() => router.push('/admin')}
@@ -199,54 +240,63 @@ export default function POS() {
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))', gap: '15px' }}>
-            {filteredProducts.map(p => (
-              <div 
-                key={p.id} 
-                style={{ 
-                  background: '#FAFAFA', 
-                  border: '1px solid #EBEBEB', 
-                  borderRadius: '10px', 
-                  padding: '15px', 
-                  display: 'flex', 
-                  flexDirection: 'column', 
-                  justifyContent: 'space-between'
-                }}
-              >
-                <div>
-                  {p.image ? (
-                    <img src={p.image} alt={p.name} style={{ width: '100%', height: '110px', objectFit: 'cover', borderRadius: '6px', marginBottom: '10px', background: '#EEE' }} />
-                  ) : (
-                    <div style={{ width: '100%', height: '110px', background: '#EEE', borderRadius: '6px', marginBottom: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#AAA', fontSize: '11px' }}>Geen foto</div>
+            {filteredProducts.map(p => {
+              const isOut = p.stock_status === 'outofstock' || (p.stock_quantity !== null && p.stock_quantity <= 0);
+              return (
+                <div 
+                  key={p.id} 
+                  style={{ 
+                    background: '#FAFAFA', 
+                    border: '1px solid #EBEBEB', 
+                    borderRadius: '10px', 
+                    padding: '15px', 
+                    display: 'flex', 
+                    flexDirection: 'column', 
+                    justifyContent: 'space-between',
+                    position: 'relative'
+                  }}
+                >
+                  {isOut && (
+                    <span style={{ position: 'absolute', top: '10px', right: '10px', background: '#FCE8E6', color: '#C3110C', fontSize: '10px', fontWeight: '700', padding: '2px 6px', borderRadius: '4px' }}>
+                      Geen voorraad
+                    </span>
                   )}
-                  <h3 style={{ fontSize: '13px', fontWeight: '600', margin: '0 0 5px 0', color: '#111', lineHeight: '1.3' }}>{p.name}</h3>
-                  <span style={{ fontSize: '12px', color: '#666', display: 'block', marginBottom: '10px' }}>€{parseFloat(p.price).toFixed(2)}</span>
-                </div>
-
-                {p.type === 'variable' && p.variations && p.variations.length > 0 ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <span style={{ fontSize: '11px', fontWeight: '700', color: '#C3110C' }}>Optie:</span>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px', maxHeight: '70px', overflowY: 'auto' }}>
-                      {p.variations.map(v => (
-                        <button
-                          key={v.id}
-                          onClick={() => addToCart(p, v)}
-                          style={{ padding: '3px 6px', fontSize: '11px', background: '#FFF', border: '1px solid #CCC', borderRadius: '4px', cursor: 'pointer' }}
-                        >
-                          {v.name} (€{v.price})
-                        </button>
-                      ))}
-                    </div>
+                  <div>
+                    {p.image ? (
+                      <img src={p.image} alt={p.name} style={{ width: '100%', height: '110px', objectFit: 'cover', borderRadius: '6px', marginBottom: '10px', background: '#EEE' }} />
+                    ) : (
+                      <div style={{ width: '100%', height: '110px', background: '#EEE', borderRadius: '6px', marginBottom: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#AAA', fontSize: '11px' }}>Geen foto</div>
+                    )}
+                    <h3 style={{ fontSize: '13px', fontWeight: '600', margin: '0 0 5px 0', color: '#111', lineHeight: '1.3' }}>{p.name}</h3>
+                    <span style={{ fontSize: '12px', color: '#666', display: 'block', marginBottom: '10px' }}>€{parseFloat(p.price).toFixed(2)}</span>
                   </div>
-                ) : (
-                  <button 
-                    onClick={() => addToCart(p)} 
-                    style={{ width: '100%', padding: '9px', background: '#000', color: '#FFFFFF', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', fontSize: '12px', marginTop: '10px' }}
-                  >
-                    + Toevoegen
-                  </button>
-                )}
-              </div>
-            ))}
+
+                  {p.type === 'variable' && p.variations && p.variations.length > 0 ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <span style={{ fontSize: '11px', fontWeight: '700', color: '#C3110C' }}>Optie:</span>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px', maxHeight: '70px', overflowY: 'auto' }}>
+                        {p.variations.map(v => (
+                          <button
+                            key={v.id}
+                            onClick={() => checkAndAddToCart(p, v)}
+                            style={{ padding: '3px 6px', fontSize: '11px', background: '#FFF', border: '1px solid #CCC', borderRadius: '4px', cursor: 'pointer' }}
+                          >
+                            {v.name} (€{v.price})
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <button 
+                      onClick={() => checkAndAddToCart(p)} 
+                      style={{ width: '100%', padding: '9px', background: '#000', color: '#FFFFFF', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', fontSize: '12px', marginTop: '10px' }}
+                    >
+                      + Toevoegen
+                    </button>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
 
