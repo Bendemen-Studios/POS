@@ -7,85 +7,76 @@ export default function Login() {
   const router = useRouter();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [step, setStep] = useState(1); // 1 = Login, 2 = Kies Winkel
-  const [userData, setUserData] = useState(null);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   const handleLogin = async (e) => {
     e.preventDefault();
+    setLoading(true);
     setError('');
-    
+
     try {
-      const response = await axios.post('/api/auth/login', { username, password });
-      
-      if (response.data.success) {
-        setUserData(response.data.user);
-        
-        // Als de gebruiker maar 1 winkel heeft, direct doorsturen
-        if (response.data.user.stores.length === 1) {
-          selectStore(response.data.user.stores[0], response.data.user);
-        } else {
-          setStep(2); // Laat winkel selecteren
+      // Haal winkels op en log in via de WordPress REST API
+      const loginRes = await axios.post('/api/auth/login', { username, password });
+
+      if (loginRes.data.success) {
+        localStorage.setItem('pos_token', 'active_session');
+        localStorage.setItem('pos_user', JSON.stringify(loginRes.data.user));
+
+        // Haal beschikbare winkels op
+        const storesRes = await axios.get('/api/admin/stores');
+        const stores = storesRes.data;
+
+        if (stores.length > 0) {
+          localStorage.setItem('pos_active_store', JSON.stringify(stores[0]));
         }
+
+        router.push('/');
       }
     } catch (err) {
-      setError('Inloggen mislukt. Controleer je gegevens.');
+      setError('Inloggen mislukt. Controleer je gegevens of de verbinding met de server.');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const selectStore = (store, user = userData) => {
-    // Sla lokaal op voor offline gebruik
-    localStorage.setItem('pos_token', 'simulated_jwt_token_12345');
-    localStorage.setItem('pos_user', JSON.stringify(user));
-    localStorage.setItem('pos_active_store', JSON.stringify(store));
-    
-    router.push('/');
-  };
-
   return (
-    <div style={{ maxWidth: '400px', margin: '100px auto', fontFamily: 'Arial', padding: '20px', border: '1px solid #ddd', borderRadius: '8px' }}>
-      <h1 style={{ textAlign: 'center' }}>Bendemen POS</h1>
-      
-      {error && <p style={{ color: 'red', textAlign: 'center' }}>{error}</p>}
+    <div style={{ display: 'flex', height: '100vh', justifyContent: 'center', alignItems: 'center', background: '#f5f5f5', fontFamily: 'Arial' }}>
+      <form onSubmit={handleLogin} style={{ background: '#fff', padding: '40px', borderRadius: '8px', boxShadow: '0 4px 15px rgba(0,0,0,0.1)', width: '300px' }}>
+        <h2 style={{ marginBottom: '20px', textAlign: 'center' }}>Bendemen POS</h2>
+        
+        {error && <div style={{ color: 'red', marginBottom: '15px', fontSize: '14px', textAlign: 'center' }}>{error}</div>}
 
-      {step === 1 && (
-        <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+        <div style={{ marginBottom: '15px' }}>
+          <label style={{ display: 'block', marginBottom: '5px', fontSize: '14px', fontWeight: 'bold' }}>Gebruikersnaam</label>
           <input 
             type="text" 
-            placeholder="Gebruikersnaam" 
             value={username} 
-            onChange={(e) => setUsername(e.target.value)}
-            style={{ padding: '10px', fontSize: '16px' }}
-            required
+            onChange={(e) => setUsername(e.target.value)} 
+            style={{ width: '100%', padding: '10px', boxSizing: 'border-box', borderRadius: '4px', border: '1px solid #ccc' }}
+            required 
           />
+        </div>
+
+        <div style={{ marginBottom: '20px' }}>
+          <label style={{ display: 'block', marginBottom: '5px', fontSize: '14px', fontWeight: 'bold' }}>Wachtwoord</label>
           <input 
             type="password" 
-            placeholder="Wachtwoord / PIN" 
             value={password} 
-            onChange={(e) => setPassword(e.target.value)}
-            style={{ padding: '10px', fontSize: '16px' }}
-            required
+            onChange={(e) => setPassword(e.target.value)} 
+            style={{ width: '100%', padding: '10px', boxSizing: 'border-box', borderRadius: '4px', border: '1px solid #ccc' }}
+            required 
           />
-          <button type="submit" style={{ padding: '10px', background: '#000', color: '#fff', fontSize: '16px', cursor: 'pointer' }}>
-            Inloggen
-          </button>
-        </form>
-      )}
-
-      {step === 2 && userData && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          <h3>Kies Locatie</h3>
-          {userData.stores.map(store => (
-            <button 
-              key={store.id} 
-              onClick={() => selectStore(store)}
-              style={{ padding: '15px', background: '#f5f5f5', border: '1px solid #ccc', cursor: 'pointer', fontSize: '16px' }}
-            >
-              {store.name}
-            </button>
-          ))}
         </div>
-      )}
+
+        <button 
+          type="submit" 
+          disabled={loading} 
+          style={{ width: '100%', padding: '12px', background: '#0070f3', color: '#fff', border: 'none', borderRadius: '4px', fontSize: '16px', cursor: 'pointer', fontWeight: 'bold' }}
+        >
+          {loading ? 'Bezig...' : 'Inloggen'}
+        </button>
+      </form>
     </div>
   );
 }
