@@ -13,41 +13,45 @@ export default async function handler(req, res) {
   try {
     let allProducts = [];
     let page = 1;
+    let keepFetching = true;
 
-    // We verkleinen de batch naar 10 om de Nginx timeout te omzeilen
-    while (true) {
+    // FASE 1: Alle producten ophalen
+    while (keepFetching) {
+      console.log(`[Sync] Pagina ${page} ophalen...`);
+      
       const response = await api.get("products", { 
-        per_page: 10, 
+        per_page: 20, // Iets grotere batch, maar met minimale fields
         page: page,
-        status: 'publish', // Alleen gepubliceerde producten
+        status: 'any', 
         _fields: 'id,name,price,sku,type,categories,images' 
       });
 
-      if (!response.data || response.data.length === 0) break;
-      
-      allProducts.push(...response.data);
-      page++;
+      if (response.data && response.data.length > 0) {
+        allProducts.push(...response.data);
+        page++;
+      } else {
+        keepFetching = false;
+      }
     }
+
+    console.log(`[Sync] Totaal ${allProducts.length} producten gevonden, nu details verwerken...`);
 
     const finalProducts = [];
 
+    // FASE 2: Producten verwerken
     for (const product of allProducts) {
-      let mainCategory = 'Overig';
-      if (product.categories && product.categories.length > 0) {
-        mainCategory = product.categories[0].name;
-      }
+      try {
+        let imageUrl = product.images?.[0]?.src || null;
+        let mainCategory = product.categories?.[0]?.name || 'Overig';
 
-      let imageUrl = product.images?.[0]?.src || null;
-
-      if (product.type === 'variable') {
-        try {
-          // Haal variaties op voor dit specifieke product
+        if (product.type === 'variable') {
+          // Variaties ophalen
           const varRes = await api.get(`products/${product.id}/variations`, { 
-            per_page: 50, // Variaties zijn meestal licht, dit kan vaak wel
+            per_page: 50,
             _fields: 'id,attributes,sku,price,image'
           });
 
-          const variations = varRes.data.map(variation => ({
+          const variations = (varRes.data || []).map(variation => ({
             id: variation.id,
             product_id: product.id,
             variation_id: variation.id,
@@ -69,35 +73,29 @@ export default async function handler(req, res) {
             type: 'variable',
             variations: variations
           });
-        } catch (err) {
-          // Fallback als variaties niet lukken
+        } else {
           finalProducts.push({
             id: product.id,
+            product_id: product.id,
+            variation_id: 0,
             name: product.name,
+            sku: product.sku,
             price: parseFloat(product.price) || 0,
+            image: imageUrl,
+            categoryName: mainCategory,
             type: 'simple',
             variations: []
           });
         }
-      } else {
-        finalProducts.push({
-          id: product.id,
-          product_id: product.id,
-          variation_id: 0,
-          name: product.name,
-          sku: product.sku,
-          price: parseFloat(product.price) || 0,
-          image: imageUrl,
-          categoryName: mainCategory,
-          type: 'simple',
-          variations: []
-        });
+      } catch (err) {
+        console.error(`[Sync Fout] Product ${product.id} mislukt:`, err.message);
+        // We gaan gewoon door met het volgende product
       }
     }
 
     res.status(200).json({ success: true, count: finalProducts.length, products: finalProducts });
   } catch (error) {
-    console.error("WooCommerce API Error:", error.message);
-    res.status(500).json({ success: false, error: 'Fout bij ophalen: ' + error.message });
+    console.error("[Sync Fatal Error]:", error.message);
+    res.status(500).json({ success: false, error: error.message });
   }
 }
