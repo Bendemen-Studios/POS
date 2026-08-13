@@ -23,35 +23,43 @@ export default async function handler(req, res) {
     if (!currentStore) return res.status(404).json({ success: false, error: "Winkel niet gevonden." });
 
     const categoryName = currentStore.category_name || `POS ${currentStore.name}`;
+    
+    // 2. Zoek de categorie in WooCommerce
     const categoryResponse = await api.get("products/categories", { search: categoryName });
 
     let categoryId = null;
     if (categoryResponse.data && categoryResponse.data.length > 0) {
+      // Dwing een EXACTE naammatch af (hoofdletterongevoelig)
       const exactMatch = categoryResponse.data.find(cat => cat.name.toLowerCase() === categoryName.toLowerCase());
-      categoryId = exactMatch ? exactMatch.id : categoryResponse.data[0].id;
+      if (exactMatch) {
+        categoryId = exactMatch.id;
+      }
     }
 
-    if (!categoryId) return res.status(404).json({ success: false, error: `Categorie '${categoryName}' niet gevonden.` });
+    // Als er geen exacte match is, stoppen we direct met een foutmelding
+    if (!categoryId) {
+      return res.status(404).json({ 
+        success: false, 
+        error: `Exacte WooCommerce categorie '${categoryName}' niet gevonden. Maak deze categorie aan in WooCommerce of controleer de spelling.` 
+      });
+    }
 
-    // 2. Haal de hoofdproducten op uit deze categorie
+    // 3. Haal de hoofdproducten op uit deze specifieke categorie
     const response = await api.get("products", { category: categoryId, per_page: 100 });
     
     const finalProducts = [];
     const variationPromises = [];
 
-    // 3. Loop door alle producten. Als het variabel is, haal de variaties op.
     for (const product of response.data) {
       if (product.type === 'variable') {
-        // Maak een snelle asynchrone call voor de variaties
         const promise = api.get(`products/${product.id}/variations`, { per_page: 100 })
           .then(varRes => {
             return varRes.data.map(variation => {
-              // Combineer de attributen (zoals "Zwart - XL")
               const attrString = variation.attributes.map(a => a.option).join(', ');
               return {
-                id: variation.id,                   // Unieke ID voor de cart
-                product_id: product.id,             // Hoofd ID (voor WooCommerce)
-                variation_id: variation.id,         // Variatie ID (voor WooCommerce)
+                id: variation.id,
+                product_id: product.id,
+                variation_id: variation.id,
                 name: `${product.name} ${attrString ? `- ${attrString}` : ''}`.trim(),
                 sku: variation.sku || product.sku,
                 price: parseFloat(variation.price) || 0,
@@ -64,7 +72,6 @@ export default async function handler(req, res) {
           });
         variationPromises.push(promise);
       } else {
-        // Simpel product
         finalProducts.push({
           id: product.id,
           product_id: product.id,
@@ -76,7 +83,6 @@ export default async function handler(req, res) {
       }
     }
 
-    // Wacht tot alle variaties tegelijk zijn ingeladen (supersnel)
     const resolvedVariations = await Promise.all(variationPromises);
     resolvedVariations.forEach(vars => finalProducts.push(...vars));
 
