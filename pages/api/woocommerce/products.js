@@ -19,13 +19,11 @@ export default async function handler(req, res) {
     const finalProducts = [];
 
     for (const product of response.data) {
-      // Categorie ophalen
       let mainCategory = 'Overig';
       if (product.categories && product.categories.length > 0) {
         mainCategory = product.categories[0].name || 'Overig';
       }
 
-      // Afbeelding ophalen
       let imageUrl = null;
       if (product.images && product.images.length > 0) {
         imageUrl = product.images[0].src || null;
@@ -65,7 +63,6 @@ export default async function handler(req, res) {
             variations: variations
           });
         } catch (err) {
-          // Fallback als variaties ophalen faalt
           finalProducts.push({
             id: product.id,
             product_id: product.id,
@@ -84,7 +81,7 @@ export default async function handler(req, res) {
           id: product.id,
           product_id: product.id,
           variation_id: 0,
-          name: product.name,
+            name: product.name,
           sku: product.sku,
           price: parseFloat(product.price) || 0,
           image: imageUrl,
