@@ -1,10 +1,30 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
-import axios from 'axios';
+import useSWR from 'swr';
+import { fetcher } from '../lib/fetcher';
 
 export default function SelectStore() {
   const router = useRouter();
-  const [allowedStores, setAllowedStores] = useState([]);
+
+  // Haal direct op uit localStorage als directe cache (0ms laadtijd)
+  const [cachedStores, setCachedStores] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('cached_pos_stores');
+      if (saved) {
+        try { return JSON.parse(saved); } catch (e) {}
+      }
+    }
+    return [{ id: 'store_ons_winkeltje', name: 'Ons Winkeltje', location: 'Hoofdvestiging' }];
+  });
+
+  // SWR haalt op de achtergrond de meest recente database-data op
+  const { data } = useSWR('/api/stores', fetcher, {
+    fallbackData: { success: true, stores: cachedStores },
+    revalidateOnFocus: false,
+    revalidateIfStale: false
+  });
+
+  const stores = data?.stores || cachedStores;
 
   useEffect(() => {
     const storedRules = localStorage.getItem('pos_allowed_stores');
@@ -12,24 +32,10 @@ export default function SelectStore() {
       router.push('/login');
       return;
     }
-
-    axios.get('/api/stores')
-      .then(res => {
-        if (res.data.success) {
-          const allStores = res.data.stores;
-          try {
-            const parsedRules = JSON.parse(storedRules);
-            const filtered = allStores.filter(store => 
-              parsedRules.includes(store.id) || parsedRules.includes('store-1') || parsedRules.length === 0
-            );
-            setAllowedStores(filtered.length > 0 ? filtered : allStores);
-          } catch (e) {
-            setAllowedStores(allStores);
-          }
-        }
-      })
-      .catch(err => console.error(err));
-  }, []);
+    if (data?.stores) {
+      localStorage.setItem('cached_pos_stores', JSON.stringify(data.stores));
+    }
+  }, [data, router]);
 
   const selectStore = (store) => {
     localStorage.setItem('selectedStore', JSON.stringify(store));
@@ -45,7 +51,7 @@ export default function SelectStore() {
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-          {allowedStores.map(store => (
+          {stores.map(store => (
             <div 
               key={store.id}
               onClick={() => selectStore(store)}
@@ -59,6 +65,16 @@ export default function SelectStore() {
             </div>
           ))}
         </div>
+        
+        <button 
+          onClick={() => {
+            localStorage.clear();
+            router.push('/login');
+          }}
+          style={{ marginTop: '25px', background: 'none', border: 'none', color: '#888', cursor: 'pointer', fontSize: '13px', width: '100%', textAlign: 'center' }}
+        >
+          ← Uitloggen / Ander account
+        </button>
       </div>
     </div>
   );

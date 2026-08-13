@@ -1,18 +1,23 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
+import useSWR from 'swr';
 import axios from 'axios';
+import { fetcher } from '../lib/fetcher';
 
 export default function AdminPanel() {
   const router = useRouter();
-  const [users, setUsers] = useState([]);
-  const [stores, setStores] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
   
-  // State voor nieuwe winkel toevoegen
+  // SWR hooks voor bliksemsnelle data en automatische caching
+  const { data: usersData, mutate: mutateUsers } = useSWR('/api/admin/users', fetcher, { revalidateOnFocus: false });
+  const { data: storesData, mutate: mutateStores } = useSWR('/api/stores', fetcher, { revalidateOnFocus: false });
+
+  const users = usersData?.users || [];
+  const stores = storesData?.stores || [];
+  const isLoading = !usersData && !storesData;
+
   const [newStoreName, setNewStoreName] = useState('');
   const [newStoreLocation, setNewStoreLocation] = useState('');
 
-  // State voor nieuw personeelslid
   const [form, setForm] = useState({
     username: '',
     email: '',
@@ -26,38 +31,17 @@ export default function AdminPanel() {
   useEffect(() => {
     const token = localStorage.getItem('pos_token');
     const rawUser = localStorage.getItem('pos_user');
-    
     if (!token && !rawUser) {
       router.push('/login');
-      return;
     }
-    
-    fetchData();
   }, [router]);
 
-  const fetchData = async () => {
-    try {
-      const [usersRes, storesRes] = await Promise.all([
-        axios.get('/api/admin/users'),
-        axios.get('/api/stores')
-      ]);
-
-      if (usersRes.data.success) {
-        setUsers(usersRes.data.users || []);
-      }
-      if (storesRes.data.success) {
-        const fetchedStores = storesRes.data.stores || [];
-        setStores(fetchedStores);
-        if (fetchedStores.length > 0) {
-          setForm(f => ({ ...f, storeId: fetchedStores[0].id }));
-        }
-      }
-    } catch (error) {
-      console.error('Fout bij ophalen admin data:', error);
-    } finally {
-      setIsLoading(false);
+  // Update standaard storeId zodra winkels geladen zijn
+  useEffect(() => {
+    if (stores.length > 0 && !form.storeId) {
+      setForm(f => ({ ...f, storeId: stores[0].id }));
     }
-  };
+  }, [stores]);
 
   const handleAddStore = async (e) => {
     e.preventDefault();
@@ -71,7 +55,7 @@ export default function AdminPanel() {
       if (res.data.success) {
         setNewStoreName('');
         setNewStoreLocation('');
-        fetchData();
+        mutateStores(); // Ververst de winkelcache direct op het scherm
         alert('Winkel succesvol toegevoegd!');
       }
     } catch (error) {
@@ -89,7 +73,7 @@ export default function AdminPanel() {
     try {
       const res = await axios.delete(`/api/stores?id=${id}`);
       if (res.data.success) {
-        fetchData();
+        mutateStores();
         alert('Winkel verwijderd.');
       }
     } catch (error) {
@@ -117,7 +101,7 @@ export default function AdminPanel() {
           role: 'cashier',
           storeId: stores[0]?.id || ''
         });
-        fetchData();
+        mutateUsers();
       }
     } catch (error) {
       alert(error.response?.data?.error || 'Fout bij aanmaken van gebruiker.');
@@ -131,7 +115,7 @@ export default function AdminPanel() {
       const res = await axios.delete(`/api/admin/users?id=${id}`);
       if (res.data.success) {
         alert('Gebruiker verwijderd.');
-        fetchData();
+        mutateUsers();
       }
     } catch (error) {
       alert(error.response?.data?.error || 'Fout bij verwijderen van gebruiker.');
