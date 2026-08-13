@@ -21,13 +21,11 @@ export default async function handler(req, res) {
     const variationPromises = [];
 
     for (const product of response.data) {
-      // 1. Veilige categorie extractie
       let mainCategory = 'Overig';
       if (product.categories && Array.isArray(product.categories) && product.categories.length > 0) {
-        mainCategory = product.categories[0].name || product.categories[0].slug || 'Overig';
+        mainCategory = product.categories[0].name || 'Overig';
       }
 
-      // 2. Veilige hoofdafbeelding extractie
       let imageUrl = null;
       if (product.images && Array.isArray(product.images) && product.images.length > 0) {
         imageUrl = product.images[0].src || null;
@@ -36,10 +34,8 @@ export default async function handler(req, res) {
       if (product.type === 'variable') {
         const promise = api.get(`products/${product.id}/variations`, { per_page: 100, status: 'any' })
           .then(varRes => {
-            return (varRes.data || []).map(variation => {
+            const variations = (varRes.data || []).map(variation => {
               const attrString = (variation.attributes || []).map(a => a.option).join(', ');
-              
-              // Variatie foto of fallback naar hoofdproduct foto
               let varImage = imageUrl;
               if (variation.image && variation.image.src) {
                 varImage = variation.image.src;
@@ -49,38 +45,40 @@ export default async function handler(req, res) {
                 id: variation.id,
                 product_id: product.id,
                 variation_id: variation.id,
-                name: `${product.name} ${attrString ? `- ${attrString}` : ''}`.trim(),
+                name: attrString || variation.name,
                 sku: variation.sku || product.sku,
                 price: parseFloat(variation.price) || 0,
                 image: varImage,
-                categoryName: mainCategory
               };
             });
+
+            return {
+              id: product.id,
+              product_id: product.id,
+              variation_id: 0,
+              name: product.name,
+              sku: product.sku,
+              price: parseFloat(product.price) || 0,
+              image: imageUrl,
+              categoryName: mainCategory,
+              type: 'variable',
+              variations: variations
+            };
           })
-          .catch(err => {
-            console.error(`Fout bij variaties van product ${product.id}:`, err.message);
-            return [];
-          });
+          .catch(() => ({
+            id: product.id,
+            product_id: product.id,
+            variation_id: 0,
+            name: product.name,
+            sku: product.sku,
+            price: parseFloat(product.price) || 0,
+            image: imageUrl,
+            categoryName: mainCategory,
+            type: 'simple',
+            variations: []
+          }));
         
-        variationPromises.push(
-          promise.then(variations => {
-            if (variations.length > 0) {
-              finalProducts.push(...variations);
-            } else {
-              // Fallback als variaties falen
-              finalProducts.push({
-                id: product.id,
-                product_id: product.id,
-                variation_id: 0,
-                name: product.name,
-                sku: product.sku,
-                price: parseFloat(product.price) || 0,
-                image: imageUrl,
-                categoryName: mainCategory
-              });
-            }
-          })
-        );
+        variationPromises.push(promise);
       } else {
         finalProducts.push({
           id: product.id,
@@ -90,12 +88,15 @@ export default async function handler(req, res) {
           sku: product.sku,
           price: parseFloat(product.price) || 0,
           image: imageUrl,
-          categoryName: mainCategory
+          categoryName: mainCategory,
+          type: 'simple',
+          variations: []
         });
       }
     }
 
-    await Promise.all(variationPromises);
+    const resolvedVariables = await Promise.all(variationPromises);
+    resolvedVariables.forEach(prod => finalProducts.push(prod));
 
     res.status(200).json({ success: true, count: finalProducts.length, products: finalProducts });
   } catch (error) {
