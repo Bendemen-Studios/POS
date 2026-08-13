@@ -14,86 +14,48 @@ export default async function handler(req, res) {
     let allProducts = [];
     let page = 1;
 
-    // --- ROBUUSTE PAGINERING LOOP (Blijft doorgaan tot de API leeg is) ---
+    // We verkleinen de batch naar 10 om de Nginx timeout te omzeilen
     while (true) {
       const response = await api.get("products", { 
-        per_page: 100,
+        per_page: 10, 
         page: page,
-        status: 'any' 
+        status: 'publish', // Alleen gepubliceerde producten
+        _fields: 'id,name,price,sku,type,categories,images' 
       });
 
-      if (!response.data || response.data.length === 0) {
-        break; // Geen producten meer, klaar met loopen
-      }
-
+      if (!response.data || response.data.length === 0) break;
+      
       allProducts.push(...response.data);
-
-      // Als deze pagina minder dan 100 items bevat, is dit sowieso de laatste pagina
-      if (response.data.length < 100) {
-        break;
-      }
-
       page++;
     }
 
     const finalProducts = [];
 
     for (const product of allProducts) {
-      // Prioriteit voor subcategorieën (zoals Barks)
       let mainCategory = 'Overig';
       if (product.categories && product.categories.length > 0) {
-        const specificCategory = product.categories.find(cat => cat.parent && cat.parent > 0) || product.categories[0];
-        mainCategory = specificCategory.name || specificCategory.slug || 'Overig';
+        mainCategory = product.categories[0].name;
       }
 
-      let imageUrl = null;
-      if (product.images && product.images.length > 0) {
-        imageUrl = product.images[0].src || null;
-      }
+      let imageUrl = product.images?.[0]?.src || null;
 
       if (product.type === 'variable') {
         try {
-          let allVariations = [];
-          let varPage = 1;
-
-          // --- ROBUUSTE VARIATIE LOOP ---
-          while (true) {
-            const varRes = await api.get(`products/${product.id}/variations`, { 
-              per_page: 100, 
-              page: varPage,
-              status: 'any' 
-            });
-
-            if (!varRes.data || varRes.data.length === 0) {
-              break;
-            }
-
-            allVariations.push(...varRes.data);
-
-            if (varRes.data.length < 100) {
-              break;
-            }
-
-            varPage++;
-          }
-
-          const variations = allVariations.map(variation => {
-            const attrString = (variation.attributes || []).map(a => a.option).join(', ');
-            let varImage = imageUrl;
-            if (variation.image && variation.image.src) {
-              varImage = variation.image.src;
-            }
-            
-            return {
-              id: variation.id,
-              product_id: product.id,
-              variation_id: variation.id,
-              name: attrString || variation.name,
-              sku: variation.sku || product.sku,
-              price: parseFloat(variation.price) || 0,
-              image: varImage,
-            };
+          // Haal variaties op voor dit specifieke product
+          const varRes = await api.get(`products/${product.id}/variations`, { 
+            per_page: 50, // Variaties zijn meestal licht, dit kan vaak wel
+            _fields: 'id,attributes,sku,price,image'
           });
+
+          const variations = varRes.data.map(variation => ({
+            id: variation.id,
+            product_id: product.id,
+            variation_id: variation.id,
+            name: (variation.attributes || []).map(a => a.option).join(', ') || 'Variatie',
+            sku: variation.sku || product.sku,
+            price: parseFloat(variation.price) || 0,
+            image: variation.image?.src || imageUrl,
+          }));
 
           finalProducts.push({
             id: product.id,
@@ -108,15 +70,11 @@ export default async function handler(req, res) {
             variations: variations
           });
         } catch (err) {
+          // Fallback als variaties niet lukken
           finalProducts.push({
             id: product.id,
-            product_id: product.id,
-            variation_id: 0,
             name: product.name,
-            sku: product.sku,
             price: parseFloat(product.price) || 0,
-            image: imageUrl,
-            categoryName: mainCategory,
             type: 'simple',
             variations: []
           });
@@ -139,7 +97,7 @@ export default async function handler(req, res) {
 
     res.status(200).json({ success: true, count: finalProducts.length, products: finalProducts });
   } catch (error) {
-    console.error("WooCommerce API Error:", error.response?.data || error.message);
-    res.status(500).json({ success: false, error: 'Fout bij ophalen van producten via WooCommerce API' });
+    console.error("WooCommerce API Error:", error.message);
+    res.status(500).json({ success: false, error: 'Fout bij ophalen: ' + error.message });
   }
 }
