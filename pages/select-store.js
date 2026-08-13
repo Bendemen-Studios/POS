@@ -72,25 +72,3 @@ export default function SelectStore() {
     </div>
   );
 }
-
-  return (
-    <div style={{ display: 'flex', height: '100vh', justifyContent: 'center', alignItems: 'center', background: '#f5f5f5', fontFamily: 'Arial' }}>
-      <div style={{ background: '#fff', padding: '40px', borderRadius: '8px', boxShadow: '0 4px 15px rgba(0,0,0,0.1)', width: '350px', textAlign: 'center' }}>
-        <h2>Kies een Winkel</h2>
-        <p style={{ color: '#666', fontSize: '14px', marginBottom: '20px' }}>Selecteer de actieve locatie voor deze sessie.</p>
-        
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          {stores.map(store => (
-            <button
-              key={store.id}
-              onClick={() => handleSelectStore(store)}
-              style={{ padding: '15px', background: '#0070f3', color: '#fff', border: 'none', borderRadius: '5px', fontSize: '16px', cursor: 'pointer', fontWeight: 'bold' }}
-            >
-              {store.name}
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
