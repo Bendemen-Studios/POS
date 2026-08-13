@@ -12,7 +12,6 @@ export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ message: 'Method not allowed' });
 
   try {
-    // Haal alle producten op inclusief verborgen/private items en categorieën
     const response = await api.get("products", { 
       per_page: 100,
       status: 'any' 
@@ -22,17 +21,14 @@ export default async function handler(req, res) {
     const variationPromises = [];
 
     for (const product of response.data) {
-      // Haal de categorie naam op uit het product object
       const productCategories = product.categories || [];
       const mainCategory = productCategories.length > 0 ? (productCategories[0].name || 'Overig') : 'Overig';
-      
-      // Hoofdafbeelding ophalen
       const imageUrl = (product.images && product.images.length > 0 && product.images[0].src) ? product.images[0].src : null;
 
       if (product.type === 'variable') {
         const promise = api.get(`products/${product.id}/variations`, { per_page: 100, status: 'any' })
           .then(varRes => {
-            return varRes.data.map(variation => {
+            const variations = varRes.data.map(variation => {
               const attrString = variation.attributes.map(a => a.option).join(', ');
               const varImage = (variation.image && variation.image.src) ? variation.image.src : imageUrl;
               
@@ -40,15 +36,38 @@ export default async function handler(req, res) {
                 id: variation.id,
                 product_id: product.id,
                 variation_id: variation.id,
-                name: `${product.name} ${attrString ? `- ${attrString}` : ''}`.trim(),
+                name: attrString || variation.name,
                 sku: variation.sku || product.sku,
                 price: parseFloat(variation.price) || 0,
                 image: varImage,
-                categoryName: mainCategory
               };
             });
+
+            return {
+              id: product.id,
+              product_id: product.id,
+              variation_id: 0,
+              name: product.name,
+              sku: product.sku,
+              price: parseFloat(product.price) || 0,
+              image: imageUrl,
+              categoryName: mainCategory,
+              type: 'variable',
+              variations: variations
+            };
           })
-          .catch(err => []);
+          .catch(err => ({
+            id: product.id,
+            product_id: product.id,
+            variation_id: 0,
+            name: product.name,
+            sku: product.sku,
+            price: parseFloat(product.price) || 0,
+            image: imageUrl,
+            categoryName: mainCategory,
+            type: 'simple',
+            variations: []
+          }));
         variationPromises.push(promise);
       } else {
         finalProducts.push({
@@ -59,13 +78,15 @@ export default async function handler(req, res) {
           sku: product.sku,
           price: parseFloat(product.price) || 0,
           image: imageUrl,
-          categoryName: mainCategory
+          categoryName: mainCategory,
+          type: 'simple',
+          variations: []
         });
       }
     }
 
-    const resolvedVariations = await Promise.all(variationPromises);
-    resolvedVariations.forEach(vars => finalProducts.push(...vars));
+    const resolvedVariables = await Promise.all(variationPromises);
+    resolvedVariables.forEach(prod => finalProducts.push(prod));
 
     res.status(200).json({ success: true, products: finalProducts });
   } catch (error) {
