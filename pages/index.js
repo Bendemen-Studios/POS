@@ -8,37 +8,30 @@ import { useOfflineSync } from '../hooks/useOfflineSync';
 export default function BendemenPOS() {
   const router = useRouter();
   
-  // --- SYNC MANAGER HOOK ---
   const { isSyncingOrders, unsyncedCount, syncOfflineOrders, checkUnsyncedOrders } = useOfflineSync();
 
-  // --- STATE ---
   const [cart, setCart] = useState([]);
   const [products, setProducts] = useState([]);
   const [isOnline, setIsOnline] = useState(true);
   const [isSyncingProducts, setIsSyncingProducts] = useState(false);
   const [isWaitingForPin, setIsWaitingForPin] = useState(false);
   
-  // Open Prijs / Bedrag Scherm State
   const [openPriceModal, setOpenPriceModal] = useState(false);
   const [activeOpenProduct, setActiveOpenProduct] = useState(null);
   const [customPriceInput, setCustomPriceInput] = useState('');
 
-  // Authenticatie state
   const [currentUser, setCurrentUser] = useState(null);
   const [activeStore, setActiveStore] = useState(null);
 
-  // Korting en Punten state (100 punten = €5,00 -> conversie = 0.05)
   const [discount, setDiscount] = useState({ type: 'none', value: 0 }); 
   const [pointsToUse, setPointsToUse] = useState(0);
   const pointsConversionRate = 0.05; 
 
-  // Klant state
   const [customerSearch, setCustomerSearch] = useState('');
   const [customerResults, setCustomerResults] = useState([]);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [isSearching, setIsSearching] = useState(false);
 
-  // --- VEILIGE LOCALSTORAGE HELPER ---
   const getSafeLocalStorage = (key) => {
     try {
       const item = localStorage.getItem(key);
@@ -49,7 +42,6 @@ export default function BendemenPOS() {
     }
   };
 
-  // --- LIFECYCLE ---
   useEffect(() => {
     const token = localStorage.getItem('pos_token');
     if (!token) {
@@ -75,7 +67,6 @@ export default function BendemenPOS() {
     loadLocalProducts();
   }, [router]);
 
-  // --- PRODUCTEN ---
   const loadLocalProducts = async () => {
     const localProducts = await db.products.toArray();
     setProducts(localProducts);
@@ -86,20 +77,15 @@ export default function BendemenPOS() {
       alert("Je bent momenteel offline. Verbind met internet om producten te updaten.");
       return;
     }
-    
-    if (!activeStore || !activeStore.id) {
-      alert("Geen actieve winkel geselecteerd.");
-      return;
-    }
 
     setIsSyncingProducts(true);
     try {
-      const response = await axios.get(`/api/woocommerce/products?storeId=${activeStore.id}`);
+      const response = await axios.get(`/api/woocommerce/products`);
       if (response.data.success) {
         await db.products.clear();
         await db.products.bulkAdd(response.data.products);
         setProducts(response.data.products);
-        alert(`Producten voor ${activeStore.name} succesvol gesynchroniseerd!`);
+        alert(`Alle producten succesvol gesynchroniseerd!`);
       }
     } catch (error) {
       const errorMsg = error.response?.data?.error || 'Fout bij synchroniseren van producten.';
@@ -109,7 +95,6 @@ export default function BendemenPOS() {
     }
   };
 
-  // --- KLANTEN ZOEKEN ---
   const searchCustomer = async () => {
     if (!isOnline) {
       alert("Je bent offline, je kunt nu geen klanten zoeken in WooCommerce.");
@@ -127,7 +112,6 @@ export default function BendemenPOS() {
     }
   };
 
-  // --- WINKELWAGEN LOGICA & OPEN PRIJS ---
   const handleProductClick = (product) => {
     if (product.price === 0) {
       setActiveOpenProduct(product);
@@ -179,7 +163,6 @@ export default function BendemenPOS() {
     setCart(cart.filter(item => !(item.id === id && (item.variation_id || 0) === (variationId || 0))));
   };
 
-  // --- BEREKENINGEN & PUNTEN BEVEILIGING ---
   const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
   
   let discountAmount = 0;
@@ -193,7 +176,6 @@ export default function BendemenPOS() {
   const pointsDiscount = finalPointsToUse > 0 ? finalPointsToUse * pointsConversionRate : 0;
   const total = Math.max(0, subtotal - discountAmount - pointsDiscount);
 
-  // --- AFREKENEN & RESET ---
   const handleCheckout = async (isPin = false) => {
     const orderData = { 
       orderItems: cart, 
@@ -253,12 +235,20 @@ export default function BendemenPOS() {
     router.push('/login');
   };
 
+  // Groepeer producten per hoofdcategorie voor de weergave
+  const groupedProducts = products.reduce((acc, product) => {
+    const cat = product.categoryName || 'Overig';
+    if (!acc[cat]) acc[cat] = [];
+    acc[cat].push(product);
+    return acc;
+  }, {});
+
   if (!currentUser || !activeStore) return null; 
 
   return (
     <div style={{ display: 'flex', height: '100vh', fontFamily: 'Arial', position: 'relative' }}>
       
-      {/* LINKER KANT: Producten */}
+      {/* LINKER KANT: Producten gegroepeerd per categorie */}
       <div style={{ flex: '2', padding: '20px', borderRight: '1px solid #ddd', overflowY: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
           <h2>Producten</h2>
@@ -274,16 +264,38 @@ export default function BendemenPOS() {
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '15px' }}>
-          {products.length === 0 ? <p>Geen producten. Druk op Sync.</p> : products.map(product => (
-            <div key={`${product.id}-${product.variation_id || 0}`} onClick={() => handleProductClick(product)} style={{ border: '1px solid #ccc', borderRadius: '8px', padding: '15px', cursor: 'pointer', textAlign: 'center', background: product.price === 0 ? '#fffbe6' : '#f9f9f9' }}>
-              <div style={{ fontWeight: 'bold', marginBottom: '10px', fontSize: '14px' }}>{product.name}</div>
-              <div style={{ color: '#0070f3' }}>
-                {product.price === 0 ? 'Vrij Bedrag' : `€${product.price.toFixed(2)}`}
+        {products.length === 0 ? (
+          <p>Geen producten gevonden. Druk op Sync met WooCommerce.</p>
+        ) : (
+          Object.keys(groupedProducts).map(categoryName => (
+            <div key={categoryName} style={{ marginBottom: '30px' }}>
+              <h3 style={{ borderBottom: '2px solid #0070f3', paddingBottom: '5px', marginBottom: '15px', color: '#333', fontSize: '18px' }}>
+                {categoryName}
+              </h3>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '15px' }}>
+                {groupedProducts[categoryName].map(product => (
+                  <div 
+                    key={`${product.id}-${product.variation_id || 0}`} 
+                    onClick={() => handleProductClick(product)} 
+                    style={{ border: '1px solid #ccc', borderRadius: '8px', padding: '10px', cursor: 'pointer', textAlign: 'center', background: product.price === 0 ? '#fffbe6' : '#f9f9f9', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}
+                  >
+                    {product.image ? (
+                      <img src={product.image} alt={product.name} style={{ width: '100%', height: '100px', objectFit: 'cover', borderRadius: '5px', marginBottom: '8px' }} />
+                    ) : (
+                      <div style={{ width: '100%', height: '100px', background: '#eee', borderRadius: '5px', marginBottom: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', color: '#888' }}>Geen foto</div>
+                    )}
+
+                    <div style={{ fontWeight: 'bold', marginBottom: '5px', fontSize: '13px' }}>{product.name}</div>
+                    <div style={{ color: '#0070f3', fontWeight: 'bold' }}>
+                      {product.price === 0 ? 'Vrij Bedrag' : `€${product.price.toFixed(2)}`}
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
-          ))}
-        </div>
+          ))
+        )}
       </div>
 
       {/* RECHTER KANT: Winkelwagen Geavanceerd */}
@@ -322,7 +334,6 @@ export default function BendemenPOS() {
           Locatie: <strong>{activeStore.name}</strong> | Kassa: <strong>{currentUser.name}</strong>
         </div>
 
-        {/* Klant Zoeken & Koppelen */}
         <div style={{ background: '#fff', padding: '15px', borderRadius: '8px', border: '1px solid #ddd', marginBottom: '15px' }}>
           <label style={{ fontSize: '14px', fontWeight: 'bold', display: 'block', marginBottom: '10px' }}>Klant Koppelen</label>
           
@@ -379,7 +390,6 @@ export default function BendemenPOS() {
           )}
         </div>
 
-        {/* Winkelwagen Lijst */}
         <div style={{ flexGrow: 1, overflowY: 'auto', background: '#fff', padding: '15px', borderRadius: '8px', border: '1px solid #ddd', marginBottom: '15px' }}>
           {cart.length === 0 ? <p style={{ color: '#888', textAlign: 'center' }}>Winkelmandje is leeg</p> : cart.map(item => (
             <div key={`${item.id}-${item.variation_id || 0}-${item.price}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #eee', paddingBottom: '10px', marginBottom: '10px' }}>
@@ -401,7 +411,6 @@ export default function BendemenPOS() {
           ))}
         </div>
 
-        {/* Korting & Veilige Punten Sectie */}
         <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
           <div style={{ flex: 1, background: '#fff', padding: '10px', borderRadius: '5px', border: '1px solid #ddd' }}>
             <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Handmatige Korting</label>
@@ -441,7 +450,6 @@ export default function BendemenPOS() {
           </div>
         </div>
 
-        {/* Totalen Overzicht */}
         <div style={{ background: '#111', color: 'white', padding: '15px', borderRadius: '8px', marginBottom: '15px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px', fontSize: '14px' }}>
             <span>Subtotaal:</span> <span>€{subtotal.toFixed(2)}</span>
@@ -461,7 +469,6 @@ export default function BendemenPOS() {
           </div>
         </div>
 
-        {/* Knoppen (Contant & Pin) */}
         <div style={{ display: 'flex', gap: '10px' }}>
           <button onClick={resetCart} style={{ flex: 1, padding: '15px', background: '#fff', color: 'red', border: '1px solid red', borderRadius: '5px', cursor: 'pointer' }}>Leegmaken</button>
           
@@ -483,7 +490,6 @@ export default function BendemenPOS() {
         </div>
       </div>
 
-      {/* --- OPEN PRIJS MODAL SCHERM --- */}
       {openPriceModal && (
         <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
           <div style={{ background: '#fff', padding: '30px', borderRadius: '10px', width: '350px', boxShadow: '0 4px 15px rgba(0,0,0,0.2)', textAlign: 'center' }}>
