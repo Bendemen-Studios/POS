@@ -11,14 +11,29 @@ export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ message: 'Method not allowed' });
 
   try {
-    const response = await api.get("products", { 
-      per_page: 100,
-      status: 'any' 
-    });
-    
+    let allProducts = [];
+    let page = 1;
+    let totalPages = 1;
+
+    // --- LOOP DOOR ALLE PAGINA'S VOOR PRODUCTEN ---
+    do {
+      const response = await api.get("products", { 
+        per_page: 100,
+        page: page,
+        status: 'any' 
+      });
+
+      if (response.data && response.data.length > 0) {
+        allProducts.push(...response.data);
+      }
+
+      totalPages = parseInt(response.headers['x-wp-totalpages']) || 1;
+      page++;
+    } while (page <= totalPages);
+
     const finalProducts = [];
 
-    for (const product of response.data) {
+    for (const product of allProducts) {
       let mainCategory = 'Overig';
       if (product.categories && product.categories.length > 0) {
         mainCategory = product.categories[0].name || 'Overig';
@@ -31,8 +46,27 @@ export default async function handler(req, res) {
 
       if (product.type === 'variable') {
         try {
-          const varRes = await api.get(`products/${product.id}/variations`, { per_page: 100, status: 'any' });
-          const variations = (varRes.data || []).map(variation => {
+          let allVariations = [];
+          let varPage = 1;
+          let varTotalPages = 1;
+
+          // --- LOOP DOOR ALLE PAGINA'S VOOR VARIATIES ---
+          do {
+            const varRes = await api.get(`products/${product.id}/variations`, { 
+              per_page: 100, 
+              page: varPage,
+              status: 'any' 
+            });
+
+            if (varRes.data && varRes.data.length > 0) {
+              allVariations.push(...varRes.data);
+            }
+
+            varTotalPages = parseInt(varRes.headers['x-wp-totalpages']) || 1;
+            varPage++;
+          } while (varPage <= varTotalPages);
+
+          const variations = allVariations.map(variation => {
             const attrString = (variation.attributes || []).map(a => a.option).join(', ');
             let varImage = imageUrl;
             if (variation.image && variation.image.src) {
@@ -81,7 +115,7 @@ export default async function handler(req, res) {
           id: product.id,
           product_id: product.id,
           variation_id: 0,
-            name: product.name,
+          name: product.name,
           sku: product.sku,
           price: parseFloat(product.price) || 0,
           image: imageUrl,
@@ -92,7 +126,7 @@ export default async function handler(req, res) {
       }
     }
 
-    res.status(200).json({ success: true, products: finalProducts });
+    res.status(200).json({ success: true, count: finalProducts.length, products: finalProducts });
   } catch (error) {
     console.error("WooCommerce API Error:", error.response?.data || error.message);
     res.status(500).json({ success: false, error: 'Fout bij ophalen van producten via WooCommerce API' });
