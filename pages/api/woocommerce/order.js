@@ -1,4 +1,4 @@
-/import WooCommerceRestApi from "@woocommerce/woocommerce-rest-api";
+import WooCommerceRestApi from "@woocommerce/woocommerce-rest-api";
 
 const api = new WooCommerceRestApi({
   url: process.env.WOO_SITE_URL,
