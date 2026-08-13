@@ -12,12 +12,14 @@ export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ message: 'Method not allowed' });
 
   try {
-    // Haal alle producten op (inclusief verborgen/private items via status: 'any')
+    console.log("Start ophalen producten met status: 'any'...");
     const response = await api.get("products", { 
       per_page: 100,
       status: 'any' 
     });
     
+    console.log(`Aantal opgehaalde hoofdproducten: ${response.data.length}`);
+
     const finalProducts = [];
     const variationPromises = [];
 
@@ -25,7 +27,6 @@ export default async function handler(req, res) {
       const productCategories = product.categories || [];
       const mainCategory = productCategories.length > 0 ? (productCategories[0].name || 'Overig') : 'Overig';
       
-      // Hoofdafbeelding ophalen
       const imageUrl = (product.images && product.images.length > 0 && product.images[0].src) ? product.images[0].src : null;
 
       if (product.type === 'variable') {
@@ -33,7 +34,6 @@ export default async function handler(req, res) {
           .then(varRes => {
             return varRes.data.map(variation => {
               const attrString = variation.attributes.map(a => a.option).join(', ');
-              // Pak variatie afbeelding, of anders de hoofdproduct afbeelding
               const varImage = (variation.image && variation.image.src) ? variation.image.src : imageUrl;
               
               return {
@@ -48,7 +48,10 @@ export default async function handler(req, res) {
               };
             });
           })
-          .catch(err => []);
+          .catch(err => {
+            console.error(`Fout bij variaties van product ${product.id}:`, err.message);
+            return [];
+          });
         variationPromises.push(promise);
       } else {
         finalProducts.push({
@@ -67,9 +70,13 @@ export default async function handler(req, res) {
     const resolvedVariations = await Promise.all(variationPromises);
     resolvedVariations.forEach(vars => finalProducts.push(...vars));
 
-    res.status(200).json({ success: true, products: finalProducts });
+    console.log(`Totaal verwerkte producten inclusief variaties: ${finalProducts.length}`);
+    res.status(200).json({ success: true, count: finalProducts.length, products: finalProducts });
   } catch (error) {
     console.error("WooCommerce API Error:", error.response?.data || error.message);
-    res.status(500).json({ success: false, error: 'Fout bij ophalen van producten uit WooCommerce' });
+    res.status(500).json({ 
+      success: false, 
+      error: error.response?.data?.message || error.message || 'Fout bij ophalen van producten uit WooCommerce' 
+    });
   }
 }
