@@ -12,8 +12,26 @@ export default function CashRegister() {
   const [store, setStore] = useState(null);
   const [cart, setCart] = useState([]);
   const [search, setSearch] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('sumup');
+  const [isSyncing, setIsSyncing] = useState(false);
+  
+  // Korting & Punten state
+  const [discount, setDiscount] = useState(0);
+  const [discountType, setDiscountType] = useState('fixed');
+  
+  // Klant & WooCommerce Points state
+  const [customerSearch, setCustomerSearch] = useState('');
+  const [selectedCustomer, setSelectedCustomer] = useState(null);
+  const [redeemPoints, setRedeemPoints] = useState(false);
+  
+  // Modal voor nieuwe klant aanmaken
+  const [showNewCustomerModal, setShowNewCustomerModal] = useState(false);
+  const [newCustomer, setNewCustomer] = useState({ firstName: '', lastName: '', email: '', phone: '' });
 
-  const { data: productsData } = useSWR('/api/woocommerce/products', fetcher, { revalidateOnFocus: false });
+  const { data: productsData, mutate: mutateProducts } = useSWR('/api/woocommerce/products', fetcher, { 
+    revalidateOnFocus: false,
+    revalidateIfStale: false 
+  });
   const products = productsData?.products || [];
 
   useEffect(() => {
@@ -38,8 +56,24 @@ export default function CashRegister() {
     }
   }, [router]);
 
-  // Voorkom hydration mismatch door niets te tonen tot de client is geladen
   if (!mounted) return null;
+
+  const handleSyncProducts = async () => {
+    try {
+      setIsSyncing(true);
+      const res = await axios.post('/api/woocommerce/sync-products');
+      if (res.data.success) {
+        alert('Producten succesvol gesynchroniseerd!');
+        mutateProducts(); // Herlaad productlijst direct
+      } else {
+        alert('Fout bij synchroniseren van producten.');
+      }
+    } catch (err) {
+      alert('Fout bij communicatie met server tijdens sync.');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   const addToCart = (product) => {
     setCart((prev) => {
@@ -55,7 +89,45 @@ export default function CashRegister() {
     setCart((prev) => prev.filter((item) => item.id !== id));
   };
 
-  const totalPrice = cart.reduce((sum, item) => sum + (parseFloat(item.price || 0) * item.quantity), 0);
+  const subtotal = cart.reduce((sum, item) => sum + (parseFloat(item.price || 0) * item.quantity), 0);
+  
+  let discountAmount = discountType === 'percentage' ? (subtotal * (parseFloat(discount || 0) / 100)) : parseFloat(discount || 0);
+  let pointsDiscount = (redeemPoints && selectedCustomer?.points) ? selectedCustomer.points * 0.05 : 0;
+  const totalPrice = Math.max(0, subtotal - discountAmount - pointsDiscount);
+
+  const handleSearchCustomer = async () => {
+    if (!customerSearch) return;
+    try {
+      const res = await axios.get(`/api/woocommerce/customers?search=${customerSearch}`);
+      if (res.data.success && res.data.customers?.length > 0) {
+        setSelectedCustomer(res.data.customers[0]);
+      } else {
+        alert('Geen klant gevonden. Maak hieronder een nieuwe klant aan.');
+      }
+    } catch (err) {
+      alert('Fout bij zoeken naar klant.');
+    }
+  };
+
+  const handleCreateCustomer = async () => {
+    if (!newCustomer.email || !newCustomer.firstName) {
+        alert('Vul minimaal voornaam en e-mailadres in.');
+        return;
+    }
+    try {
+      const res = await axios.post('/api/woocommerce/customers', newCustomer);
+      if (res.data.success) {
+        setSelectedCustomer(res.data.customer);
+        setShowNewCustomerModal(false);
+        setNewCustomer({ firstName: '', lastName: '', email: '', phone: '' });
+        alert('Klant succesvol aangemaakt en gekoppeld!');
+      } else {
+        alert('Fout bij aanmaken klant.');
+      }
+    } catch (err) {
+      alert('Fout bij communicatie met server.');
+    }
+  };
 
   const handleCheckout = async () => {
     if (cart.length === 0) {
@@ -63,16 +135,37 @@ export default function CashRegister() {
       return;
     }
     try {
+      if (paymentMethod === 'sumup') {
+        const sumupRes = await axios.post('/api/sumup/checkout', {
+          total: totalPrice,
+          storeId: store?.id
+        });
+        if (!sumupRes.data.success) {
+          alert('SumUp betaling mislukt.');
+          return;
+        }
+      }
+
       const res = await axios.post('/api/woocommerce/create-order', {
         storeId: store?.id,
         items: cart,
-        total: totalPrice
+        subtotal: subtotal,
+        discount: discountAmount + pointsDiscount,
+        total: totalPrice,
+        paymentMethod: paymentMethod,
+        customerId: selectedCustomer?.id || null,
+        redeemPoints: redeemPoints,
+        pointsToRedeem: redeemPoints ? selectedCustomer?.points : 0
       });
+
       if (res.data.success) {
-        alert('Bestelling succesvol geplaatst!');
+        alert(`Bestelling succesvol geplaatst via ${paymentMethod === 'sumup' ? 'SumUp Pin' : 'Contant'}!`);
         setCart([]);
+        setDiscount(0);
+        setSelectedCustomer(null);
+        setRedeemPoints(false);
       } else {
-        alert('Fout bij plaatsen bestelling.');
+        alert('Fout bij plaatsen bestelling in WooCommerce.');
       }
     } catch (err) {
       alert('Fout bij communicatie met server.');
@@ -90,10 +183,17 @@ export default function CashRegister() {
             <div style={{ background: '#000', color: '#FFF', padding: '8px 12px', fontWeight: '900', borderRadius: '6px', fontSize: '16px' }}>BDM</div>
             <div>
               <h1 style={{ margin: 0, fontSize: '18px', fontWeight: '800' }}>BENDEMEN POS</h1>
-              <span style={{ fontSize: '13px', color: '#666' }}>Winkel: <strong>{store?.name || 'Laden...'}</strong></span>
+              <span style={{ fontSize: '13px', color: '#666' }}>Winkel: <strong>{store?.name || 'Ons Winkeltje'}</strong></span>
             </div>
           </div>
-          <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            <button 
+              onClick={handleSyncProducts} 
+              disabled={isSyncing}
+              style={{ padding: '10px 16px', background: '#F1F3F4', color: '#333', border: 'none', borderRadius: '6px', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}
+            >
+              {isSyncing ? 'Bezig met sync...' : '🔄 Sync Producten'}
+            </button>
             {user?.role === 'administrator' && (
               <button onClick={() => router.push('/admin')} style={{ padding: '10px 16px', background: '#000', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}>Admin Paneel</button>
             )}
@@ -122,11 +222,11 @@ export default function CashRegister() {
             </div>
           </div>
 
-          {/* Cart Section */}
-          <div style={{ background: '#FAFAFA', padding: '20px', borderRadius: '12px', border: '1px solid #EAEAEA', height: 'calc(100vh - 140px)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+          {/* Cart & Checkout Section */}
+          <div style={{ background: '#FAFAFA', padding: '20px', borderRadius: '12px', border: '1px solid #EAEAEA', height: 'calc(100vh - 140px)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', overflowY: 'auto' }}>
             <div>
               <h3 style={{ marginTop: 0, fontSize: '18px', fontWeight: '800', marginBottom: '15px' }}>Winkelmand</h3>
-              <div style={{ overflowY: 'auto', maxHeight: 'calc(100vh - 320px)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div style={{ maxHeight: '160px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '15px' }}>
                 {cart.length === 0 ? (
                   <p style={{ color: '#666', fontSize: '14px' }}>Winkelmand is leeg.</p>
                 ) : (
@@ -141,10 +241,84 @@ export default function CashRegister() {
                   ))
                 )}
               </div>
+
+              {/* Klant & Punten Sectie */}
+              <div style={{ marginBottom: '12px', background: '#fff', padding: '12px', borderRadius: '8px', border: '1px solid #EAEAEA' }}>
+                <label style={{ display: 'block', fontSize: '11px', fontWeight: '700', marginBottom: '6px', textTransform: 'uppercase', color: '#555' }}>Klant koppelen / Punten</label>
+                {selectedCustomer ? (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px' }}>
+                    <div>
+                      <strong>{selectedCustomer.firstName} {selectedCustomer.lastName}</strong>
+                      <div style={{ fontSize: '11px', color: '#666' }}>Punten: {selectedCustomer.points || 0}</div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <label style={{ fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+                        <input type="checkbox" checked={redeemPoints} onChange={(e) => setRedeemPoints(e.target.checked)} />
+                        Inwisselen
+                      </label>
+                      <button onClick={() => setSelectedCustomer(null)} style={{ background: 'none', border: 'none', color: '#C3110C', cursor: 'pointer', fontWeight: 'bold' }}>✕</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+                      <input 
+                        type="text" 
+                        placeholder="Naam of e-mail klant..." 
+                        value={customerSearch} 
+                        onChange={(e) => setCustomerSearch(e.target.value)} 
+                        style={{ flex: 1, padding: '8px', border: '1px solid #DDD', borderRadius: '6px', fontSize: '13px', outline: 'none' }} 
+                      />
+                      <button onClick={handleSearchCustomer} style={{ padding: '8px 12px', background: '#333', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '12px', cursor: 'pointer' }}>Zoek</button>
+                    </div>
+                    <button onClick={() => setShowNewCustomerModal(true)} style={{ width: '100%', padding: '6px', background: '#F1F3F4', color: '#333', border: '1px dashed #CCC', borderRadius: '6px', fontSize: '12px', fontWeight: '600', cursor: 'pointer' }}>+ Nieuwe Klant Aanmaken</button>
+                  </div>
+                )}
+              </div>
+
+              {/* Korting Sectie */}
+              <div style={{ marginBottom: '12px', background: '#fff', padding: '12px', borderRadius: '8px', border: '1px solid #EAEAEA' }}>
+                <label style={{ display: 'block', fontSize: '11px', fontWeight: '700', marginBottom: '6px', textTransform: 'uppercase', color: '#555' }}>Korting toepassen</label>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input 
+                    type="number" 
+                    placeholder="Bedrag / %" 
+                    value={discount} 
+                    onChange={(e) => setDiscount(e.target.value)} 
+                    style={{ flex: 1, padding: '8px', border: '1px solid #DDD', borderRadius: '6px', fontSize: '13px', outline: 'none' }} 
+                  />
+                  <select 
+                    value={discountType} 
+                    onChange={(e) => setDiscountType(e.target.value)} 
+                    style={{ padding: '8px', border: '1px solid #DDD', borderRadius: '6px', fontSize: '13px', background: '#fff' }}
+                  >
+                    <option value="fixed">€</option>
+                    <option value="percentage">%</option>
+                  </select>
+                </div>
+              </div>
             </div>
 
             <div>
-              <div style={{ borderTop: '1px solid #EAEAEA', paddingTop: '15px', marginBottom: '15px', display: 'flex', justifyContent: 'space-between', fontSize: '18px', fontWeight: '800' }}>
+              <div style={{ marginBottom: '12px' }}>
+                <label style={{ display: 'block', fontSize: '11px', fontWeight: '700', marginBottom: '6px', textTransform: 'uppercase', color: '#555' }}>Betaalmethode</label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                  <button 
+                    onClick={() => setPaymentMethod('sumup')} 
+                    style={{ padding: '10px', background: paymentMethod === 'sumup' ? '#000' : '#FFF', color: paymentMethod === 'sumup' ? '#FFF' : '#333', border: '1px solid #DDD', borderRadius: '6px', fontWeight: '600', cursor: 'pointer', fontSize: '13px' }}
+                  >
+                    SumUp Pin
+                  </button>
+                  <button 
+                    onClick={() => setPaymentMethod('cash')} 
+                    style={{ padding: '10px', background: paymentMethod === 'cash' ? '#000' : '#FFF', color: paymentMethod === 'cash' ? '#FFF' : '#333', border: '1px solid #DDD', borderRadius: '6px', fontWeight: '600', cursor: 'pointer', fontSize: '13px' }}
+                  >
+                    Contant
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ borderTop: '1px solid #EAEAEA', paddingTop: '12px', marginBottom: '12px', display: 'flex', justifyContent: 'space-between', fontSize: '18px', fontWeight: '800' }}>
                 <span>Totaal:</span>
                 <span>€{totalPrice.toFixed(2)}</span>
               </div>
@@ -152,6 +326,49 @@ export default function CashRegister() {
             </div>
           </div>
         </div>
+
+        {/* Modal voor Nieuwe Klant */}
+        {showNewCustomerModal && (
+          <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+            <div style={{ background: '#fff', padding: '25px', borderRadius: '12px', width: '400px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+              <h3 style={{ marginTop: 0, marginBottom: '15px', fontSize: '18px', fontWeight: '800' }}>Nieuwe Klant Aanmaken</h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
+                <input 
+                  type="text" 
+                  placeholder="Voornaam" 
+                  value={newCustomer.firstName} 
+                  onChange={(e) => setNewCustomer({ ...newCustomer, firstName: e.target.value })} 
+                  style={{ padding: '10px', border: '1px solid #DDD', borderRadius: '6px', fontSize: '13px', outline: 'none' }} 
+                />
+                <input 
+                  type="text" 
+                  placeholder="Achternaam" 
+                  value={newCustomer.lastName} 
+                  onChange={(e) => setNewCustomer({ ...newCustomer, lastName: e.target.value })} 
+                  style={{ padding: '10px', border: '1px solid #DDD', borderRadius: '6px', fontSize: '13px', outline: 'none' }} 
+                />
+                <input 
+                  type="email" 
+                  placeholder="E-mailadres" 
+                  value={newCustomer.email} 
+                  onChange={(e) => setNewCustomer({ ...newCustomer, email: e.target.value })} 
+                  style={{ padding: '10px', border: '1px solid #DDD', borderRadius: '6px', fontSize: '13px', outline: 'none' }} 
+                />
+                <input 
+                  type="text" 
+                  placeholder="Telefoonnummer (optioneel)" 
+                  value={newCustomer.phone} 
+                  onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })} 
+                  style={{ padding: '10px', border: '1px solid #DDD', borderRadius: '6px', fontSize: '13px', outline: 'none' }} 
+                />
+              </div>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button onClick={handleCreateCustomer} style={{ flex: 1, padding: '10px', background: '#000', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: '600', cursor: 'pointer' }}>Opslaan & Koppelen</button>
+                <button onClick={() => setShowNewCustomerModal(false)} style={{ padding: '10px 15px', background: '#F1F3F4', color: '#333', border: 'none', borderRadius: '6px', fontWeight: '600', cursor: 'pointer' }}>Annuleren</button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
