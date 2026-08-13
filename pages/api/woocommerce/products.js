@@ -1,12 +1,13 @@
+// pages/api/woocommerce/products.js
 import mysql from 'mysql2/promise';
 
 const pool = mysql.createPool({
-  host: process.env.DB_HOST,
+  host: process.env.DB_HOST || 'localhost',
+  port: parseInt(process.env.DB_PORT) || 3306, // Poort apart instellen
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
 });
-
 export default async function handler(req, res) {
   try {
     // We queryen de database direct voor alle producten, hun prijzen, hun categorieën en hun thumbnail IDs
