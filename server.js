@@ -1,15 +1,13 @@
-cat << 'EOF' > /var/www/bendemen-pos/server.js
 const { createServer } = require("http");
 const next = require("next");
 
-const app = next({ dev: false });
+const app = next({ dev: true });
 const handle = app.getRequestHandler();
 
 app.prepare().then(() => {
   createServer((req, res) => {
     handle(req, res);
   }).listen(3000, "0.0.0.0", () => {
-    console.log("> Ready on http://localhost:3000");
+    console.log("> Live development server ready on http://localhost:3000");
   });
 });
-EOF
