@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
-import { defaultStores } from '../data/stores';
+import axios from 'axios';
 
 export default function SelectStore() {
   const router = useRouter();
@@ -13,29 +13,22 @@ export default function SelectStore() {
       return;
     }
 
-    // Haal altijd de meest actuele winkels op (localStorage krijgt voorrang, anders default)
-    let availableStores = defaultStores;
-    const savedStores = localStorage.getItem('pos_stores');
-    if (savedStores) {
-      try {
-        const parsed = JSON.parse(savedStores);
-        if (parsed && parsed.length > 0) {
-          availableStores = parsed;
+    axios.get('/api/stores')
+      .then(res => {
+        if (res.data.success) {
+          const allStores = res.data.stores;
+          try {
+            const parsedRules = JSON.parse(storedRules);
+            const filtered = allStores.filter(store => 
+              parsedRules.includes(store.id) || parsedRules.includes('store-1') || parsedRules.length === 0
+            );
+            setAllowedStores(filtered.length > 0 ? filtered : allStores);
+          } catch (e) {
+            setAllowedStores(allStores);
+          }
         }
-      } catch (e) {}
-    }
-
-    try {
-      const parsedRules = JSON.parse(storedRules);
-      // Als de gebruiker admin is of alle rechten heeft, toon alle beschikbare winkels
-      const filtered = availableStores.filter(store => 
-        parsedRules.includes(store.id) || parsedRules.includes('store-1') || parsedRules.length === 0
-      );
-      
-      setAllowedStores(filtered.length > 0 ? filtered : availableStores);
-    } catch (e) {
-      setAllowedStores(availableStores);
-    }
+      })
+      .catch(err => console.error(err));
   }, []);
 
   const selectStore = (store) => {
@@ -52,34 +45,20 @@ export default function SelectStore() {
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-          {allowedStores.length === 0 ? (
-            <p style={{ textAlign: 'center', color: '#888' }}>Geen winkels beschikbaar voor jouw account.</p>
-          ) : (
-            allowedStores.map(store => (
-              <div 
-                key={store.id}
-                onClick={() => selectStore(store)}
-                style={{ padding: '20px', background: '#FFFFFF', border: '1px solid #E0E0E0', borderRadius: '12px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-              >
-                <div>
-                  <h3 style={{ margin: '0 0 5px 0', fontSize: '16px', fontWeight: '700', color: '#111' }}>{store.name}</h3>
-                  <span style={{ fontSize: '12px', color: '#666' }}>{store.location}</span>
-                </div>
-                <span style={{ fontSize: '18px', fontWeight: 'bold', color: '#C3110C' }}>→</span>
+          {allowedStores.map(store => (
+            <div 
+              key={store.id}
+              onClick={() => selectStore(store)}
+              style={{ padding: '20px', background: '#FFFFFF', border: '1px solid #E0E0E0', borderRadius: '12px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+            >
+              <div>
+                <h3 style={{ margin: '0 0 5px 0', fontSize: '16px', fontWeight: '700', color: '#111' }}>{store.name}</h3>
+                <span style={{ fontSize: '12px', color: '#666' }}>{store.location}</span>
               </div>
-            ))
-          )}
+              <span style={{ fontSize: '18px', fontWeight: 'bold', color: '#C3110C' }}>→</span>
+            </div>
+          ))}
         </div>
-        
-        <button 
-          onClick={() => {
-            localStorage.clear();
-            router.push('/login');
-          }}
-          style={{ marginTop: '25px', background: 'none', border: 'none', color: '#888', cursor: 'pointer', fontSize: '13px', width: '100%', textAlign: 'center' }}
-        >
-          ← Uitloggen / Ander account
-        </button>
       </div>
     </div>
   );

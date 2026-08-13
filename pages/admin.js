@@ -1,17 +1,18 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import axios from 'axios';
-import { defaultStores } from '../data/stores'; // <-- Importeer hier
 
 export default function AdminPanel() {
   const router = useRouter();
   const [users, setUsers] = useState([]);
+  const [stores, setStores] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   
-  const [stores, setStores] = useState(defaultStores);
+  // State voor nieuwe winkel toevoegen
   const [newStoreName, setNewStoreName] = useState('');
   const [newStoreLocation, setNewStoreLocation] = useState('');
 
+  // State voor nieuw personeelslid
   const [form, setForm] = useState({
     username: '',
     email: '',
@@ -19,38 +20,80 @@ export default function AdminPanel() {
     firstName: '',
     lastName: '',
     role: 'cashier',
-    storeId: 'store-1'
+    storeId: ''
   });
 
   useEffect(() => {
+    const token = localStorage.getItem('pos_token');
     const rawUser = localStorage.getItem('pos_user');
-    if (!rawUser) {
+    
+    if (!token && !rawUser) {
       router.push('/login');
       return;
     }
-
-    // Laad opgeslagen winkels uit localStorage indien aanwezig
-    const savedStores = localStorage.getItem('pos_stores');
-    if (savedStores) {
-      try {
-        const parsed = JSON.parse(savedStores);
-        if (parsed.length > 0) setStores(parsed);
-      } catch (e) {}
-    }
-
-    fetchUsers();
+    
+    fetchData();
   }, [router]);
 
-  const fetchUsers = async () => {
+  const fetchData = async () => {
     try {
-      const res = await axios.get('/api/admin/users');
-      if (res.data.success) {
-        setUsers(res.data.users || []);
+      const [usersRes, storesRes] = await Promise.all([
+        axios.get('/api/admin/users'),
+        axios.get('/api/stores')
+      ]);
+
+      if (usersRes.data.success) {
+        setUsers(usersRes.data.users || []);
+      }
+      if (storesRes.data.success) {
+        const fetchedStores = storesRes.data.stores || [];
+        setStores(fetchedStores);
+        if (fetchedStores.length > 0) {
+          setForm(f => ({ ...f, storeId: fetchedStores[0].id }));
+        }
       }
     } catch (error) {
-      console.error(error);
+      console.error('Fout bij ophalen admin data:', error);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleAddStore = async (e) => {
+    e.preventDefault();
+    if (!newStoreName) return;
+
+    try {
+      const res = await axios.post('/api/stores', { 
+        name: newStoreName, 
+        location: newStoreLocation || 'Hoofdvestiging' 
+      });
+      if (res.data.success) {
+        setNewStoreName('');
+        setNewStoreLocation('');
+        fetchData();
+        alert('Winkel succesvol toegevoegd!');
+      }
+    } catch (error) {
+      alert(error.response?.data?.error || 'Fout bij toevoegen van winkel.');
+    }
+  };
+
+  const handleDeleteStore = async (id, name) => {
+    if (stores.length <= 1) {
+      alert('Je moet minimaal één winkel behouden.');
+      return;
+    }
+    if (!confirm(`Weet je zeker dat je winkel "${name}" wilt verwijderen?`)) return;
+
+    try {
+      const res = await axios.delete(`/api/stores?id=${id}`);
+      if (res.data.success) {
+        fetchData();
+        alert('Winkel verwijderd.');
+      }
+    } catch (error) {
+      alert(error.response?.data?.error || 'Fout bij verwijderen van winkel.');
     }
   };
 
@@ -72,9 +115,9 @@ export default function AdminPanel() {
           firstName: '',
           lastName: '',
           role: 'cashier',
-          storeId: stores[0]?.id || 'store-1'
+          storeId: stores[0]?.id || ''
         });
-        fetchUsers();
+        fetchData();
       }
     } catch (error) {
       alert(error.response?.data?.error || 'Fout bij aanmaken van gebruiker.');
@@ -88,42 +131,11 @@ export default function AdminPanel() {
       const res = await axios.delete(`/api/admin/users?id=${id}`);
       if (res.data.success) {
         alert('Gebruiker verwijderd.');
-        fetchUsers();
+        fetchData();
       }
     } catch (error) {
       alert(error.response?.data?.error || 'Fout bij verwijderen van gebruiker.');
     }
-  };
-
-  const handleAddStore = (e) => {
-    e.preventDefault();
-    if (!newStoreName) return;
-
-    const newStore = {
-      id: 'store-' + Date.now(),
-      name: newStoreName,
-      location: newStoreLocation || 'Filiaal'
-    };
-
-    const updatedStores = [...stores, newStore];
-    setStores(updatedStores);
-    localStorage.setItem('pos_stores', JSON.stringify(updatedStores));
-    
-    setNewStoreName('');
-    setNewStoreLocation('');
-    alert('Winkel succesvol toegevoegd!');
-  };
-
-  const handleDeleteStore = (id) => {
-    if (stores.length <= 1) {
-      alert('Je moet minimaal één winkel behouden.');
-      return;
-    }
-    if (!confirm('Weet je zeker dat je deze winkel wilt verwijderen?')) return;
-
-    const updatedStores = stores.filter(s => s.id !== id);
-    setStores(updatedStores);
-    localStorage.setItem('pos_stores', JSON.stringify(updatedStores));
   };
 
   return (
@@ -153,7 +165,7 @@ export default function AdminPanel() {
               <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '6px', textTransform: 'uppercase', color: '#333' }}>Winkelnaam</label>
               <input 
                 type="text" 
-                placeholder="Bijv. Bendemen Store Zwolle"
+                placeholder="Bijv. Ons Winkeltje"
                 value={newStoreName}
                 onChange={(e) => setNewStoreName(e.target.value)}
                 required
@@ -164,7 +176,7 @@ export default function AdminPanel() {
               <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '6px', textTransform: 'uppercase', color: '#333' }}>Locatie / Omschrijving</label>
               <input 
                 type="text" 
-                placeholder="Bijv. Filiaal Oost"
+                placeholder="Bijv. Hellevoetsluis"
                 value={newStoreLocation}
                 onChange={(e) => setNewStoreLocation(e.target.value)}
                 style={{ width: '100%', padding: '12px', border: '1px solid #DDD', borderRadius: '8px', boxSizing: 'border-box', fontSize: '14px', outline: 'none' }}
@@ -194,7 +206,7 @@ export default function AdminPanel() {
                     <td style={{ padding: '12px 15px', color: '#666' }}>{store.location}</td>
                     <td style={{ padding: '12px 15px', textAlign: 'right' }}>
                       <button
-                        onClick={() => handleDeleteStore(store.id)}
+                        onClick={() => handleDeleteStore(store.id, store.name)}
                         style={{
                           padding: '5px 10px',
                           background: '#FCE8E6',
