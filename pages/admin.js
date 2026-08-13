@@ -8,7 +8,6 @@ export default function AdminPanel() {
   const [users, setUsers] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   
-  // Formulier state voor nieuwe gebruiker
   const [form, setForm] = useState({
     username: '',
     email: '',
@@ -21,7 +20,6 @@ export default function AdminPanel() {
 
   const stores = [
     { id: 'store_ons_winkeltje', name: 'Ons Winkeltje' },
-    // Voeg hier eventueel extra winkels toe
   ];
 
   useEffect(() => {
@@ -76,6 +74,20 @@ export default function AdminPanel() {
     }
   };
 
+  const handleDeleteUser = async (id, name) => {
+    if (!confirm(`Weet je zeker dat je ${name} wilt verwijderen?`)) return;
+
+    try {
+      const res = await axios.delete(`/api/admin/users?id=${id}`);
+      if (res.data.success) {
+        alert('Gebruiker verwijderd.');
+        fetchUsers();
+      }
+    } catch (error) {
+      alert(error.response?.data?.error || 'Fout bij verwijderen van gebruiker.');
+    }
+  };
+
   return (
     <div style={{ padding: '30px', fontFamily: 'Arial', maxWidth: '1000px', margin: '0 auto' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' }}>
@@ -88,7 +100,7 @@ export default function AdminPanel() {
         </button>
       </div>
 
-      {/* Formulier om gebruiker toe te voegen */}
+      {/* Formulier */}
       <div style={{ background: '#fff', padding: '20px', borderRadius: '8px', border: '1px solid #ddd', marginBottom: '30px', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
         <h3 style={{ marginTop: 0, marginBottom: '15px' }}>Nieuw Personeel / Manager Toevoegen</h3>
         
@@ -183,7 +195,7 @@ export default function AdminPanel() {
         </form>
       </div>
 
-      {/* Lijst van bestaande gebruikers */}
+      {/* Tabel met gebruikers */}
       <div style={{ background: '#fff', padding: '20px', borderRadius: '8px', border: '1px solid #ddd', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
         <h3 style={{ marginTop: 0, marginBottom: '15px' }}>Geregistreerd Personeel</h3>
         {isLoading ? (
@@ -198,6 +210,7 @@ export default function AdminPanel() {
                 <th style={{ padding: '10px' }}>E-mail</th>
                 <th style={{ padding: '10px' }}>Rol</th>
                 <th style={{ padding: '10px' }}>Winkel</th>
+                <th style={{ padding: '10px', textAlign: 'right' }}>Actie</th>
               </tr>
             </thead>
             <tbody>
@@ -217,6 +230,22 @@ export default function AdminPanel() {
                     </span>
                   </td>
                   <td style={{ padding: '10px' }}>{u.storeId === 'store_ons_winkeltje' ? 'Ons Winkeltje' : u.storeId}</td>
+                  <td style={{ padding: '10px', textAlign: 'right' }}>
+                    <button
+                      onClick={() => handleDeleteUser(u.id, u.name)}
+                      style={{
+                        padding: '6px 12px',
+                        background: '#ff4d4f',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontSize: '12px'
+                      }}
+                    >
+                      Verwijderen
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
