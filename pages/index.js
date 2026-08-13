@@ -1,594 +1,309 @@
-// pages/index.js
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
-import { db, saveOfflineOrder } from '../lib/db';
-import axios from 'axios';
-import { useOfflineSync } from '../hooks/useOfflineSync';
 
-export default function BendemenPOS() {
-  const router = useRouter();
-  
-  const { isSyncingOrders, unsyncedCount, syncOfflineOrders, checkUnsyncedOrders } = useOfflineSync();
-
-  const [cart, setCart] = useState([]);
+export default function POS() {
   const [products, setProducts] = useState([]);
-  const [isOnline, setIsOnline] = useState(true);
-  const [isSyncingProducts, setIsSyncingProducts] = useState(false);
-  const [isWaitingForPin, setIsWaitingForPin] = useState(false);
-  
-  // Open Prijs / Bedrag Scherm State
-  const [openPriceModal, setOpenPriceModal] = useState(false);
-  const [activeOpenProduct, setActiveOpenProduct] = useState(null);
-  const [customPriceInput, setCustomPriceInput] = useState('');
-
-  // Variatie Scherm State
-  const [variationModal, setVariationModal] = useState(false);
-  const [activeVariableProduct, setActiveVariableProduct] = useState(null);
-
-  const [currentUser, setCurrentUser] = useState(null);
-  const [activeStore, setActiveStore] = useState(null);
-
-  const [discount, setDiscount] = useState({ type: 'none', value: 0 }); 
-  const [pointsToUse, setPointsToUse] = useState(0);
-  const pointsConversionRate = 0.05; 
-
-  const [customerSearch, setCustomerSearch] = useState('');
-  const [customerResults, setCustomerResults] = useState([]);
-  const [selectedCustomer, setSelectedCustomer] = useState(null);
-  const [isSearching, setIsSearching] = useState(false);
-
-  const getSafeLocalStorage = (key) => {
-    try {
-      const item = localStorage.getItem(key);
-      if (!item || item === 'undefined' || item === 'null') return null;
-      return JSON.parse(item);
-    } catch (e) {
-      return null;
-    }
-  };
+  const [cart, setCart] = useState([]);
+  const [selectedCategory, setSelectedCategory] = useState('Alle');
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
+  const [amountGiven, setAmountGiven] = useState('');
+  const [paymentSuccess, setPaymentSuccess] = useState(false);
+  const [store, setStore] = useState({ name: 'Bendemen POS' });
+  const router = useRouter();
 
   useEffect(() => {
-    const token = localStorage.getItem('pos_token');
-    if (!token) {
-      router.push('/login');
-      return;
+    const savedStore = localStorage.getItem('selectedStore');
+    if (savedStore) {
+      try { setStore(JSON.parse(savedStore)); } catch (e) {}
     }
+    fetchProducts();
+  }, []);
 
-    const user = getSafeLocalStorage('pos_user');
-    const store = getSafeLocalStorage('pos_active_store');
-
-    if (!user) {
-      router.push('/login');
-      return;
-    }
-
-    setCurrentUser(user);
-    setActiveStore(store || { id: 'store_ons_winkeltje', name: 'Ons Winkeltje' });
-
-    setIsOnline(navigator.onLine);
-    window.addEventListener('online', () => setIsOnline(true));
-    window.addEventListener('offline', () => setIsOnline(false));
-
-    loadLocalProducts();
-  }, [router]);
-
-  const loadLocalProducts = async () => {
-    const localProducts = await db.products.toArray();
-    setProducts(localProducts);
-  };
-
-  const syncProducts = async () => {
-    if (!isOnline) {
-      alert("Je bent momenteel offline. Verbind met internet om producten te updaten.");
-      return;
-    }
-
-    setIsSyncingProducts(true);
+  const fetchProducts = async () => {
+    setLoading(true);
+    setErrorMsg('');
     try {
-      const response = await axios.get(`/api/woocommerce/products`);
-      if (response.data.success) {
-        await db.products.clear();
-        await db.products.bulkAdd(response.data.products);
-        setProducts(response.data.products);
-        alert(`Succes! ${response.data.products.length} hoofdproducten gesynchroniseerd.`);
+      const res = await fetch('/api/woocommerce/products');
+      const data = await res.json();
+      if (data.success) {
+        setProducts(data.products || []);
       } else {
-        alert("Synchronisatie mislukt: Geen succesvolle respons.");
+        setErrorMsg('Fout bij ophalen: ' + (data.error || 'Onbekende fout'));
       }
-    } catch (error) {
-      console.error("Sync error:", error);
-      const errorMsg = error.response?.data?.error || error.message || 'Fout bij synchroniseren van producten.';
-      alert(`Fout bij sync: ${errorMsg}`);
+    } catch (err) {
+      setErrorMsg('Kan geen verbinding maken met WooCommerce API.');
     } finally {
-      setIsSyncingProducts(false);
+      setLoading(false);
     }
   };
 
-  const searchCustomer = async () => {
-    if (!isOnline) {
-      alert("Je bent offline, je kunt nu geen klanten zoeken in WooCommerce.");
-      return;
-    }
-    if (customerSearch.length > 2) {
-      setIsSearching(true);
-      try {
-        const response = await axios.get(`/api/woocommerce/customers?search=${customerSearch}`);
-        setCustomerResults(response.data.customers);
-      } catch (error) {
-        alert('Fout bij zoeken naar klant.');
-      }
-      setIsSearching(false);
-    }
-  };
-
-  const handleProductClick = (product) => {
-    if (product.type === 'variable' && product.variations && product.variations.length > 0) {
-      setActiveVariableProduct(product);
-      setVariationModal(true);
-    } else if (product.price === 0) {
-      setActiveOpenProduct(product);
-      setCustomPriceInput('');
-      setOpenPriceModal(true);
-    } else {
-      addToCartWithPrice(product, product.price);
-    }
-  };
-
-  const handleVariationSelect = (variation) => {
+  const addToCart = (item, variation = null) => {
     const cartItem = {
-      id: activeVariableProduct.id,
-      product_id: activeVariableProduct.id,
-      variation_id: variation.id,
-      name: `${activeVariableProduct.name} - ${variation.name}`,
-      sku: variation.sku,
-      price: variation.price,
-      image: variation.image || activeVariableProduct.image,
+      uniqueId: variation ? `${item.id}-${variation.id}` : `${item.id}-single`,
+      id: item.id,
+      product_id: item.id,
+      variation_id: variation ? variation.id : 0,
+      name: variation ? `${item.name} (${variation.name})` : item.name,
+      price: variation ? variation.price : item.price,
+      sku: variation ? variation.sku : item.sku,
+      image: variation?.image || item.image
     };
-    addToCartWithPrice(cartItem, variation.price);
-    setVariationModal(false);
-    setActiveVariableProduct(null);
+    setCart([...cart, cartItem]);
   };
 
-  const addToCartWithPrice = (product, unitPrice) => {
-    const itemKey = product.variation_id ? `${product.id}-${product.variation_id}` : `${product.id}`;
-    const existingItem = cart.find(item => (item.variation_id ? `${item.id}-${item.variation_id}` : `${item.id}`) === itemKey && item.price === unitPrice);
-    
-    if (existingItem) {
-      setCart(cart.map(item => 
-        ((item.variation_id ? `${item.id}-${item.variation_id}` : `${item.id}`) === itemKey && item.price === unitPrice) 
-          ? { ...item, quantity: item.quantity + 1 } 
-          : item
-      ));
-    } else {
-      setCart([...cart, { ...product, price: unitPrice, quantity: 1 }]);
-    }
+  const removeFromCart = (index) => {
+    const newCart = [...cart];
+    newCart.splice(index, 1);
+    setCart(newCart);
   };
 
-  const confirmCustomPrice = () => {
-    const price = parseFloat(customPriceInput);
-    if (isNaN(price) || price <= 0) {
-      alert('Vul alstublieft een geldig bedrag in.');
-      return;
-    }
-    addToCartWithPrice(activeOpenProduct, price);
-    setOpenPriceModal(false);
-    setActiveOpenProduct(null);
-    setCustomPriceInput('');
-  };
+  const cartTotal = cart.reduce((sum, item) => sum + parseFloat(item.price), 0);
+  const categories = ['Alle', ...new Set(products.map(p => p.categoryName || 'Overig'))];
+  const filteredProducts = selectedCategory === 'Alle' 
+    ? products 
+    : products.filter(p => (p.categoryName || 'Overig') === selectedCategory);
 
-  const updateQuantity = (id, variationId, delta) => {
-    setCart(cart.map(item => {
-      if (item.id === id && (item.variation_id || 0) === (variationId || 0)) {
-        const newQuantity = item.quantity + delta;
-        return newQuantity > 0 ? { ...item, quantity: newQuantity } : item;
-      }
-      return item;
-    }));
-  };
+  const handleCheckout = async () => {
+    const given = parseFloat(amountGiven);
+    if (isNaN(given) || given < cartTotal) return;
 
-  const removeItem = (id, variationId) => {
-    setCart(cart.filter(item => !(item.id === id && (item.variation_id || 0) === (variationId || 0))));
-  };
-
-  const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-  
-  let discountAmount = 0;
-  if (discount.type === 'fixed') discountAmount = discount.value;
-  if (discount.type === 'percentage') discountAmount = subtotal * (discount.value / 100);
-  
-  const maxCustomerPoints = selectedCustomer ? (selectedCustomer.points_balance || 0) : 0;
-  const validPointsToUse = Math.max(0, pointsToUse);
-  const finalPointsToUse = selectedCustomer ? Math.min(validPointsToUse, maxCustomerPoints) : 0;
-  
-  const pointsDiscount = finalPointsToUse > 0 ? finalPointsToUse * pointsConversionRate : 0;
-  const total = Math.max(0, subtotal - discountAmount - pointsDiscount);
-
-  const handleCheckout = async (paymentMethod) => {
-    const orderData = { 
-      orderItems: cart, 
-      paymentMethod: paymentMethod, 
-      storeId: activeStore?.id || 'store_ons_winkeltje',
-      cashierId: currentUser?.id || 1,
-      customerId: selectedCustomer ? selectedCustomer.id : 0,
-      totals: { subtotal, discountAmount, pointsDiscount: pointsDiscount, total, pointsUsed: finalPointsToUse }
-    };
-
-    if (!isOnline) {
-      if (paymentMethod === 'sumup') {
-        alert("Pinnen via SumUp is niet mogelijk zonder internetverbinding!");
-        return;
-      }
-      await saveOfflineOrder(orderData);
-      alert(`Offline modus: Order opgeslagen via ${paymentMethod === 'manual_pin' ? 'Handmatige PIN' : 'Contant'}.`);
-      checkUnsyncedOrders();
-      resetCart();
-      return;
-    }
+    const change = given - cartTotal;
 
     try {
-      if (paymentMethod === 'sumup') {
-        setIsWaitingForPin(true);
-        const sumupRes = await axios.post('/api/sumup/checkout', {
-          totalAmount: total,
-          terminalId: 'JOUW_SUMUP_TERMINAL_ID'
-        });
+      setLoading(true);
+      const res = await fetch('/api/woocommerce/create-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cart: cart,
+          total: cartTotal,
+          amountGiven: given,
+          change: change,
+          storeName: store?.name
+        })
+      });
 
-        if (!sumupRes.data.success) {
-          throw new Error('Pintransactie mislukt.');
-        }
-        setIsWaitingForPin(false);
+      const data = await res.json();
+
+      if (data.success) {
+        setPaymentSuccess(true);
+        setTimeout(() => {
+          setCart([]);
+          setAmountGiven('');
+          setPaymentSuccess(false);
+        }, 2500);
+      } else {
+        alert('Fout bij opslaan bestelling in WooCommerce: ' + data.error);
       }
-
-      await axios.post('/api/woocommerce/order', orderData);
-      const methodName = paymentMethod === 'sumup' ? 'Pin (SumUp)' : paymentMethod === 'manual_pin' ? 'Handmatige PIN' : 'Contant';
-      alert(`Bendemen POS: Order succesvol afgerekend via ${methodName}!`);
-      resetCart();
-    } catch (error) {
-      setIsWaitingForPin(false);
-      alert('Bendemen POS: Fout bij afrekenen. Transactie afgebroken.');
+    } catch (err) {
+      console.error(err);
+      alert('Netwerkfout bij afrekenen.');
+    } finally {
+      setLoading(false);
     }
   };
-
-  const resetCart = () => {
-    setCart([]);
-    setDiscount({ type: 'none', value: 0 });
-    setPointsToUse(0);
-    setSelectedCustomer(null);
-    setCustomerSearch('');
-    setCustomerResults([]);
-  };
-
-  const handleLogout = () => {
-    localStorage.clear();
-    router.push('/login');
-  };
-
-  const groupedProducts = products.reduce((acc, product) => {
-    const cat = product.categoryName || 'Overig';
-    if (!acc[cat]) acc[cat] = [];
-    acc[cat].push(product);
-    return acc;
-  }, {});
-
-  if (!currentUser || !activeStore) return null; 
 
   return (
-    <div style={{ display: 'flex', height: '100vh', fontFamily: 'Arial', position: 'relative' }}>
+    <div style={{ background: '#FFFFFF', color: '#111111', minHeight: '100vh', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
       
-      <div style={{ flex: '2', padding: '20px', borderRight: '1px solid #ddd', overflowY: 'auto' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-          <h2>Producten</h2>
-          <div style={{ display: 'flex', gap: '10px' }}>
-            {(currentUser.role === 'administrator' || currentUser.role === 'shop_manager') && (
-              <button onClick={() => router.push('/admin')} style={{ padding: '10px', background: '#0070f3', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer' }}>
-                ⚙️ Beheer
-              </button>
-            )}
-            <button onClick={syncProducts} disabled={isSyncingProducts || !isOnline} style={{ padding: '10px', background: '#333', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer' }}>
-              {isSyncingProducts ? '🔄 Syncing...' : '🔄 Sync met WooCommerce'}
-            </button>
+      {/* Header */}
+      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px 30px', borderBottom: '1px solid #EAEAEA', background: '#FFFFFF', position: 'sticky', top: 0, zIndex: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+          <div style={{ background: '#000', color: '#FFF', padding: '6px 10px', fontWeight: '900', borderRadius: '4px', fontSize: '16px' }}>BOM</div>
+          <div>
+            <h1 style={{ margin: 0, fontSize: '16px', fontWeight: '800' }}>BENDEMEN POS</h1>
+            <span style={{ fontSize: '11px', color: '#C3110C', fontWeight: '700' }}>📍 {store.name}</span>
           </div>
         </div>
 
-        {products.length === 0 ? (
-          <p>Geen producten gevonden. Druk op Sync met WooCommerce.</p>
-        ) : (
-          Object.keys(groupedProducts).map(categoryName => (
-            <div key={categoryName} style={{ marginBottom: '30px' }}>
-              <h3 style={{ borderBottom: '2px solid #0070f3', paddingBottom: '5px', marginBottom: '15px', color: '#333', fontSize: '18px' }}>
-                {categoryName}
-              </h3>
-              
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '15px' }}>
-                {groupedProducts[categoryName].map(product => (
-                  <div 
-                    key={product.id} 
-                    onClick={() => handleProductClick(product)} 
-                    style={{ border: '1px solid #ccc', borderRadius: '8px', padding: '10px', cursor: 'pointer', textAlign: 'center', background: product.price === 0 ? '#fffbe6' : '#f9f9f9', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}
-                  >
-                    {product.image ? (
-                      <img src={product.image} alt={product.name} style={{ width: '100%', height: '100px', objectFit: 'cover', borderRadius: '5px', marginBottom: '8px' }} />
-                    ) : (
-                      <div style={{ width: '100%', height: '100px', background: '#eee', borderRadius: '5px', marginBottom: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', color: '#888' }}>Geen foto</div>
-                    )}
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          <button 
+            onClick={() => router.push('/admin')}
+            style={{ padding: '8px 16px', background: '#F0F0F0', color: '#333', border: 'none', borderRadius: '6px', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}
+          >
+            ⚙️ Admin
+          </button>
+          <button 
+            onClick={fetchProducts} 
+            disabled={loading}
+            style={{ padding: '8px 16px', background: '#000', color: '#FFFFFF', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', fontSize: '13px' }}
+          >
+            {loading ? 'Bezig...' : '🔄 Sync'}
+          </button>
+          <button 
+            onClick={() => router.push('/select-store')}
+            style={{ padding: '8px 12px', background: '#FFF', border: '1px solid #DDD', borderRadius: '6px', cursor: 'pointer', fontSize: '13px' }}
+            title="Winkel wisselen"
+          >
+            🏪
+          </button>
+        </div>
+      </header>
 
-                    <div style={{ fontWeight: 'bold', marginBottom: '5px', fontSize: '13px' }}>{product.name}</div>
-                    <div style={{ color: '#0070f3', fontWeight: 'bold' }}>
-                      {product.type === 'variable' ? 'Variaties' : product.price === 0 ? 'Vrij Bedrag' : `€${product.price.toFixed(2)}`}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))
-        )}
-      </div>
+      {errorMsg && (
+        <div style={{ margin: '15px 30px', padding: '12px', background: '#FCE8E6', color: '#C3110C', borderRadius: '8px', border: '1px solid #FAD2D1', fontWeight: '500', fontSize: '13px' }}>
+          ⚠️ {errorMsg}
+        </div>
+      )}
 
-      <div style={{ flex: '1.5', padding: '20px', display: 'flex', flexDirection: 'column', background: '#f5f5f5' }}>
+      {/* Kassa Layout */}
+      <div style={{ display: 'flex', height: 'calc(100vh - 65px)' }}>
         
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-          <h1 style={{ fontSize: '20px', margin: '0' }}>Bendemen POS {isOnline ? '🟢' : '🔴'}</h1>
+        {/* Linkerkant: Producten */}
+        <div style={{ flex: 2.5, padding: '30px', overflowY: 'auto', borderRight: '1px solid #EAEAEA' }}>
           
-          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-            {unsyncedCount > 0 && (
-              <button 
-                onClick={syncOfflineOrders}
-                disabled={isSyncingOrders || !isOnline}
-                style={{ 
-                  padding: '5px 10px', 
-                  background: isOnline ? '#ff9900' : '#ccc', 
-                  color: 'white', 
-                  border: 'none', 
-                  borderRadius: '5px', 
-                  cursor: isOnline ? 'pointer' : 'not-allowed',
-                  fontSize: '12px',
-                  fontWeight: 'bold'
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '25px', overflowX: 'auto', paddingBottom: '5px' }}>
+            {categories.map(cat => (
+              <button
+                key={cat}
+                onClick={() => setSelectedCategory(cat)}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: '20px',
+                  border: selectedCategory === cat ? 'none' : '1px solid #DDDDDD',
+                  background: selectedCategory === cat ? '#C3110C' : '#FFFFFF',
+                  color: selectedCategory === cat ? '#FFFFFF' : '#333333',
+                  fontWeight: '600',
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap'
                 }}
               >
-                {isSyncingOrders ? '⏳ Syncen...' : `⚠️ ${unsyncedCount} orders offline`}
+                {cat}
               </button>
+            ))}
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))', gap: '15px' }}>
+            {filteredProducts.map(p => (
+              <div 
+                key={p.id} 
+                style={{ 
+                  background: '#FAFAFA', 
+                  border: '1px solid #EBEBEB', 
+                  borderRadius: '10px', 
+                  padding: '15px', 
+                  display: 'flex', 
+                  flexDirection: 'column', 
+                  justifyContent: 'space-between'
+                }}
+              >
+                <div>
+                  {p.image ? (
+                    <img src={p.image} alt={p.name} style={{ width: '100%', height: '110px', objectFit: 'cover', borderRadius: '6px', marginBottom: '10px', background: '#EEE' }} />
+                  ) : (
+                    <div style={{ width: '100%', height: '110px', background: '#EEE', borderRadius: '6px', marginBottom: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#AAA', fontSize: '11px' }}>Geen foto</div>
+                  )}
+                  <h3 style={{ fontSize: '13px', fontWeight: '600', margin: '0 0 5px 0', color: '#111', lineHeight: '1.3' }}>{p.name}</h3>
+                  <span style={{ fontSize: '12px', color: '#666', display: 'block', marginBottom: '10px' }}>€{parseFloat(p.price).toFixed(2)}</span>
+                </div>
+
+                {p.type === 'variable' && p.variations && p.variations.length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <span style={{ fontSize: '11px', fontWeight: '700', color: '#C3110C' }}>Optie:</span>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px', maxHeight: '70px', overflowY: 'auto' }}>
+                      {p.variations.map(v => (
+                        <button
+                          key={v.id}
+                          onClick={() => addToCart(p, v)}
+                          style={{ padding: '3px 6px', fontSize: '11px', background: '#FFF', border: '1px solid #CCC', borderRadius: '4px', cursor: 'pointer' }}
+                        >
+                          {v.name} (€{v.price})
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <button 
+                    onClick={() => addToCart(p)} 
+                    style={{ width: '100%', padding: '9px', background: '#000', color: '#FFFFFF', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', fontSize: '12px', marginTop: '10px' }}
+                  >
+                    + Toevoegen
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Rechterkant: Mandje */}
+        <div style={{ flex: 1, background: '#FAFAFA', padding: '25px', display: 'flex', flexDirection: 'column', borderLeft: '1px solid #EAEAEA', minWidth: '340px' }}>
+          <h2 style={{ fontSize: '16px', fontWeight: '800', marginBottom: '15px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>Winkelmand</span>
+            <span style={{ background: '#000', color: '#FFF', fontSize: '12px', padding: '2px 8px', borderRadius: '10px' }}>{cart.length}</span>
+          </h2>
+
+          <div style={{ flex: 1, overflowY: 'auto', marginBottom: '15px' }}>
+            {cart.length === 0 ? (
+              <p style={{ color: '#888', textAlign: 'center', marginTop: '50px', fontSize: '13px' }}>Je mandje is leeg.</p>
+            ) : (
+              <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {cart.map((item, idx) => (
+                  <li key={idx} style={{ background: '#FFFFFF', padding: '10px 12px', borderRadius: '8px', border: '1px solid #EBEBEB', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ paddingRight: '10px' }}>
+                      <span style={{ fontSize: '12px', fontWeight: '600', display: 'block', color: '#111' }}>{item.name}</span>
+                      <span style={{ fontSize: '11px', color: '#C3110C', fontWeight: '700' }}>€{parseFloat(item.price).toFixed(2)}</span>
+                    </div>
+                    <button onClick={() => removeFromCart(idx)} style={{ background: 'none', border: 'none', color: '#999', cursor: 'pointer', fontSize: '16px' }}>×</button>
+                  </li>
+                ))}
+              </ul>
             )}
-
-            <button onClick={handleLogout} style={{ padding: '5px 10px', background: 'transparent', color: 'red', border: '1px solid red', borderRadius: '5px', cursor: 'pointer', fontSize: '12px' }}>
-              Uitloggen
-            </button>
           </div>
-        </div>
-        
-        <div style={{ marginBottom: '15px', fontSize: '12px', background: '#fff', padding: '10px', borderRadius: '5px', border: '1px solid #ddd' }}>
-          Locatie: <strong>{activeStore.name}</strong> | Kassa: <strong>{currentUser.name}</strong>
-        </div>
 
-        <div style={{ background: '#fff', padding: '15px', borderRadius: '8px', border: '1px solid #ddd', marginBottom: '15px' }}>
-          <label style={{ fontSize: '14px', fontWeight: 'bold', display: 'block', marginBottom: '10px' }}>Klant Koppelen</label>
-          
-          {selectedCustomer ? (
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#e6f7ff', padding: '10px', borderRadius: '5px', border: '1px solid #91d5ff' }}>
-              <div>
-                <strong>{selectedCustomer.name}</strong> <br/>
-                <span style={{ fontSize: '12px', color: '#555' }}>
-                  Huidige punten: <strong style={{ color: '#0070f3' }}>{maxCustomerPoints}</strong> 
-                  (waarde: €{(maxCustomerPoints * pointsConversionRate).toFixed(2)})
-                </span>
-              </div>
-              <button 
-                onClick={() => { setSelectedCustomer(null); setPointsToUse(0); }} 
-                style={{ padding: '5px 10px', background: 'transparent', border: '1px solid red', color: 'red', borderRadius: '3px', cursor: 'pointer' }}
-              >
-                Loskoppelen
-              </button>
+          <div style={{ borderTop: '1px solid #EAEAEA', paddingTop: '15px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px', fontSize: '16px', fontWeight: '800' }}>
+              <span>Totaal:</span>
+              <span style={{ color: '#C3110C' }}>€{cartTotal.toFixed(2)}</span>
             </div>
-          ) : (
-            <div>
-              <div style={{ display: 'flex', gap: '10px' }}>
-                <input 
-                  type="text" 
-                  placeholder="Zoek op naam of email..." 
-                  value={customerSearch}
-                  onChange={(e) => setCustomerSearch(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && searchCustomer()}
-                  style={{ flex: 1, padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}
+
+            {paymentSuccess ? (
+              <div style={{ padding: '15px', background: '#E6F4EA', color: '#137333', borderRadius: '8px', fontWeight: '700', textAlign: 'center', fontSize: '14px' }}>
+                ✅ Bestelling geplaatst & betaald!
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <input
+                  type="number"
+                  step="0.01"
+                  placeholder="Bedrag ontvangen (€)"
+                  value={amountGiven}
+                  onChange={(e) => setAmountGiven(e.target.value)}
+                  style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #DDD', fontSize: '14px', boxSizing: 'border-box' }}
                 />
+                {amountGiven !== '' && (
+                  <div style={{ fontSize: '13px', fontWeight: '700', color: parseFloat(amountGiven) >= cartTotal ? '#137333' : '#C3110C' }}>
+                    {parseFloat(amountGiven) >= cartTotal 
+                      ? `Wisselgeld: € ${(parseFloat(amountGiven) - cartTotal).toFixed(2)}`
+                      : `Tekort: € ${(cartTotal - parseFloat(amountGiven)).toFixed(2)}`
+                    }
+                  </div>
+                )}
                 <button 
-                  onClick={searchCustomer} 
-                  style={{ padding: '8px 15px', background: '#333', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                  onClick={handleCheckout} 
+                  disabled={cart.length === 0 || parseFloat(amountGiven || 0) < cartTotal || loading} 
+                  style={{ 
+                    padding: '12px', 
+                    background: (cart.length === 0 || parseFloat(amountGiven || 0) < cartTotal || loading) ? '#CCCCCC' : '#C3110C', 
+                    color: '#FFFFFF', 
+                    border: 'none', 
+                    borderRadius: '8px', 
+                    width: '100%', 
+                    cursor: 'pointer', 
+                    fontWeight: '700', 
+                    fontSize: '14px'
+                  }}
                 >
-                  {isSearching ? 'Zoeken...' : 'Zoek'}
+                  {loading ? 'Bezig met verwerken...' : 'Afrekenen & Bestelling Plaatsen'}
                 </button>
               </div>
-              
-              {customerResults.length > 0 && (
-                <ul style={{ listStyle: 'none', padding: 0, marginTop: '10px', maxHeight: '150px', overflowY: 'auto', border: '1px solid #eee', borderRadius: '4px' }}>
-                  {customerResults.map(customer => (
-                    <li 
-                      key={customer.id} 
-                      onClick={() => { setSelectedCustomer(customer); setCustomerResults([]); setCustomerSearch(''); }} 
-                      style={{ padding: '10px', borderBottom: '1px solid #eee', cursor: 'pointer', background: '#fafafa' }}
-                    >
-                      <div style={{ fontWeight: 'bold' }}>{customer.name}</div>
-                      <div style={{ fontSize: '12px', color: '#666' }}>{customer.email} | Punten: {customer.points_balance}</div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
-        </div>
-
-        <div style={{ flexGrow: 1, overflowY: 'auto', background: '#fff', padding: '15px', borderRadius: '8px', border: '1px solid #ddd', marginBottom: '15px' }}>
-          {cart.length === 0 ? <p style={{ color: '#888', textAlign: 'center' }}>Winkelmandje is leeg</p> : cart.map(item => (
-            <div key={`${item.id}-${item.variation_id || 0}-${item.price}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #eee', paddingBottom: '10px', marginBottom: '10px' }}>
-              <div style={{ flex: '1' }}>
-                <div style={{ fontWeight: 'bold' }}>{item.name}</div>
-                <div style={{ color: '#666', fontSize: '14px' }}>€{item.price.toFixed(2)} per stuk</div>
-              </div>
-              
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <button onClick={() => updateQuantity(item.id, item.variation_id, -1)} style={{ padding: '5px 10px', cursor: 'pointer' }}>-</button>
-                <span style={{ width: '20px', textAlign: 'center' }}>{item.quantity}</span>
-                <button onClick={() => updateQuantity(item.id, item.variation_id, 1)} style={{ padding: '5px 10px', cursor: 'pointer' }}>+</button>
-                <button onClick={() => removeItem(item.id, item.variation_id)} style={{ padding: '5px 10px', background: 'red', color: 'white', border: 'none', borderRadius: '3px', cursor: 'pointer' }}>X</button>
-              </div>
-              <div style={{ width: '70px', textAlign: 'right', fontWeight: 'bold' }}>
-                €{(item.price * item.quantity).toFixed(2)}
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
-          <div style={{ flex: 1, background: '#fff', padding: '10px', borderRadius: '5px', border: '1px solid #ddd' }}>
-            <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Handmatige Korting</label>
-            <div style={{ display: 'flex', gap: '5px' }}>
-              <select onChange={(e) => setDiscount({ ...discount, type: e.target.value })} value={discount.type} style={{ padding: '5px' }}>
-                <option value="none">Geen</option>
-                <option value="fixed">€</option>
-                <option value="percentage">%</option>
-              </select>
-              <input 
-                type="number" 
-                min="0"
-                value={discount.value} 
-                onChange={(e) => setDiscount({ ...discount, value: parseFloat(e.target.value) || 0 })}
-                disabled={discount.type === 'none'}
-                style={{ width: '100%', padding: '5px' }}
-              />
-            </div>
+            )}
           </div>
-          
-          <div style={{ flex: 1, background: '#fff', padding: '10px', borderRadius: '5px', border: '1px solid #ddd' }}>
-            <label style={{ fontSize: '12px', fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Punten Inwisselen</label>
-            <input 
-              type="number" 
-              min="0"
-              placeholder="Aantal punten"
-              value={pointsToUse || ''}
-              onChange={(e) => setPointsToUse(Math.max(0, parseInt(e.target.value) || 0))}
-              disabled={!selectedCustomer || maxCustomerPoints <= 0}
-              style={{ width: '100%', padding: '5px', boxSizing: 'border-box' }}
-            />
-            <div style={{ fontSize: '11px', color: '#666', marginTop: '3px' }}>
-              {!selectedCustomer 
-                ? 'Koppel eerst een klant' 
-                : `Korting: €${pointsDiscount.toFixed(2)} (Max: ${maxCustomerPoints})`}
-            </div>
-          </div>
+
         </div>
 
-        <div style={{ background: '#111', color: 'white', padding: '15px', borderRadius: '8px', marginBottom: '15px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px', fontSize: '14px' }}>
-            <span>Subtotaal:</span> <span>€{subtotal.toFixed(2)}</span>
-          </div>
-          {discountAmount > 0 && (
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px', fontSize: '14px', color: '#ffaaaa' }}>
-              <span>Korting:</span> <span>- €{discountAmount.toFixed(2)}</span>
-            </div>
-          )}
-          {pointsDiscount > 0 && (
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px', fontSize: '14px', color: '#ffaaaa' }}>
-              <span>Punten Korting ({finalPointsToUse}p):</span> <span>- €{pointsDiscount.toFixed(2)}</span>
-            </div>
-          )}
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '10px', paddingTop: '10px', borderTop: '1px solid #333', fontSize: '24px', fontWeight: 'bold' }}>
-            <span>Totaal:</span> <span>€{total.toFixed(2)}</span>
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', gap: '10px' }}>
-          <button onClick={resetCart} style={{ flex: 1, padding: '15px', background: '#fff', color: 'red', border: '1px solid red', borderRadius: '5px', cursor: 'pointer' }}>Leegmaken</button>
-          
-          <button 
-            onClick={() => handleCheckout('cash')} 
-            disabled={cart.length === 0} 
-            style={{ flex: 2, padding: '15px', background: cart.length === 0 ? '#ccc' : '#0070f3', color: 'white', border: 'none', borderRadius: '5px', fontSize: '15px', cursor: cart.length === 0 ? 'not-allowed' : 'pointer' }}
-          >
-            Contant
-          </button>
-
-          <button 
-            onClick={() => handleCheckout('manual_pin')} 
-            disabled={cart.length === 0} 
-            style={{ flex: 2, padding: '15px', background: cart.length === 0 ? '#ccc' : '#17a2b8', color: 'white', border: 'none', borderRadius: '5px', fontSize: '15px', cursor: cart.length === 0 ? 'not-allowed' : 'pointer' }}
-          >
-            Pin (Handmatig)
-          </button>
-          
-          <button 
-            onClick={() => handleCheckout('sumup')} 
-            disabled={cart.length === 0 || isWaitingForPin} 
-            style={{ flex: 2, padding: '15px', background: cart.length === 0 ? '#ccc' : '#28a745', color: 'white', border: 'none', borderRadius: '5px', fontSize: '15px', cursor: cart.length === 0 || isWaitingForPin ? 'not-allowed' : 'pointer' }}
-          >
-            {isWaitingForPin ? '⏳ Wachten...' : 'PIN (SumUp)'}
-          </button>
-        </div>
       </div>
-
-      {/* --- OPEN PRIJS MODAL SCHERM --- */}
-      {openPriceModal && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
-          <div style={{ background: '#fff', padding: '30px', borderRadius: '10px', width: '350px', boxShadow: '0 4px 15px rgba(0,0,0,0.2)', textAlign: 'center' }}>
-            <h3 style={{ margin: '0 0 10px 0', fontSize: '20px' }}>{activeOpenProduct?.name}</h3>
-            <p style={{ color: '#666', fontSize: '14px', marginBottom: '20px' }}>Voer het gewenste bedrag in voor dit product.</p>
-            
-            <input 
-              type="number" 
-              step="0.01"
-              min="0"
-              autoFocus
-              placeholder="0.00"
-              value={customPriceInput}
-              onChange={(e) => setCustomPriceInput(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && confirmCustomPrice()}
-              style={{ width: '100%', padding: '12px', fontSize: '22px', textAlign: 'center', boxSizing: 'border-box', marginBottom: '20px', border: '2px solid #0070f3', borderRadius: '6px' }}
-            />
-
-            <div style={{ display: 'flex', gap: '10px' }}>
-              <button 
-                onClick={() => setOpenPriceModal(false)}
-                style={{ flex: 1, padding: '12px', background: '#ccc', border: 'none', borderRadius: '5px', cursor: 'pointer', fontSize: '16px' }}
-              >
-                Annuleren
-              </button>
-              <button 
-                onClick={confirmCustomPrice}
-                style={{ flex: 1, padding: '12px', background: '#0070f3', color: '#fff', border: 'none', borderRadius: '5px', cursor: 'pointer', fontSize: '16px', fontWeight: 'bold' }}
-              >
-                Toevoegen
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* --- VARIATIE SELECTIE MODAL SCHERM --- */}
-      {variationModal && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
-          <div style={{ background: '#fff', padding: '30px', borderRadius: '10px', width: '400px', maxHeight: '80vh', overflowY: 'auto', boxShadow: '0 4px 15px rgba(0,0,0,0.2)', textAlign: 'center' }}>
-            <h3 style={{ margin: '0 0 10px 0', fontSize: '20px' }}>{activeVariableProduct?.name}</h3>
-            <p style={{ color: '#666', fontSize: '14px', marginBottom: '20px' }}>Selecteer de gewenste variatie:</p>
-            
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
-              {activeVariableProduct?.variations?.map(variation => (
-                <button
-                  key={variation.id}
-                  onClick={() => handleVariationSelect(variation)}
-                  style={{ padding: '12px', background: '#f9f9f9', border: '1px solid #ccc', borderRadius: '6px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '15px' }}
-                >
-                  <span style={{ textAlign: 'left' }}>{variation.name}</span>
-                  <span style={{ fontWeight: 'bold', color: '#0070f3' }}>€{variation.price.toFixed(2)}</span>
-                </button>
-              ))}
-            </div>
-
-            <button 
-              onClick={() => setVariationModal(false)}
-              style={{ width: '100%', padding: '12px', background: '#ccc', border: 'none', borderRadius: '5px', cursor: 'pointer', fontSize: '16px' }}
-            >
-              Annuleren
-            </button>
-          </div>
-        </div>
-      )}
-
     </div>
   );
 }
