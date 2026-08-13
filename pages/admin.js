@@ -24,11 +24,11 @@ export default function AdminDashboard() {
 
   const loadAdminData = async () => {
     try {
-      // Haal winkels op via WordPress endpoint
-      const res = await axios.get(`https://${window.location.hostname}/wp-json/bendemen/v1/stores`);
+      // Haal winkels op via onze eigen Next.js API route
+      const res = await axios.get('/api/admin/stores');
       setStores(res.data);
     } catch (err) {
-      console.error(err);
+      console.error("Fout bij laden winkels:", err);
     }
   };
 
