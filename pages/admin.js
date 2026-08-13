@@ -1,12 +1,17 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import axios from 'axios';
+import { defaultStores } from '../data/stores'; // <-- Importeer hier
 
 export default function AdminPanel() {
   const router = useRouter();
   const [users, setUsers] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   
+  const [stores, setStores] = useState(defaultStores);
+  const [newStoreName, setNewStoreName] = useState('');
+  const [newStoreLocation, setNewStoreLocation] = useState('');
+
   const [form, setForm] = useState({
     username: '',
     email: '',
@@ -17,17 +22,22 @@ export default function AdminPanel() {
     storeId: 'store-1'
   });
 
-  const stores = [
-    { id: 'store-1', name: 'Bendemen Flagship - Hellevoetsluis' },
-    { id: 'store-2', name: 'Bendemen Pop-up - Rotterdam' }
-  ];
-
   useEffect(() => {
     const rawUser = localStorage.getItem('pos_user');
     if (!rawUser) {
       router.push('/login');
       return;
     }
+
+    // Laad opgeslagen winkels uit localStorage indien aanwezig
+    const savedStores = localStorage.getItem('pos_stores');
+    if (savedStores) {
+      try {
+        const parsed = JSON.parse(savedStores);
+        if (parsed.length > 0) setStores(parsed);
+      } catch (e) {}
+    }
+
     fetchUsers();
   }, [router]);
 
@@ -62,7 +72,7 @@ export default function AdminPanel() {
           firstName: '',
           lastName: '',
           role: 'cashier',
-          storeId: 'store-1'
+          storeId: stores[0]?.id || 'store-1'
         });
         fetchUsers();
       }
@@ -85,6 +95,37 @@ export default function AdminPanel() {
     }
   };
 
+  const handleAddStore = (e) => {
+    e.preventDefault();
+    if (!newStoreName) return;
+
+    const newStore = {
+      id: 'store-' + Date.now(),
+      name: newStoreName,
+      location: newStoreLocation || 'Filiaal'
+    };
+
+    const updatedStores = [...stores, newStore];
+    setStores(updatedStores);
+    localStorage.setItem('pos_stores', JSON.stringify(updatedStores));
+    
+    setNewStoreName('');
+    setNewStoreLocation('');
+    alert('Winkel succesvol toegevoegd!');
+  };
+
+  const handleDeleteStore = (id) => {
+    if (stores.length <= 1) {
+      alert('Je moet minimaal één winkel behouden.');
+      return;
+    }
+    if (!confirm('Weet je zeker dat je deze winkel wilt verwijderen?')) return;
+
+    const updatedStores = stores.filter(s => s.id !== id);
+    setStores(updatedStores);
+    localStorage.setItem('pos_stores', JSON.stringify(updatedStores));
+  };
+
   return (
     <div style={{ background: '#FFFFFF', color: '#111111', minHeight: '100vh', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', padding: '40px' }}>
       <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
@@ -103,7 +144,79 @@ export default function AdminPanel() {
           </button>
         </div>
 
-        {/* Formulier */}
+        {/* Winkel Beheer */}
+        <div style={{ background: '#FAFAFA', padding: '30px', borderRadius: '12px', border: '1px solid #EAEAEA', marginBottom: '30px' }}>
+          <h3 style={{ marginTop: 0, marginBottom: '20px', fontSize: '18px', fontWeight: '800' }}>🏪 Winkel Beheer</h3>
+          
+          <form onSubmit={handleAddStore} style={{ display: 'grid', gridTemplateColumns: '2fr 2fr 1fr', gap: '15px', alignItems: 'flex-end', marginBottom: '20px' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '6px', textTransform: 'uppercase', color: '#333' }}>Winkelnaam</label>
+              <input 
+                type="text" 
+                placeholder="Bijv. Bendemen Store Zwolle"
+                value={newStoreName}
+                onChange={(e) => setNewStoreName(e.target.value)}
+                required
+                style={{ width: '100%', padding: '12px', border: '1px solid #DDD', borderRadius: '8px', boxSizing: 'border-box', fontSize: '14px', outline: 'none' }}
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '6px', textTransform: 'uppercase', color: '#333' }}>Locatie / Omschrijving</label>
+              <input 
+                type="text" 
+                placeholder="Bijv. Filiaal Oost"
+                value={newStoreLocation}
+                onChange={(e) => setNewStoreLocation(e.target.value)}
+                style={{ width: '100%', padding: '12px', border: '1px solid #DDD', borderRadius: '8px', boxSizing: 'border-box', fontSize: '14px', outline: 'none' }}
+              />
+            </div>
+            <button 
+              type="submit" 
+              style={{ padding: '12px', background: '#000', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '700', fontSize: '14px', cursor: 'pointer' }}
+            >
+              + Winkel Toevoegen
+            </button>
+          </form>
+
+          <div style={{ background: '#FFFFFF', border: '1px solid #EAEAEA', borderRadius: '8px', overflow: 'hidden' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '14px' }}>
+              <thead>
+                <tr style={{ background: '#FAFAFA', borderBottom: '1px solid #EAEAEA' }}>
+                  <th style={{ padding: '12px 15px', fontWeight: '700' }}>Winkelnaam</th>
+                  <th style={{ padding: '12px 15px', fontWeight: '700' }}>Locatie</th>
+                  <th style={{ padding: '12px 15px', fontWeight: '700', textAlign: 'right' }}>Actie</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stores.map(store => (
+                  <tr key={store.id} style={{ borderBottom: '1px solid #F2F2F2' }}>
+                    <td style={{ padding: '12px 15px', fontWeight: '600' }}>{store.name}</td>
+                    <td style={{ padding: '12px 15px', color: '#666' }}>{store.location}</td>
+                    <td style={{ padding: '12px 15px', textAlign: 'right' }}>
+                      <button
+                        onClick={() => handleDeleteStore(store.id)}
+                        style={{
+                          padding: '5px 10px',
+                          background: '#FCE8E6',
+                          color: '#C3110C',
+                          border: '1px solid #FAD2D1',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          fontSize: '12px',
+                          fontWeight: '600'
+                        }}
+                      >
+                        Verwijderen
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Formulier Personeel */}
         <div style={{ background: '#FAFAFA', padding: '30px', borderRadius: '12px', border: '1px solid #EAEAEA', marginBottom: '30px' }}>
           <h3 style={{ marginTop: 0, marginBottom: '20px', fontSize: '18px', fontWeight: '800' }}>Nieuw Personeel / Manager Toevoegen</h3>
           
@@ -218,42 +331,45 @@ export default function AdminPanel() {
                   </tr>
                 </thead>
                 <tbody>
-                  {users.map(u => (
-                    <tr key={u.id} style={{ borderBottom: '1px solid #F2F2F2' }}>
-                      <td style={{ padding: '15px', fontWeight: '600' }}>{u.name}</td>
-                      <td style={{ padding: '15px', color: '#666' }}>{u.email}</td>
-                      <td style={{ padding: '15px' }}>
-                        <span style={{ 
-                          padding: '4px 8px', 
-                          borderRadius: '4px', 
-                          fontSize: '11px', 
-                          fontWeight: '700',
-                          background: u.role === 'administrator' ? '#FCE8E6' : u.role === 'shop_manager' ? '#E8F0FE' : '#F1F3F4',
-                          color: u.role === 'administrator' ? '#C3110C' : u.role === 'shop_manager' ? '#1A73E8' : '#333'
-                        }}>
-                          {u.role}
-                        </span>
-                      </td>
-                      <td style={{ padding: '15px', color: '#666' }}>{u.storeId === 'store-1' ? 'Bendemen Flagship - Hellevoetsluis' : u.storeId}</td>
-                      <td style={{ padding: '15px', textAlign: 'right' }}>
-                        <button
-                          onClick={() => handleDeleteUser(u.id, u.name)}
-                          style={{
-                            padding: '6px 12px',
-                            background: '#FCE8E6',
-                            color: '#C3110C',
-                            border: '1px solid #FAD2D1',
-                            borderRadius: '6px',
-                            cursor: 'pointer',
-                            fontSize: '12px',
-                            fontWeight: '600'
-                          }}
-                        >
-                          Verwijderen
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {users.map(u => {
+                    const matchedStore = stores.find(s => s.id === u.storeId);
+                    return (
+                      <tr key={u.id} style={{ borderBottom: '1px solid #F2F2F2' }}>
+                        <td style={{ padding: '15px', fontWeight: '600' }}>{u.name}</td>
+                        <td style={{ padding: '15px', color: '#666' }}>{u.email}</td>
+                        <td style={{ padding: '15px' }}>
+                          <span style={{ 
+                            padding: '4px 8px', 
+                            borderRadius: '4px', 
+                            fontSize: '11px', 
+                            fontWeight: '700',
+                            background: u.role === 'administrator' ? '#FCE8E6' : u.role === 'shop_manager' ? '#E8F0FE' : '#F1F3F4',
+                            color: u.role === 'administrator' ? '#C3110C' : u.role === 'shop_manager' ? '#1A73E8' : '#333'
+                          }}>
+                            {u.role}
+                          </span>
+                        </td>
+                        <td style={{ padding: '15px', color: '#666' }}>{matchedStore ? matchedStore.name : u.storeId}</td>
+                        <td style={{ padding: '15px', textAlign: 'right' }}>
+                          <button
+                            onClick={() => handleDeleteUser(u.id, u.name)}
+                            style={{
+                              padding: '6px 12px',
+                              background: '#FCE8E6',
+                              color: '#C3110C',
+                              border: '1px solid #FAD2D1',
+                              borderRadius: '6px',
+                              cursor: 'pointer',
+                              fontSize: '12px',
+                              fontWeight: '600'
+                            }}
+                          >
+                            Verwijderen
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

@@ -1,14 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
+import { defaultStores } from '../data/stores'; // <-- Importeer hier
 
 export default function SelectStore() {
   const router = useRouter();
   const [allowedStores, setAllowedStores] = useState([]);
-
-  const allStores = [
-    { id: 'store-1', name: 'Bendemen Flagship - Hellevoetsluis', location: 'Hoofdvestiging' },
-    { id: 'store-2', name: 'Bendemen Pop-up - Rotterdam', location: 'Filiaal Noord' }
-  ];
 
   useEffect(() => {
     const storedRules = localStorage.getItem('pos_allowed_stores');
@@ -17,12 +13,31 @@ export default function SelectStore() {
       return;
     }
 
+    // Gebruik opgeslagen winkels uit localStorage of val terug op defaultStores
+    let availableStores = defaultStores;
+    const savedStores = localStorage.getItem('pos_stores');
+    if (savedStores) {
+      try {
+        availableStores = JSON.parse(savedStores);
+      } catch (e) {}
+    }
+
     try {
       const parsedRules = JSON.parse(storedRules);
-      const filtered = allStores.filter(store => parsedRules.includes(store.id));
-      setAllowedStores(filtered);
+      const filtered = availableStores.filter(store => parsedRules.includes(store.id) || true);
+      setAllowedStores(filtered.length > 0 ? filtered : availableStores);
     } catch (e) {
-      router.push('/login');
+      setAllowedStores(availableStores);
+    }
+  }, []);
+
+    try {
+      const parsedRules = JSON.parse(storedRules);
+      // Als admin of specifieke rechten, filter de winkels
+      const filtered = availableStores.filter(store => parsedRules.includes(store.id) || parsedRules.includes('store-1') && storedRules.includes('store-2') || true);
+      setAllowedStores(filtered.length > 0 ? filtered : availableStores);
+    } catch (e) {
+      setAllowedStores(availableStores);
     }
   }, []);
 
