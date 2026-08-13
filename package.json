@@ -12,10 +12,12 @@
     "@woocommerce/woocommerce-rest-api": "^1.0.1",
     "axios": "^1.7.9",
     "dexie": "^4.0.8",
+    "mysql2": "^3.9.2",
     "next": "^14.2.5",
     "next-pwa": "^5.6.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "swr": "^2.2.5"
   },
   "devDependencies": {
     "eslint": "^8",
