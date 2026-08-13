@@ -7,6 +7,7 @@ const fetcher = (url) => axios.get(url).then((res) => res.data);
 
 export default function CashRegister() {
   const router = useRouter();
+  const [mounted, setMounted] = useState(false);
   const [user, setUser] = useState(null);
   const [store, setStore] = useState(null);
   const [cart, setCart] = useState([]);
@@ -16,6 +17,7 @@ export default function CashRegister() {
   const products = productsData?.products || [];
 
   useEffect(() => {
+    setMounted(true);
     const rawUser = localStorage.getItem('pos_user');
     if (!rawUser) {
       router.push('/login');
@@ -35,6 +37,9 @@ export default function CashRegister() {
       router.push('/select-store');
     }
   }, [router]);
+
+  // Voorkom hydration mismatch door niets te tonen tot de client is geladen
+  if (!mounted) return null;
 
   const addToCart = (product) => {
     setCart((prev) => {
