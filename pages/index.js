@@ -8,37 +8,30 @@ import { useOfflineSync } from '../hooks/useOfflineSync';
 export default function BendemenPOS() {
   const router = useRouter();
   
-  // --- SYNC MANAGER HOOK ---
   const { isSyncingOrders, unsyncedCount, syncOfflineOrders, checkUnsyncedOrders } = useOfflineSync();
 
-  // --- STATE ---
   const [cart, setCart] = useState([]);
   const [products, setProducts] = useState([]);
   const [isOnline, setIsOnline] = useState(true);
   const [isSyncingProducts, setIsSyncingProducts] = useState(false);
   const [isWaitingForPin, setIsWaitingForPin] = useState(false);
   
-  // Open Prijs / Bedrag Scherm State
   const [openPriceModal, setOpenPriceModal] = useState(false);
   const [activeOpenProduct, setActiveOpenProduct] = useState(null);
   const [customPriceInput, setCustomPriceInput] = useState('');
 
-  // Authenticatie state
   const [currentUser, setCurrentUser] = useState(null);
   const [activeStore, setActiveStore] = useState(null);
 
-  // Korting en Punten state (100 punten = €5,00 -> conversie = 0.05)
   const [discount, setDiscount] = useState({ type: 'none', value: 0 }); 
   const [pointsToUse, setPointsToUse] = useState(0);
   const pointsConversionRate = 0.05; 
 
-  // Klant state
   const [customerSearch, setCustomerSearch] = useState('');
   const [customerResults, setCustomerResults] = useState([]);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [isSearching, setIsSearching] = useState(false);
 
-  // --- LIFECYCLE ---
   useEffect(() => {
     const token = localStorage.getItem('pos_token');
     if (!token) {
@@ -55,7 +48,6 @@ export default function BendemenPOS() {
     loadLocalProducts();
   }, [router]);
 
-  // --- PRODUCTEN ---
   const loadLocalProducts = async () => {
     const localProducts = await db.products.toArray();
     setProducts(localProducts);
@@ -69,21 +61,21 @@ export default function BendemenPOS() {
     
     setIsSyncingProducts(true);
     try {
-      const response = await axios.get('/api/woocommerce/products');
+      const response = await axios.get(`/api/woocommerce/products?storeId=${activeStore.id}`);
       if (response.data.success) {
         await db.products.clear();
         await db.products.bulkAdd(response.data.products);
         setProducts(response.data.products);
-        alert('Producten succesvol gesynchroniseerd!');
+        alert(`Producten voor ${activeStore.name} succesvol gesynchroniseerd!`);
       }
     } catch (error) {
-      alert('Fout bij synchroniseren van producten.');
+      const errorMsg = error.response?.data?.error || 'Fout bij synchroniseren van producten.';
+      alert(errorMsg);
     } finally {
       setIsSyncingProducts(false);
     }
   };
 
-  // --- KLANTEN ZOEKEN ---
   const searchCustomer = async () => {
     if (!isOnline) {
       alert("Je bent offline, je kunt nu geen klanten zoeken in WooCommerce.");
@@ -101,9 +93,7 @@ export default function BendemenPOS() {
     }
   };
 
-  // --- WINKELWAGEN LOGICA & OPEN PRIJS ---
   const handleProductClick = (product) => {
-    // Als de prijs 0 is in WooCommerce, beschouwen we dit als een Open Prijs / Bedrag product
     if (product.price === 0) {
       setActiveOpenProduct(product);
       setCustomPriceInput('');
@@ -150,7 +140,6 @@ export default function BendemenPOS() {
     setCart(cart.filter(item => item.id !== id));
   };
 
-  // --- BEREKENINGEN ---
   const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
   
   let discountAmount = 0;
@@ -160,7 +149,6 @@ export default function BendemenPOS() {
   const pointsDiscount = pointsToUse * pointsConversionRate;
   const total = Math.max(0, subtotal - discountAmount - pointsDiscount);
 
-  // --- AFREKENEN & RESET ---
   const handleCheckout = async (isPin = false) => {
     const orderData = { 
       orderItems: cart, 
@@ -227,11 +215,18 @@ export default function BendemenPOS() {
       
       {/* LINKER KANT: Producten */}
       <div style={{ flex: '2', padding: '20px', borderRight: '1px solid #ddd', overflowY: 'auto' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
           <h2>Producten</h2>
-          <button onClick={syncProducts} disabled={isSyncingProducts || !isOnline} style={{ padding: '10px', background: '#333', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer' }}>
-            {isSyncingProducts ? '🔄 Syncing...' : '🔄 Sync met WooCommerce'}
-          </button>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            {(currentUser.role === 'administrator' || currentUser.role === 'shop_manager') && (
+              <button onClick={() => router.push('/admin')} style={{ padding: '10px', background: '#0070f3', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer' }}>
+                ⚙️ Beheer
+              </button>
+            )}
+            <button onClick={syncProducts} disabled={isSyncingProducts || !isOnline} style={{ padding: '10px', background: '#333', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer' }}>
+              {isSyncingProducts ? '🔄 Syncing...' : '🔄 Sync met WooCommerce'}
+            </button>
+          </div>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '15px' }}>
@@ -249,7 +244,6 @@ export default function BendemenPOS() {
       {/* RECHTER KANT: Winkelwagen Geavanceerd */}
       <div style={{ flex: '1.5', padding: '20px', display: 'flex', flexDirection: 'column', background: '#f5f5f5' }}>
         
-        {/* Header Rechterkant inclusief Sync Indicator */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
           <h1 style={{ fontSize: '20px', margin: '0' }}>Bendemen POS {isOnline ? '🟢' : '🔴'}</h1>
           

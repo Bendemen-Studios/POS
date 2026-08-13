@@ -7,8 +7,8 @@ export default function AdminDashboard() {
   const router = useRouter();
   const [currentUser, setCurrentUser] = useState(null);
   const [stores, setStores] = useState([]);
-  const [staff, setStaff] = useState([]);
   const [newStoreName, setNewStoreName] = useState('');
+  const [newCategoryName, setNewCategoryName] = useState('');
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -24,10 +24,9 @@ export default function AdminDashboard() {
 
   const loadAdminData = async () => {
     try {
-      // Omdat we inloggen via WP, kunnen we direct admin requests afvuren of via een Next.js API route.
-      // Voor het gemak halen we het hier op.
-      const storesRes = await axios.get(`${process.env.NEXT_PUBLIC_WOO_SITE_URL || ''}/wp-json/bendemen/v1/stores`);
-      setStores(storesRes.data);
+      // Haal winkels op via WordPress endpoint
+      const res = await axios.get(`https://${window.location.hostname}/wp-json/bendemen/v1/stores`);
+      setStores(res.data);
     } catch (err) {
       console.error(err);
     }
@@ -38,10 +37,14 @@ export default function AdminDashboard() {
     if (!newStoreName) return;
     setLoading(true);
     try {
-      const res = await axios.post('/api/admin/store', { name: newStoreName });
+      const res = await axios.post('/api/admin/store', { 
+        name: newStoreName, 
+        category_name: newCategoryName 
+      });
       if (res.data.success) {
         setStores(res.data.stores);
         setNewStoreName('');
+        setNewCategoryName('');
         alert('Winkel succesvol aangemaakt!');
       }
     } catch (err) {
@@ -62,14 +65,21 @@ export default function AdminDashboard() {
       {/* Winkel Toevoegen */}
       <div style={{ background: '#f9f9f9', padding: '20px', borderRadius: '8px', border: '1px solid #ddd', marginBottom: '30px' }}>
         <h2>Nieuwe Winkel Aanmaken</h2>
-        <form onSubmit={handleCreateStore} style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+        <form onSubmit={handleCreateStore} style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '10px' }}>
           <input 
             type="text" 
             placeholder="Winkelnaam (bijv. Bendemen Amsterdam)" 
             value={newStoreName}
             onChange={(e) => setNewStoreName(e.target.value)}
-            style={{ flex: 1, padding: '10px', fontSize: '16px' }}
+            style={{ padding: '10px', fontSize: '16px' }}
             required
+          />
+          <input 
+            type="text" 
+            placeholder="WooCommerce Categorie Naam (bijv. POS Amsterdam, leeg = automatisch)" 
+            value={newCategoryName}
+            onChange={(e) => setNewCategoryName(e.target.value)}
+            style={{ padding: '10px', fontSize: '16px' }}
           />
           <button type="submit" disabled={loading} style={{ padding: '10px 20px', background: '#0070f3', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
             {loading ? 'Bezig...' : 'Winkel Toevoegen'}
@@ -79,11 +89,11 @@ export default function AdminDashboard() {
 
       {/* Bestaande Winkels Overzicht */}
       <div style={{ background: '#f9f9f9', padding: '20px', borderRadius: '8px', border: '1px solid #ddd' }}>
-        <h2>Actieve Winkels</h2>
+        <h2>Actieve Winkels & Categorieën</h2>
         <ul style={{ marginTop: '10px', paddingLeft: '20px' }}>
           {stores.map(store => (
             <li key={store.id} style={{ padding: '8px 0', fontSize: '16px' }}>
-              <strong>{store.name}</strong> <span style={{ color: '#666', fontSize: '14px' }}>({store.id})</span>
+              <strong>{store.name}</strong> — Categorie: <span style={{ color: '#0070f3' }}>{store.category_name}</span> <span style={{ color: '#666', fontSize: '14px' }}>({store.id})</span>
             </li>
           ))}
         </ul>
