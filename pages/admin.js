@@ -7,7 +7,6 @@ import { fetcher } from '../lib/fetcher';
 export default function AdminPanel() {
   const router = useRouter();
   
-  // SWR hooks voor bliksemsnelle data en automatische caching
   const { data: usersData, mutate: mutateUsers } = useSWR('/api/admin/users', fetcher, { revalidateOnFocus: false });
   const { data: storesData, mutate: mutateStores } = useSWR('/api/stores', fetcher, { revalidateOnFocus: false });
 
@@ -17,6 +16,13 @@ export default function AdminPanel() {
 
   const [newStoreName, setNewStoreName] = useState('');
   const [newStoreLocation, setNewStoreLocation] = useState('');
+
+  // State voor SumUp pairing
+  const [sumupForm, setSumupForm] = useState({
+    storeId: '',
+    pairingCode: '',
+    readerName: ''
+  });
 
   const [form, setForm] = useState({
     username: '',
@@ -36,10 +42,10 @@ export default function AdminPanel() {
     }
   }, [router]);
 
-  // Update standaard storeId zodra winkels geladen zijn
   useEffect(() => {
-    if (stores.length > 0 && !form.storeId) {
-      setForm(f => ({ ...f, storeId: stores[0].id }));
+    if (stores.length > 0) {
+      if (!form.storeId) setForm(f => ({ ...f, storeId: stores[0].id }));
+      if (!sumupForm.storeId) setSumupForm(s => ({ ...s, storeId: stores[0].id }));
     }
   }, [stores]);
 
@@ -55,7 +61,7 @@ export default function AdminPanel() {
       if (res.data.success) {
         setNewStoreName('');
         setNewStoreLocation('');
-        mutateStores(); // Ververst de winkelcache direct op het scherm
+        mutateStores();
         alert('Winkel succesvol toegevoegd!');
       }
     } catch (error) {
@@ -78,6 +84,25 @@ export default function AdminPanel() {
       }
     } catch (error) {
       alert(error.response?.data?.error || 'Fout bij verwijderen van winkel.');
+    }
+  };
+
+  const handlePairSumUp = async (e) => {
+    e.preventDefault();
+    if (!sumupForm.pairingCode) {
+      alert('Vul de pairing code van het pinapparaat in.');
+      return;
+    }
+
+    try {
+      const res = await axios.post('/api/admin/sumup-pair', sumupForm);
+      if (res.data.success) {
+        alert('Pinapparaat succesvol gekoppeld aan de winkel!');
+        setSumupForm({ storeId: stores[0]?.id || '', pairingCode: '', readerName: '' });
+        mutateStores();
+      }
+    } catch (error) {
+      alert(error.response?.data?.error || 'Fout bij koppelen van SumUp.');
     }
   };
 
@@ -180,6 +205,7 @@ export default function AdminPanel() {
                 <tr style={{ background: '#FAFAFA', borderBottom: '1px solid #EAEAEA' }}>
                   <th style={{ padding: '12px 15px', fontWeight: '700' }}>Winkelnaam</th>
                   <th style={{ padding: '12px 15px', fontWeight: '700' }}>Locatie</th>
+                  <th style={{ padding: '12px 15px', fontWeight: '700' }}>SumUp Reader / Status</th>
                   <th style={{ padding: '12px 15px', fontWeight: '700', textAlign: 'right' }}>Actie</th>
                 </tr>
               </thead>
@@ -188,6 +214,9 @@ export default function AdminPanel() {
                   <tr key={store.id} style={{ borderBottom: '1px solid #F2F2F2' }}>
                     <td style={{ padding: '12px 15px', fontWeight: '600' }}>{store.name}</td>
                     <td style={{ padding: '12px 15px', color: '#666' }}>{store.location}</td>
+                    <td style={{ padding: '12px 15px', color: store.sumup_reader_id ? '#0d904f' : '#888', fontWeight: '600' }}>
+                      {store.sumup_reader_id ? `Gekoppeld (${store.sumup_reader_id})` : 'Niet gekoppeld'}
+                    </td>
                     <td style={{ padding: '12px 15px', textAlign: 'right' }}>
                       <button
                         onClick={() => handleDeleteStore(store.id, store.name)}
@@ -210,6 +239,46 @@ export default function AdminPanel() {
               </tbody>
             </table>
           </div>
+        </div>
+
+        {/* SumUp Pinapparaat Koppelen */}
+        <div style={{ background: '#FAFAFA', padding: '30px', borderRadius: '12px', border: '1px solid #EAEAEA', marginBottom: '30px' }}>
+          <h3 style={{ marginTop: 0, marginBottom: '20px', fontSize: '18px', fontWeight: '800' }}>💳 SumUp Pinapparaat Koppelen</h3>
+          <p style={{ fontSize: '13px', color: '#666', marginBottom: '20px' }}>
+            Zet je SumUp lezer in de API-modus om een pairing code te genereren, selecteer de winkel en vul de code hieronder in.
+          </p>
+
+          <form onSubmit={handlePairSumUp} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px', alignItems: 'flex-end' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '6px', textTransform: 'uppercase', color: '#333' }}>Kies Winkel</label>
+              <select 
+                value={sumupForm.storeId}
+                onChange={(e) => setSumupForm({ ...sumupForm, storeId: e.target.value })}
+                style={{ width: '100%', padding: '12px', border: '1px solid #DDD', borderRadius: '8px', boxSizing: 'border-box', background: '#fff', fontSize: '14px', outline: 'none' }}
+              >
+                {stores.map(store => (
+                  <option key={store.id} value={store.id}>{store.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '6px', textTransform: 'uppercase', color: '#333' }}>Pairing Code</label>
+              <input 
+                type="text" 
+                placeholder="Bijv. ABC123XYZ"
+                value={sumupForm.pairingCode}
+                onChange={(e) => setSumupForm({ ...sumupForm, pairingCode: e.target.value })}
+                required
+                style={{ width: '100%', padding: '12px', border: '1px solid #DDD', borderRadius: '8px', boxSizing: 'border-box', fontSize: '14px', outline: 'none' }}
+              />
+            </div>
+            <button 
+              type="submit" 
+              style={{ padding: '12px', background: '#000', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '700', fontSize: '14px', cursor: 'pointer' }}
+            >
+              Pinapparaat Koppelen
+            </button>
+          </form>
         </div>
 
         {/* Formulier Personeel */}

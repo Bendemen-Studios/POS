@@ -42,8 +42,6 @@ export default function SelectStore() {
       location: store.location || 'Hoofdvestiging'
     };
     localStorage.setItem('selectedStore', JSON.stringify(storeData));
-    
-    // Harde navigatie zodat de app direct doorlaadt naar de kassa
     window.location.href = '/';
   };
 
@@ -57,17 +55,30 @@ export default function SelectStore() {
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
           {stores.map(store => (
-            <div 
+            <button 
               key={store.id || store.name}
               onClick={() => selectStore(store)}
-              style={{ padding: '20px', background: '#FFFFFF', border: '1px solid #E0E0E0', borderRadius: '12px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', transition: 'border-color 0.2s' }}
+              type="button"
+              style={{ 
+                width: '100%',
+                padding: '20px', 
+                background: '#FFFFFF', 
+                border: '1px solid #E0E0E0', 
+                borderRadius: '12px', 
+                cursor: 'pointer', 
+                display: 'flex', 
+                justifyContent: 'space-between', 
+                alignItems: 'center', 
+                textAlign: 'left',
+                transition: 'border-color 0.2s' 
+              }}
             >
               <div>
                 <h3 style={{ margin: '0 0 5px 0', fontSize: '16px', fontWeight: '700', color: '#111' }}>{store.name}</h3>
                 <span style={{ fontSize: '12px', color: '#666' }}>{store.location}</span>
               </div>
               <span style={{ fontSize: '18px', fontWeight: 'bold', color: '#C3110C' }}>→</span>
-            </div>
+            </button>
           ))}
         </div>
         
@@ -76,6 +87,7 @@ export default function SelectStore() {
             localStorage.clear();
             window.location.href = '/login';
           }}
+          type="button"
           style={{ marginTop: '25px', background: 'none', border: 'none', color: '#888', cursor: 'pointer', fontSize: '13px', width: '100%', textAlign: 'center' }}
         >
           ← Uitloggen / Ander account
