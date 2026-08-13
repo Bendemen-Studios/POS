@@ -1,4 +1,3 @@
-// pages/admin.js
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import axios from 'axios';
@@ -15,22 +14,20 @@ export default function AdminPanel() {
     firstName: '',
     lastName: '',
     role: 'cashier',
-    storeId: 'store_ons_winkeltje'
+    storeId: 'store-1'
   });
 
   const stores = [
-    { id: 'store_ons_winkeltje', name: 'Ons Winkeltje' },
+    { id: 'store-1', name: 'Bendemen Flagship - Hellevoetsluis' },
+    { id: 'store-2', name: 'Bendemen Pop-up - Rotterdam' }
   ];
 
   useEffect(() => {
-    const token = localStorage.getItem('pos_token');
-    const user = JSON.parse(localStorage.getItem('pos_user') || '{}');
-
-    if (!token || (user.role !== 'administrator' && user.role !== 'shop_manager')) {
-      router.push('/');
+    const rawUser = localStorage.getItem('pos_user');
+    if (!rawUser) {
+      router.push('/login');
       return;
     }
-
     fetchUsers();
   }, [router]);
 
@@ -38,10 +35,10 @@ export default function AdminPanel() {
     try {
       const res = await axios.get('/api/admin/users');
       if (res.data.success) {
-        setUsers(res.data.users);
+        setUsers(res.data.users || []);
       }
     } catch (error) {
-      alert('Fout bij ophalen van personeelslijst.');
+      console.error(error);
     } finally {
       setIsLoading(false);
     }
@@ -50,8 +47,8 @@ export default function AdminPanel() {
   const handleCreateUser = async (e) => {
     e.preventDefault();
     if (!form.username || !form.email || !form.password) {
-        alert('Vul minimaal gebruikersnaam, e-mail en wachtwoord in.');
-        return;
+      alert('Vul minimaal gebruikersnaam, e-mail en wachtwoord in.');
+      return;
     }
 
     try {
@@ -65,7 +62,7 @@ export default function AdminPanel() {
           firstName: '',
           lastName: '',
           role: 'cashier',
-          storeId: 'store_ons_winkeltje'
+          storeId: 'store-1'
         });
         fetchUsers();
       }
@@ -89,168 +86,180 @@ export default function AdminPanel() {
   };
 
   return (
-    <div style={{ padding: '30px', fontFamily: 'Arial', maxWidth: '1000px', margin: '0 auto' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' }}>
-        <h1>⚙️ Bendemen POS - Beheer</h1>
-        <button 
-          onClick={() => router.push('/')}
-          style={{ padding: '10px 15px', background: '#333', color: '#fff', border: 'none', borderRadius: '5px', cursor: 'pointer' }}
-        >
-          ← Terug naar Kassa
-        </button>
-      </div>
-
-      {/* Formulier */}
-      <div style={{ background: '#fff', padding: '20px', borderRadius: '8px', border: '1px solid #ddd', marginBottom: '30px', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
-        <h3 style={{ marginTop: 0, marginBottom: '15px' }}>Nieuw Personeel / Manager Toevoegen</h3>
+    <div style={{ background: '#FFFFFF', color: '#111111', minHeight: '100vh', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', padding: '40px' }}>
+      <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
         
-        <form onSubmit={handleCreateUser} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
-          <div>
-            <label style={{ display: 'block', fontSize: '13px', fontWeight: 'bold', marginBottom: '5px' }}>Gebruikersnaam</label>
-            <input 
-              type="text" 
-              value={form.username}
-              onChange={(e) => setForm({ ...form, username: e.target.value })}
-              required
-              style={{ width: '100%', padding: '8px', border: '1px solid #ccc', borderRadius: '4px', boxSizing: 'border-box' }}
-            />
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px', borderBottom: '1px solid #EAEAEA', paddingBottom: '20px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+            <div style={{ background: '#000', color: '#FFF', padding: '6px 10px', fontWeight: '900', borderRadius: '4px', fontSize: '16px' }}>BDM</div>
+            <h1 style={{ margin: 0, fontSize: '20px', fontWeight: '800' }}>BENDEMEN ADMIN</h1>
           </div>
+          <button 
+            onClick={() => router.push('/')}
+            style={{ padding: '10px 16px', background: '#000', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}
+          >
+            ← Terug naar Kassa
+          </button>
+        </div>
 
-          <div>
-            <label style={{ display: 'block', fontSize: '13px', fontWeight: 'bold', marginBottom: '5px' }}>E-mailadres</label>
-            <input 
-              type="email" 
-              value={form.email}
-              onChange={(e) => setForm({ ...form, email: e.target.value })}
-              required
-              style={{ width: '100%', padding: '8px', border: '1px solid #ccc', borderRadius: '4px', boxSizing: 'border-box' }}
-            />
-          </div>
+        {/* Formulier */}
+        <div style={{ background: '#FAFAFA', padding: '30px', borderRadius: '12px', border: '1px solid #EAEAEA', marginBottom: '30px' }}>
+          <h3 style={{ marginTop: 0, marginBottom: '20px', fontSize: '18px', fontWeight: '800' }}>Nieuw Personeel / Manager Toevoegen</h3>
+          
+          <form onSubmit={handleCreateUser} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '6px', textTransform: 'uppercase', color: '#333' }}>Gebruikersnaam</label>
+              <input 
+                type="text" 
+                value={form.username}
+                onChange={(e) => setForm({ ...form, username: e.target.value })}
+                required
+                style={{ width: '100%', padding: '12px', border: '1px solid #DDD', borderRadius: '8px', boxSizing: 'border-box', fontSize: '14px', outline: 'none' }}
+              />
+            </div>
 
-          <div>
-            <label style={{ display: 'block', fontSize: '13px', fontWeight: 'bold', marginBottom: '5px' }}>Voornaam</label>
-            <input 
-              type="text" 
-              value={form.firstName}
-              onChange={(e) => setForm({ ...form, firstName: e.target.value })}
-              style={{ width: '100%', padding: '8px', border: '1px solid #ccc', borderRadius: '4px', boxSizing: 'border-box' }}
-            />
-          </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '6px', textTransform: 'uppercase', color: '#333' }}>E-mailadres</label>
+              <input 
+                type="email" 
+                value={form.email}
+                onChange={(e) => setForm({ ...form, email: e.target.value })}
+                required
+                style={{ width: '100%', padding: '12px', border: '1px solid #DDD', borderRadius: '8px', boxSizing: 'border-box', fontSize: '14px', outline: 'none' }}
+              />
+            </div>
 
-          <div>
-            <label style={{ display: 'block', fontSize: '13px', fontWeight: 'bold', marginBottom: '5px' }}>Achternaam</label>
-            <input 
-              type="text" 
-              value={form.lastName}
-              onChange={(e) => setForm({ ...form, lastName: e.target.value })}
-              style={{ width: '100%', padding: '8px', border: '1px solid #ccc', borderRadius: '4px', boxSizing: 'border-box' }}
-            />
-          </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '6px', textTransform: 'uppercase', color: '#333' }}>Voornaam</label>
+              <input 
+                type="text" 
+                value={form.firstName}
+                onChange={(e) => setForm({ ...form, firstName: e.target.value })}
+                style={{ width: '100%', padding: '12px', border: '1px solid #DDD', borderRadius: '8px', boxSizing: 'border-box', fontSize: '14px', outline: 'none' }}
+              />
+            </div>
 
-          <div>
-            <label style={{ display: 'block', fontSize: '13px', fontWeight: 'bold', marginBottom: '5px' }}>Wachtwoord</label>
-            <input 
-              type="password" 
-              value={form.password}
-              onChange={(e) => setForm({ ...form, password: e.target.value })}
-              required
-              style={{ width: '100%', padding: '8px', border: '1px solid #ccc', borderRadius: '4px', boxSizing: 'border-box' }}
-            />
-          </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '6px', textTransform: 'uppercase', color: '#333' }}>Achternaam</label>
+              <input 
+                type="text" 
+                value={form.lastName}
+                onChange={(e) => setForm({ ...form, lastName: e.target.value })}
+                style={{ width: '100%', padding: '12px', border: '1px solid #DDD', borderRadius: '8px', boxSizing: 'border-box', fontSize: '14px', outline: 'none' }}
+              />
+            </div>
 
-          <div>
-            <label style={{ display: 'block', fontSize: '13px', fontWeight: 'bold', marginBottom: '5px' }}>Rol / Functie</label>
-            <select 
-              value={form.role}
-              onChange={(e) => setForm({ ...form, role: e.target.value })}
-              style={{ width: '100%', padding: '8px', border: '1px solid #ccc', borderRadius: '4px', boxSizing: 'border-box', background: '#fff' }}
-            >
-              <option value="cashier">Personeel (Kassa)</option>
-              <option value="shop_manager">Manager</option>
-              <option value="administrator">Administrator</option>
-            </select>
-          </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '6px', textTransform: 'uppercase', color: '#333' }}>Wachtwoord</label>
+              <input 
+                type="password" 
+                value={form.password}
+                onChange={(e) => setForm({ ...form, password: e.target.value })}
+                required
+                style={{ width: '100%', padding: '12px', border: '1px solid #DDD', borderRadius: '8px', boxSizing: 'border-box', fontSize: '14px', outline: 'none' }}
+              />
+            </div>
 
-          <div style={{ gridColumn: 'span 2' }}>
-            <label style={{ display: 'block', fontSize: '13px', fontWeight: 'bold', marginBottom: '5px' }}>Toegewezen Winkel</label>
-            <select 
-              value={form.storeId}
-              onChange={(e) => setForm({ ...form, storeId: e.target.value })}
-              style={{ width: '100%', padding: '8px', border: '1px solid #ccc', borderRadius: '4px', boxSizing: 'border-box', background: '#fff' }}
-            >
-              {stores.map(store => (
-                <option key={store.id} value={store.id}>{store.name}</option>
-              ))}
-            </select>
-          </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '6px', textTransform: 'uppercase', color: '#333' }}>Rol / Functie</label>
+              <select 
+                value={form.role}
+                onChange={(e) => setForm({ ...form, role: e.target.value })}
+                style={{ width: '100%', padding: '12px', border: '1px solid #DDD', borderRadius: '8px', boxSizing: 'border-box', background: '#fff', fontSize: '14px', outline: 'none' }}
+              >
+                <option value="cashier">Personeel (Kassa)</option>
+                <option value="shop_manager">Manager</option>
+                <option value="administrator">Administrator</option>
+              </select>
+            </div>
 
-          <div style={{ gridColumn: 'span 2', marginTop: '10px' }}>
-            <button 
-              type="submit" 
-              style={{ width: '100%', padding: '12px', background: '#0070f3', color: '#fff', border: 'none', borderRadius: '5px', fontWeight: 'bold', cursor: 'pointer' }}
-            >
-              Gebruiker Aanmaken
-            </button>
-          </div>
-        </form>
-      </div>
+            <div style={{ gridColumn: 'span 2' }}>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '6px', textTransform: 'uppercase', color: '#333' }}>Toegewezen Winkel</label>
+              <select 
+                value={form.storeId}
+                onChange={(e) => setForm({ ...form, storeId: e.target.value })}
+                style={{ width: '100%', padding: '12px', border: '1px solid #DDD', borderRadius: '8px', boxSizing: 'border-box', background: '#fff', fontSize: '14px', outline: 'none' }}
+              >
+                {stores.map(store => (
+                  <option key={store.id} value={store.id}>{store.name}</option>
+                ))}
+              </select>
+            </div>
 
-      {/* Tabel met gebruikers */}
-      <div style={{ background: '#fff', padding: '20px', borderRadius: '8px', border: '1px solid #ddd', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
-        <h3 style={{ marginTop: 0, marginBottom: '15px' }}>Geregistreerd Personeel</h3>
-        {isLoading ? (
-          <p>Laden...</p>
-        ) : users.length === 0 ? (
-          <p style={{ color: '#666' }}>Geen gebruikers gevonden.</p>
-        ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-            <thead>
-              <tr style={{ borderBottom: '2px solid #eee', color: '#555', fontSize: '13px' }}>
-                <th style={{ padding: '10px' }}>Naam</th>
-                <th style={{ padding: '10px' }}>E-mail</th>
-                <th style={{ padding: '10px' }}>Rol</th>
-                <th style={{ padding: '10px' }}>Winkel</th>
-                <th style={{ padding: '10px', textAlign: 'right' }}>Actie</th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map(u => (
-                <tr key={u.id} style={{ borderBottom: '1px solid #eee', fontSize: '14px' }}>
-                  <td style={{ padding: '10px', fontWeight: 'bold' }}>{u.name}</td>
-                  <td style={{ padding: '10px', color: '#666' }}>{u.email}</td>
-                  <td style={{ padding: '10px' }}>
-                    <span style={{ 
-                      padding: '3px 8px', 
-                      borderRadius: '4px', 
-                      fontSize: '12px', 
-                      background: u.role === 'administrator' ? '#ffe6e6' : u.role === 'shop_manager' ? '#e6f7ff' : '#f0f0f0',
-                      color: u.role === 'administrator' ? '#d9534f' : u.role === 'shop_manager' ? '#0070f3' : '#333'
-                    }}>
-                      {u.role}
-                    </span>
-                  </td>
-                  <td style={{ padding: '10px' }}>{u.storeId === 'store_ons_winkeltje' ? 'Ons Winkeltje' : u.storeId}</td>
-                  <td style={{ padding: '10px', textAlign: 'right' }}>
-                    <button
-                      onClick={() => handleDeleteUser(u.id, u.name)}
-                      style={{
-                        padding: '6px 12px',
-                        background: '#ff4d4f',
-                        color: '#fff',
-                        border: 'none',
-                        borderRadius: '4px',
-                        cursor: 'pointer',
-                        fontSize: '12px'
-                      }}
-                    >
-                      Verwijderen
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+            <div style={{ gridColumn: 'span 2', marginTop: '10px' }}>
+              <button 
+                type="submit" 
+                style={{ width: '100%', padding: '14px', background: '#C3110C', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '700', fontSize: '15px', cursor: 'pointer' }}
+              >
+                Gebruiker Aanmaken
+              </button>
+            </div>
+          </form>
+        </div>
+
+        {/* Tabel met gebruikers */}
+        <div style={{ background: '#FAFAFA', padding: '30px', borderRadius: '12px', border: '1px solid #EAEAEA' }}>
+          <h3 style={{ marginTop: 0, marginBottom: '20px', fontSize: '18px', fontWeight: '800' }}>Geregistreerd Personeel</h3>
+          {isLoading ? (
+            <p style={{ color: '#666', fontSize: '14px' }}>Laden...</p>
+          ) : users.length === 0 ? (
+            <p style={{ color: '#666', fontSize: '14px' }}>Geen gebruikers gevonden.</p>
+          ) : (
+            <div style={{ background: '#FFFFFF', border: '1px solid #EAEAEA', borderRadius: '8px', overflow: 'hidden' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '14px' }}>
+                <thead>
+                  <tr style={{ background: '#FAFAFA', borderBottom: '1px solid #EAEAEA' }}>
+                    <th style={{ padding: '15px', fontWeight: '700' }}>Naam</th>
+                    <th style={{ padding: '15px', fontWeight: '700' }}>E-mail</th>
+                    <th style={{ padding: '15px', fontWeight: '700' }}>Rol</th>
+                    <th style={{ padding: '15px', fontWeight: '700' }}>Winkel</th>
+                    <th style={{ padding: '15px', fontWeight: '700', textAlign: 'right' }}>Actie</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {users.map(u => (
+                    <tr key={u.id} style={{ borderBottom: '1px solid #F2F2F2' }}>
+                      <td style={{ padding: '15px', fontWeight: '600' }}>{u.name}</td>
+                      <td style={{ padding: '15px', color: '#666' }}>{u.email}</td>
+                      <td style={{ padding: '15px' }}>
+                        <span style={{ 
+                          padding: '4px 8px', 
+                          borderRadius: '4px', 
+                          fontSize: '11px', 
+                          fontWeight: '700',
+                          background: u.role === 'administrator' ? '#FCE8E6' : u.role === 'shop_manager' ? '#E8F0FE' : '#F1F3F4',
+                          color: u.role === 'administrator' ? '#C3110C' : u.role === 'shop_manager' ? '#1A73E8' : '#333'
+                        }}>
+                          {u.role}
+                        </span>
+                      </td>
+                      <td style={{ padding: '15px', color: '#666' }}>{u.storeId === 'store-1' ? 'Bendemen Flagship - Hellevoetsluis' : u.storeId}</td>
+                      <td style={{ padding: '15px', textAlign: 'right' }}>
+                        <button
+                          onClick={() => handleDeleteUser(u.id, u.name)}
+                          style={{
+                            padding: '6px 12px',
+                            background: '#FCE8E6',
+                            color: '#C3110C',
+                            border: '1px solid #FAD2D1',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            fontSize: '12px',
+                            fontWeight: '600'
+                          }}
+                        >
+                          Verwijderen
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
       </div>
     </div>
   );
