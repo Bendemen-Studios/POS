@@ -30,17 +30,20 @@ export default function Login() {
           console.error("Kon winkels niet ophalen", e);
         }
 
-        if (stores.length > 0) {
+        localStorage.setItem('pos_available_stores', JSON.stringify(stores));
+
+        if (stores.length > 1) {
+          router.push('/select-store');
+        } else if (stores.length === 1) {
           localStorage.setItem('pos_active_store', JSON.stringify(stores[0]));
+          router.push('/');
         } else {
           localStorage.setItem('pos_active_store', JSON.stringify({
             id: 'store_ons_winkeltje',
-            name: 'Ons Winkeltje',
-            category_name: 'POS Ons Winkeltje'
+            name: 'Ons Winkeltje'
           }));
+          router.push('/');
         }
-
-        router.push('/');
       } else {
         setError(loginRes.data?.error || 'Inloggen mislukt. Controleer je gebruikersnaam en wachtwoord.');
       }

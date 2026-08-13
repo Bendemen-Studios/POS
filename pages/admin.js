@@ -3,30 +3,33 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import axios from 'axios';
 
-export default function AdminDashboard() {
+export default function AdminPanel() {
   const router = useRouter();
   const [currentUser, setCurrentUser] = useState(null);
   const [stores, setStores] = useState([]);
   const [newStoreName, setNewStoreName] = useState('');
-  const [newCategoryName, setNewCategoryName] = useState('');
-  const [loading, setLoading] = useState(false);
+  
+  // Edit store states
+  const [editingStoreId, setEditingStoreId] = useState(null);
+  const [editedStoreName, setEditedStoreName] = useState('');
 
   useEffect(() => {
-    const user = JSON.parse(localStorage.getItem('pos_user'));
-    if (!user || (user.role !== 'administrator' && user.role !== 'shop_manager')) {
-      alert('Geen toegang tot het beheerpaneel!');
-      router.push('/');
+    const token = localStorage.getItem('pos_token');
+    const user = JSON.parse(localStorage.getItem('pos_user') || 'null');
+
+    if (!token || !user || (user.role !== 'administrator' && user.role !== 'shop_manager')) {
+      router.push('/login');
       return;
     }
+
     setCurrentUser(user);
     loadAdminData();
   }, [router]);
 
   const loadAdminData = async () => {
     try {
-      // Haal winkels op via onze eigen Next.js API route
       const res = await axios.get('/api/admin/stores');
-      setStores(res.data);
+      setStores(res.data || []);
     } catch (err) {
       console.error("Fout bij laden winkels:", err);
     }
@@ -34,70 +37,112 @@ export default function AdminDashboard() {
 
   const handleCreateStore = async (e) => {
     e.preventDefault();
-    if (!newStoreName) return;
-    setLoading(true);
+    if (!newStoreName.trim()) {
+      alert('Vul een winkelnaam in.');
+      return;
+    }
+
     try {
-      const res = await axios.post('/api/admin/store', { 
-        name: newStoreName, 
-        category_name: newCategoryName 
-      });
+      const res = await axios.post('/api/admin/store', { name: newStoreName });
       if (res.data.success) {
-        setStores(res.data.stores);
-        setNewStoreName('');
-        setNewCategoryName('');
         alert('Winkel succesvol aangemaakt!');
+        setNewStoreName('');
+        loadAdminData();
       }
     } catch (err) {
-      alert('Fout bij aanmaken winkel.');
+      alert(err.response?.data?.error || 'Fout bij aanmaken winkel.');
     }
-    setLoading(false);
+  };
+
+  const handleUpdateStore = async (storeId) => {
+    if (!editedStoreName.trim()) {
+      alert('Winkelnaam mag niet leeg zijn.');
+      return;
+    }
+
+    try {
+      const res = await axios.put('/api/admin/stores', { id: storeId, name: editedStoreName });
+      if (res.data.success) {
+        alert('Winkel succesvol bijgewerkt!');
+        setEditingStoreId(null);
+        loadAdminData();
+      }
+    } catch (err) {
+      alert('Fout bij bijwerken van winkel.');
+    }
   };
 
   if (!currentUser) return null;
 
   return (
-    <div style={{ padding: '40px', fontFamily: 'Arial', maxWidth: '800px', margin: '0 auto' }}>
+    <div style={{ padding: '30px', fontFamily: 'Arial', maxWidth: '800px', margin: '0 auto' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' }}>
-        <h1>Bendemen POS - Beheerpaneel</h1>
-        <button onClick={() => router.push('/')} style={{ padding: '10px 15px', cursor: 'pointer' }}>Terug naar Kassa</button>
+        <h1>Bendemen POS - Beheerderspaneel</h1>
+        <button 
+          onClick={() => router.push('/')} 
+          style={{ padding: '10px 15px', background: '#333', color: '#fff', border: 'none', borderRadius: '5px', cursor: 'pointer' }}
+        >
+          Terug naar Kassa
+        </button>
       </div>
 
-      {/* Winkel Toevoegen */}
-      <div style={{ background: '#f9f9f9', padding: '20px', borderRadius: '8px', border: '1px solid #ddd', marginBottom: '30px' }}>
-        <h2>Nieuwe Winkel Aanmaken</h2>
-        <form onSubmit={handleCreateStore} style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '10px' }}>
+      {/* Nieuwe winkel aanmaken (zonder categorie velden) */}
+      <div style={{ background: '#fff', padding: '20px', borderRadius: '8px', border: '1px solid #ddd', marginBottom: '30px', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
+        <h3>Nieuwe Winkel Aanmaken</h3>
+        <form onSubmit={handleCreateStore} style={{ display: 'flex', gap: '10px', marginTop: '15px' }}>
           <input 
             type="text" 
             placeholder="Winkelnaam (bijv. Bendemen Amsterdam)" 
             value={newStoreName}
             onChange={(e) => setNewStoreName(e.target.value)}
-            style={{ padding: '10px', fontSize: '16px' }}
-            required
+            style={{ flex: 1, padding: '10px', borderRadius: '4px', border: '1px solid #ccc' }}
           />
-          <input 
-            type="text" 
-            placeholder="WooCommerce Categorie Naam (bijv. POS Amsterdam, leeg = automatisch)" 
-            value={newCategoryName}
-            onChange={(e) => setNewCategoryName(e.target.value)}
-            style={{ padding: '10px', fontSize: '16px' }}
-          />
-          <button type="submit" disabled={loading} style={{ padding: '10px 20px', background: '#0070f3', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
-            {loading ? 'Bezig...' : 'Winkel Toevoegen'}
+          <button 
+            type="submit" 
+            style={{ padding: '10px 20px', background: '#0070f3', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
+          >
+            Winkel Toevoegen
           </button>
         </form>
       </div>
 
-      {/* Bestaande Winkels Overzicht */}
-      <div style={{ background: '#f9f9f9', padding: '20px', borderRadius: '8px', border: '1px solid #ddd' }}>
-        <h2>Actieve Winkels & Categorieën</h2>
-        <ul style={{ marginTop: '10px', paddingLeft: '20px' }}>
-          {stores.map(store => (
-            <li key={store.id} style={{ padding: '8px 0', fontSize: '16px' }}>
-              <strong>{store.name}</strong> — Categorie: <span style={{ color: '#0070f3' }}>{store.category_name}</span> <span style={{ color: '#666', fontSize: '14px' }}>({store.id})</span>
-            </li>
-          ))}
-        </ul>
+      {/* Actieve winkels lijst (zonder categorieën, met hernoem optie) */}
+      <div style={{ background: '#fff', padding: '20px', borderRadius: '8px', border: '1px solid #ddd', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
+        <h3>Actieve Winkels</h3>
+        <div style={{ marginTop: '15px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          {stores.length === 0 ? (
+            <p style={{ color: '#666' }}>Geen actieve winkels gevonden.</p>
+          ) : (
+            stores.map(store => (
+              <div key={store.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', background: '#fafafa', borderRadius: '5px', border: '1px solid #eee' }}>
+                {editingStoreId === store.id ? (
+                  <div style={{ display: 'flex', gap: '10px', flex: 1, marginRight: '10px' }}>
+                    <input 
+                      type="text" 
+                      value={editedStoreName} 
+                      onChange={(e) => setEditedStoreName(e.target.value)}
+                      style={{ flex: 1, padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}
+                    />
+                    <button onClick={() => handleUpdateStore(store.id)} style={{ padding: '8px 12px', background: '#28a745', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Opslaan</button>
+                    <button onClick={() => setEditingStoreId(null)} style={{ padding: '8px 12px', background: '#ccc', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Annuleren</button>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', flex: 1, alignItems: 'center' }}>
+                    <span style={{ fontWeight: 'bold', fontSize: '15px' }}>{store.name}</span>
+                    <button 
+                      onClick={() => { setEditingStoreId(store.id); setEditedStoreName(store.name); }}
+                      style={{ padding: '6px 12px', background: '#0070f3', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '13px' }}
+                    >
+                      Hernoemen
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))
+          )}
+        </div>
       </div>
+
     </div>
   );
 }
