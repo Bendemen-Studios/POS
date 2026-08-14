@@ -4,26 +4,29 @@ import Link from 'next/link';
 
 export default function POSHome() {
   const router = useRouter();
+  
+  // Producten & Winkelmand
   const [products, setProducts] = useState([]);
   const [cart, setCart] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
-  
-  // Klant & Punten state
+
+  // Klanten & Punten (WooCommerce Points & Rewards)
   const [customers, setCustomers] = useState([]);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [customerSearch, setCustomerSearch] = useState('');
   const [pointsToRedeem, setPointsToRedeem] = useState(0);
   const [redeemedDiscount, setRedeemedDiscount] = useState(0);
 
-  // Korting & Voucher state
+  // Kortingen & Vouchers
   const [discountType, setDiscountType] = useState('none'); // 'none', 'percentage', 'fixed'
   const [discountValue, setDiscountValue] = useState(0);
-  const [couponCode, setCouponCode] = useState('');
 
+  // Betaling & Status
+  const [paymentMethod, setPaymentMethod] = useState('sumup'); // 'sumup', 'manual_pin', 'cash'
   const [loading, setLoading] = useState(false);
   const [checkoutStatus, setCheckoutStatus] = useState(null);
 
-  // Ophalen producten en klanten bij laden
+  // Initialisatie: Producten & Klanten ophalen
   useEffect(() => {
     fetchProducts();
     fetchCustomers();
@@ -49,7 +52,7 @@ export default function POSHome() {
     }
   };
 
-  // Winkelmand acties
+  // Cart Handlers
   const addToCart = (product) => {
     setCart((prev) => {
       const existing = prev.find((item) => item.id === product.id);
@@ -70,10 +73,10 @@ export default function POSHome() {
     );
   };
 
-  // Berekeningen
+  // Rekensom Totalen
   const subtotal = cart.reduce((acc, item) => acc + parseFloat(item.price || 0) * item.quantity, 0);
 
-  // Korting berekenen
+  // Handmatige korting berekenen
   let manualDiscountAmount = 0;
   if (discountType === 'percentage') {
     manualDiscountAmount = (subtotal * parseFloat(discountValue || 0)) / 100;
@@ -81,11 +84,11 @@ export default function POSHome() {
     manualDiscountAmount = parseFloat(discountValue || 0);
   }
 
-  // Totale korting = handmatige korting + ingewisselde punten korting
+  // Totale korting (Handmatig + Ingewisselde Punten)
   const totalDiscount = Math.min(subtotal, manualDiscountAmount + parseFloat(redeemedDiscount || 0));
   const finalTotal = Math.max(0, subtotal - totalDiscount);
 
-  // Punten inwisselen logica (100 punten = €5 -> 1 punt = €0.05, vanaf 1 punt)
+  // Punten Inwisselen (100 punten = €5, 1 punt = €0.05)
   const handleRedeemPoints = () => {
     const pts = parseInt(pointsToRedeem) || 0;
     if (pts <= 0) {
@@ -96,7 +99,7 @@ export default function POSHome() {
       alert('Koppel eerst een klant voordat je punten kunt inwisselen.');
       return;
     }
-    const discount = pts * 0.05; // 1 punt = 5 cent
+    const discount = pts * 0.05;
     if (discount > subtotal) {
       alert('De korting door punten kan niet hoger zijn dan het subtotaal.');
       return;
@@ -104,7 +107,7 @@ export default function POSHome() {
     setRedeemedDiscount(discount.toFixed(2));
   };
 
-  // Afrekenen (Pin Handmatig)
+  // Afrekenen (SumUp / Pin / Contant)
   const handleCheckout = async () => {
     if (cart.length === 0) {
       alert('Winkelmand is leeg.');
@@ -115,20 +118,34 @@ export default function POSHome() {
     setCheckoutStatus(null);
 
     try {
+      // 1. Als SumUp is geselecteerd, start SumUp transactie
+      if (paymentMethod === 'sumup') {
+        const sumupRes = await fetch('/api/sumup/create-payment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ amount: finalTotal.toFixed(2), currency: 'EUR' }),
+        });
+        const sumupData = await sumupRes.json();
+        if (!sumupData.success) {
+          throw new Error(sumupData.error || 'SumUp betaling kon niet worden gestart.');
+        }
+      }
+
+      // 2. Maak de order aan in WooCommerce
       const line_items = cart.map((item) => ({
         product_id: item.id,
         quantity: item.quantity,
       }));
 
       const orderData = {
-        payment_method: 'manual_pin',
-        payment_method_title: 'Handmatige Pin',
+        payment_method: paymentMethod,
+        payment_method_title: paymentMethod === 'sumup' ? 'SumUp Kaartlezer' : (paymentMethod === 'cash' ? 'Contant' : 'Handmatige Pin'),
         set_paid: true,
         customer_id: selectedCustomer ? selectedCustomer.id : 0,
         line_items: line_items,
         fee_lines: totalDiscount > 0 ? [
           {
-            name: `Korting & Rewards (${pointsToRedeem ? pointsToRedeem + ' punten' : 'Actie'})`,
+            name: `Korting & Rewards (${pointsToRedeem ? pointsToRedeem + ' pnt' : 'Actie'})`,
             total: (-totalDiscount).toFixed(2),
           }
         ] : []
@@ -143,7 +160,8 @@ export default function POSHome() {
       const data = await res.json();
 
       if (data.success) {
-        setCheckoutStatus({ success: true, message: `Bestelling #${data.order.id} succesvol aangemaakt!` });
+        setCheckoutStatus({ success: true, message: `Bestelling #${data.order.id} succesvol verwerkt!` });
+        // Reset state
         setCart([]);
         setSelectedCustomer(null);
         setPointsToRedeem(0);
@@ -151,11 +169,11 @@ export default function POSHome() {
         setDiscountType('none');
         setDiscountValue(0);
       } else {
-        setCheckoutStatus({ success: false, message: data.error || 'Fout bij aanmaken bestelling.' });
+        setCheckoutStatus({ success: false, message: data.error || 'Fout bij aanmaken bestelling in WooCommerce.' });
       }
     } catch (err) {
       console.error(err);
-      setCheckoutStatus({ success: false, message: 'Netwerkfout tijdens afrekenen.' });
+      setCheckoutStatus({ success: false, message: err.message || 'Fout tijdens afrekenen.' });
     } finally {
       setLoading(false);
     }
@@ -171,7 +189,7 @@ export default function POSHome() {
 
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col">
-      {/* Header */}
+      {/* Header met werkende Admin-knop */}
       <header className="bg-black text-white p-4 flex justify-between items-center shadow-md">
         <div className="flex items-center space-x-4">
           <span className="font-bold text-xl tracking-wider">BDM POS</span>
@@ -185,10 +203,10 @@ export default function POSHome() {
         </div>
       </header>
 
-      {/* Main Content */}
+      {/* Content Layout */}
       <div className="flex-1 flex flex-col md:flex-row p-4 gap-4 overflow-hidden">
         
-        {/* Left: Product Catalog */}
+        {/* Linkerkant: Productencatalogus */}
         <div className="w-full md:w-3/5 flex flex-col bg-white rounded-lg shadow p-4">
           <div className="mb-4">
             <input
@@ -218,12 +236,12 @@ export default function POSHome() {
           </div>
         </div>
 
-        {/* Right: Cart, Customer & Checkout */}
+        {/* Rechterkant: Winkelmand, Klant, Korting & Afrekenen */}
         <div className="w-full md:w-2/5 flex flex-col bg-white rounded-lg shadow p-4 justify-between">
           <div>
             <h2 className="text-lg font-bold mb-3 border-b pb-2">Huidige Bestelling</h2>
 
-            {/* Klant Koppeling */}
+            {/* Klant Koppeling (voor Punten & Rewards) */}
             <div className="mb-3 bg-gray-50 p-2 rounded border">
               <label className="text-xs font-bold text-gray-600 block mb-1">Gekoppelde Klant (voor punten):</label>
               {selectedCustomer ? (
@@ -257,8 +275,8 @@ export default function POSHome() {
               )}
             </div>
 
-            {/* Winkelmand items */}
-            <div className="overflow-y-auto max-h-48 mb-3 divide-y">
+            {/* Cart Items */}
+            <div className="overflow-y-auto max-h-40 mb-3 divide-y">
               {cart.length === 0 ? (
                 <p className="text-gray-400 text-sm text-center py-4">Geen artikelen in winkelmand</p>
               ) : (
@@ -303,7 +321,7 @@ export default function POSHome() {
                 />
               )}
 
-              {/* Punten inwisselen (vanaf 1 punt, 100 punten = €5) */}
+              {/* Punten inwisselen */}
               <div className="bg-gray-50 p-2 rounded border">
                 <span className="font-semibold block mb-1">Punten Inwisselen (100 pnt = €5):</span>
                 <div className="flex space-x-2">
@@ -326,8 +344,32 @@ export default function POSHome() {
             </div>
           </div>
 
-          {/* Totalen en Checkout */}
+          {/* Betaalmethode Selectie & Totalen */}
           <div className="border-t pt-3 mt-2">
+            <div className="mb-2">
+              <label className="text-xs font-bold text-gray-600 block mb-1">Betaalmethode:</label>
+              <div className="grid grid-cols-3 gap-1">
+                <button
+                  onClick={() => setPaymentMethod('sumup')}
+                  className={`p-2 text-xs font-bold border rounded ${paymentMethod === 'sumup' ? 'bg-black text-white' : 'bg-gray-100 text-black'}`}
+                >
+                  SumUp
+                </button>
+                <button
+                  onClick={() => setPaymentMethod('manual_pin')}
+                  className={`p-2 text-xs font-bold border rounded ${paymentMethod === 'manual_pin' ? 'bg-black text-white' : 'bg-gray-100 text-black'}`}
+                >
+                  Handmatige Pin
+                </button>
+                <button
+                  onClick={() => setPaymentMethod('cash')}
+                  className={`p-2 text-xs font-bold border rounded ${paymentMethod === 'cash' ? 'bg-black text-white' : 'bg-gray-100 text-black'}`}
+                >
+                  Contant
+                </button>
+              </div>
+            </div>
+
             <div className="flex justify-between text-sm mb-1">
               <span>Subtotaal:</span>
               <span>€{subtotal.toFixed(2)}</span>
@@ -360,7 +402,7 @@ export default function POSHome() {
               disabled={loading || cart.length === 0}
               className="w-full bg-red-600 hover:bg-red-700 disabled:bg-gray-300 text-white font-bold py-3 rounded transition text-sm uppercase tracking-wider"
             >
-              {loading ? 'Bezig met afrekenen...' : 'Afrekenen (Pin Handmatig)'}
+              {loading ? 'Verwerken...' : `Afrekenen (€${finalTotal.toFixed(2)})`}
             </button>
           </div>
         </div>
