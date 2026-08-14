@@ -13,6 +13,24 @@ export default async function handler(req, res) {
     }
   }
 
+  // Hulpfunctie om store_id veilig om te zetten naar een integer ID
+  const resolveStoreId = async (storeIdVal) => {
+    if (!storeIdVal) return null;
+    if (!isNaN(storeIdVal)) return parseInt(storeIdVal, 10);
+    
+    // Als het een string is (bijv. 'store_ons_winkeltje'), zoek het ID op in pos_stores
+    try {
+      const [stores] = await pool.execute(
+        'SELECT id FROM pos_stores WHERE store_name = ? OR name = ? LIMIT 1',
+        [storeIdVal, storeIdVal]
+      );
+      if (stores.length > 0) return stores[0].id;
+    } catch (e) {
+      console.error("Store resolution error:", e);
+    }
+    return null;
+  };
+
   // POST: Nieuwe gebruiker aanmaken
   if (req.method === 'POST') {
     try {
@@ -23,7 +41,7 @@ export default async function handler(req, res) {
       }
 
       const assignedRole = role || 'cashier';
-      const assignedStoreId = store_id && !isNaN(store_id) ? parseInt(store_id, 10) : null;
+      const assignedStoreId = await resolveStoreId(store_id);
       const userEmail = email || null;
       const hashedPassword = await bcrypt.hash(password, 10);
 
@@ -53,7 +71,7 @@ export default async function handler(req, res) {
       }
 
       const assignedRole = role || 'cashier';
-      const assignedStoreId = store_id && !isNaN(store_id) ? parseInt(store_id, 10) : null;
+      const assignedStoreId = await resolveStoreId(store_id);
       const userEmail = email || null;
 
       if (password && password.trim() !== '') {

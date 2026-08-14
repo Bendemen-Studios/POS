@@ -87,7 +87,7 @@ export default function CashierPOS() {
   };
 
   const handleMarkAsPickedUp = async (orderId) => {
-    if (!confirm(`Weet je zeker dat bestelling #${orderId} is opgehaald? De status wordt gewijzigd naar Verzonden.`)) return;
+    if (!confirm(`Weet je zeker dat bestelling #${orderId} is opgehaald? De status wordt gewijzigd naar Voltooid.`)) return;
     try {
       const res = await axios.post('/api/woocommerce/update-order-status', {
         orderId,
@@ -154,7 +154,7 @@ export default function CashierPOS() {
   const calculateTotals = () => {
     const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
     const discountAmount = parseFloat(discount) || 0;
-    const pointsDiscount = (parseFloat(pointsUsed) || 0) * 0.10; // 10 cent per punt of eigen waarde
+    const pointsDiscount = (parseFloat(pointsUsed) || 0) * 0.10;
     const total = Math.max(0, subtotal - discountAmount - pointsDiscount);
     return { subtotal, discountAmount, pointsDiscount, total };
   };
@@ -227,7 +227,7 @@ export default function CashierPOS() {
   // Filter afhaalbestellingen op basis van het pickup_id van het geselecteerde filiaal
   const filteredPickupOrders = pickupOrders.filter(order => {
     if (!selectedStore?.pickup_id) return true;
-    return order.shipping_lines?.some(s => s.meta_data?.some(m => m.key === 'pickup_location_id' && m.value === selectedStore.pickup_id));
+    return order.shipping_lines?.some(s => s.meta_data?.some(m => m.key === 'pickup_location_id' && m.value === String(selectedStore.pickup_id)));
   });
 
   const filteredProducts = products.filter(p => {
@@ -245,8 +245,9 @@ export default function CashierPOS() {
         <div className="flex items-center space-x-3">
           <span className="font-bold text-xl tracking-wider">BDM POS</span>
           {selectedStore && (
-            <span className="text-xs bg-red-600 px-2 py-1 rounded font-bold uppercase">
-              📍 {selectedStore.store_name}
+            <span className="text-xs bg-red-600 px-2.5 py-1 rounded-md font-bold uppercase flex items-center space-x-1 shadow-sm">
+              <span>📍</span>
+              <span>{selectedStore.store_name || selectedStore.name}</span>
             </span>
           )}
           <span className="text-xs bg-gray-800 text-gray-300 px-2 py-1 rounded">
@@ -335,7 +336,7 @@ export default function CashierPOS() {
 
                       return (
                         <tr key={order.id} className="hover:bg-gray-50">
-                          <td className="p-3 font-bold">#{order.id}</td>
+                          <td className="p-3 font-bold">#{order.number || order.id}</td>
                           <td className="p-3 font-medium">
                             {order.billing?.first_name} {order.billing?.last_name}
                             <div className="text-[10px] text-gray-400">{order.billing?.email}</div>
