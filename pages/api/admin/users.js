@@ -16,32 +16,33 @@ export default async function handler(req, res) {
   // POST: Nieuwe gebruiker aanmaken
   if (req.method === 'POST') {
     try {
-      const { username, password, role, store_id } = req.body;
+      const { username, password, role, store_id, email } = req.body;
 
       if (!username || !password) {
         return res.status(400).json({ success: false, message: 'Gebruikersnaam en wachtwoord zijn verplicht.' });
       }
 
       const assignedRole = role || 'cashier';
-      const assignedStoreId = store_id ? String(store_id) : null;
+      const assignedStoreId = store_id && !isNaN(store_id) ? parseInt(store_id, 10) : null;
+      const userEmail = email || null;
       const hashedPassword = await bcrypt.hash(password, 10);
 
       await pool.execute(
-        `INSERT INTO pos_users (username, password_hash, role, store_id) VALUES (?, ?, ?, ?)`,
-        [username.trim(), hashedPassword, assignedRole, assignedStoreId]
+        `INSERT INTO pos_users (username, password_hash, email, role, store_id) VALUES (?, ?, ?, ?, ?)`,
+        [username.trim(), hashedPassword, userEmail, assignedRole, assignedStoreId]
       );
 
       return res.status(200).json({ success: true, message: 'Medewerker succesvol aangemaakt!' });
     } catch (error) {
       console.error("Users POST Error:", error);
-      return res.status(500).json({ success: false, error: 'Fout bij aanmaken medewerker.' });
+      return res.status(500).json({ success: false, error: 'Fout bij aanmaken medewerker: ' + error.message });
     }
   }
 
   // PUT: Bestaande gebruiker bewerken (behalve bendemen)
   if (req.method === 'PUT') {
     try {
-      const { id, password, role, store_id } = req.body;
+      const { id, password, role, store_id, email } = req.body;
       if (!id) return res.status(400).json({ success: false, message: 'Geen ID opgegeven.' });
 
       const [users] = await pool.execute('SELECT username FROM pos_users WHERE id = ?', [id]);
@@ -52,25 +53,26 @@ export default async function handler(req, res) {
       }
 
       const assignedRole = role || 'cashier';
-      const assignedStoreId = store_id ? String(store_id) : null;
+      const assignedStoreId = store_id && !isNaN(store_id) ? parseInt(store_id, 10) : null;
+      const userEmail = email || null;
 
       if (password && password.trim() !== '') {
         const hashedPassword = await bcrypt.hash(password, 10);
         await pool.execute(
-          `UPDATE pos_users SET password_hash = ?, role = ?, store_id = ? WHERE id = ?`,
-          [hashedPassword, assignedRole, assignedStoreId, id]
+          `UPDATE pos_users SET password_hash = ?, email = ?, role = ?, store_id = ? WHERE id = ?`,
+          [hashedPassword, userEmail, assignedRole, assignedStoreId, id]
         );
       } else {
         await pool.execute(
-          `UPDATE pos_users SET role = ?, store_id = ? WHERE id = ?`,
-          [assignedRole, assignedStoreId, id]
+          `UPDATE pos_users SET email = ?, role = ?, store_id = ? WHERE id = ?`,
+          [userEmail, assignedRole, assignedStoreId, id]
         );
       }
 
       return res.status(200).json({ success: true, message: 'Gebruiker bijgewerkt!' });
     } catch (error) {
       console.error("Users PUT Error:", error);
-      return res.status(500).json({ success: false, error: 'Fout bij bijwerken gebruiker.' });
+      return res.status(500).json({ success: false, error: 'Fout bij bijwerken gebruiker: ' + error.message });
     }
   }
 
