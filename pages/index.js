@@ -35,6 +35,7 @@ export default function CashRegister() {
   const [paymentMethod, setPaymentMethod] = useState('sumup'); 
   const [cashGiven, setCashGiven] = useState('');
   const [isProcessingCheckout, setIsProcessingCheckout] = useState(false);
+  const [sumupCancelToken, setSumupCancelToken] = useState(null);
 
   // Producten ophalen via SWR
   const { data: productsData, mutate: mutateProducts } = useSWR('/api/woocommerce/products', fetcher, { revalidateOnFocus: false });
@@ -56,7 +57,6 @@ export default function CashRegister() {
   if (!mounted) return null;
 
   const isAdminOrManager = user?.role === 'administrator' || user?.role === 'manager' || user?.role === 'shop_manager';
-
   const categories = [...new Set(products.map(p => (p.categories && p.categories.length > 0) ? p.categories[0].name : 'Algemeen'))].sort();
 
   const handleSyncProducts = async () => {
@@ -72,7 +72,6 @@ export default function CashRegister() {
   };
 
   const handleProductClick = (product) => {
-    // 1. Variabel product check
     if (product.type === 'variable' && product.attributes?.length > 0) {
       setSelectedVariableProduct(product);
       const initAttrs = {};
@@ -84,7 +83,6 @@ export default function CashRegister() {
       return;
     }
 
-    // 2. Open Bedrag check (prijs is leeg/null)
     if (product.price === "" || product.price === null || product.price === undefined) {
       setOpenPriceProduct(product);
       setCustomPriceInput('');
@@ -93,8 +91,6 @@ export default function CashRegister() {
     }
 
     const priceNum = parseFloat(product.price);
-    
-    // 3. Als prijs expliciet 0 is, mag deze ook als open bedrag of rechtstreeks aangeslagen worden
     if (isNaN(priceNum)) {
       setOpenPriceProduct(product);
       setCustomPriceInput('0.00');
@@ -112,14 +108,9 @@ export default function CashRegister() {
     });
   };
 
-  // Bevestigen van Open Bedrag (NU OOK €0.00 TOEGESTAAN)
   const handleConfirmOpenPrice = () => {
-    const rawVal = customPriceInput.replace(',', '.');
-    const parsedPrice = parseFloat(rawVal);
-
-    if (isNaN(parsedPrice)) {
-      return alert('Voer een geldig bedrag in.');
-    }
+    const parsedPrice = parseFloat(customPriceInput.replace(',', '.'));
+    if (isNaN(parsedPrice)) return alert('Voer een geldig bedrag in.');
 
     addToCart({
       ...openPriceProduct,
@@ -153,6 +144,57 @@ export default function CashRegister() {
   const parsedCashGiven = parseFloat(cashGiven.replace(',', '.')) || 0;
   const changeAmount = Math.max(0, parsedCashGiven - totalPrice);
 
+  // Bonnenprinter afdrukfunctie
+  const handlePrintReceipt = (orderId, cartItems, totalPaid, cashAmount, changeVal, storeName) => {
+    const printWindow = window.open('', '_blank', 'width=400,height=600');
+    
+    const itemsHtml = cartItems.map(item => `
+      <tr>
+        <td style="text-align:left;">${item.name}</td>
+        <td style="text-align:center;">${item.quantity}x</td>
+        <td style="text-align:right;">€${(item.price * item.quantity).toFixed(2)}</td>
+      </tr>
+    `).join('');
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Kassabon #${orderId}</title>
+          <style>
+            body { font-family: monospace; width: 280px; padding: 10px; margin: 0; font-size: 12px; }
+            h2, p { text-align: center; margin: 4px 0; }
+            table { width: 100%; border-collapse: collapse; margin: 10px 0; }
+            td { padding: 3px 0; }
+            .border { border-top: 1px dashed #000; border-bottom: 1px dashed #000; padding: 6px 0; margin: 8px 0; }
+            .bold { font-weight: bold; }
+          </style>
+        </head>
+        <body>
+          <h2>BENDEMEN</h2>
+          <p>${storeName || 'Ons Winkeltje'}</p>
+          <p>Datum: ${new Date().toLocaleString('nl-NL')}</p>
+          <p>Bon: #${orderId}</p>
+          <div class="border">
+            <table>${itemsHtml}</table>
+          </div>
+          <table>
+            <tr class="bold"><td>Totaal:</td><td style="text-align:right;">€${totalPaid.toFixed(2)}</td></tr>
+            ${cashAmount > 0 ? `<tr><td>Contant:</td><td style="text-align:right;">€${cashAmount.toFixed(2)}</td></tr>` : ''}
+            ${changeVal > 0 ? `<tr><td>Wisselgeld:</td><td style="text-align:right;">€${changeVal.toFixed(2)}</td></tr>` : ''}
+          </table>
+          <p style="margin-top:15px;">Bedankt voor je bezoek!</p>
+        </body>
+      </html>
+    `);
+
+    printWindow.document.close();
+    printWindow.focus();
+    setTimeout(() => {
+      printWindow.print();
+      printWindow.close();
+    }, 250);
+  };
+
   const openCheckoutModal = () => {
     if (cart.length === 0) return alert('Winkelmand is leeg.');
     setCashGiven('');
@@ -167,37 +209,60 @@ export default function CashRegister() {
 
     try {
       setIsProcessingCheckout(true);
+
+      // Met SumUp communiceren als dat gekozen is
+      if (paymentMethod === 'sumup') {
+        const controller = new AbortController();
+        setSumupCancelToken(controller);
+
+        const sumupRes = await axios.post('/api/sumup/checkout', {
+          totalAmount: totalPrice,
+          terminalId: store?.sumupReaderId || ''
+        }, { signal: controller.signal });
+
+        if (!sumupRes.data.success) {
+          setIsProcessingCheckout(false);
+          return alert('PIN betaling geweigerd of mislukt op terminal.');
+        }
+      }
+
+      // Order aanmaken via WooCommerce
       const res = await axios.post('/api/woocommerce/order', {
         orderItems: cart,
         paymentMethod,
         storeId: store?.id,
         cashierId: user?.id,
         customerId: selectedCustomer?.id || 0,
-        totals: { 
-          discountAmount, 
-          pointsDiscount, 
-          pointsUsed: redeemPoints ? (selectedCustomer?.points || 0) : 0, 
-          totalPaid: totalPrice,
-          cashGiven: paymentMethod === 'cash' ? parsedCashGiven : totalPrice,
-          changeAmount: paymentMethod === 'cash' ? changeAmount : 0
-        }
+        totals: { discountAmount, pointsDiscount, totalPaid: totalPrice, cashGiven: parsedCashGiven, changeAmount }
       });
 
       if (res.data.success) {
-        alert(`Bestelling #${res.data.orderId} succesvol afgerond!${paymentMethod === 'cash' ? `\nWisselgeld: €${changeAmount.toFixed(2)}` : ''}`);
+        if (confirm(`Bestelling #${res.data.orderId} succesvol afgerond!\n\nWilt u een kassabon afdrukken?`)) {
+          handlePrintReceipt(res.data.orderId, cart, totalPrice, parsedCashGiven, changeAmount, store?.name);
+        }
         setCart([]);
         setSelectedCustomer(null);
         setRedeemPoints(false);
         setShowCheckoutModal(false);
-        mutateProducts(); // Ververs voorraadlijst na bestelling
+        mutateProducts();
       } else {
         alert('Fout bij plaatsen bestelling.');
       }
     } catch (err) {
-      alert('Fout bij communicatie met server.');
+      if (axios.isCancel(err)) {
+        alert('PIN betaling geannuleerd door gebruiker.');
+      } else {
+        alert('Fout bij communicatie met server.');
+      }
     } finally {
       setIsProcessingCheckout(false);
+      setSumupCancelToken(null);
     }
+  };
+
+  const handleCancelSumupPayment = () => {
+    if (sumupCancelToken) sumupCancelToken.abort();
+    setIsProcessingCheckout(false);
   };
 
   const filteredProducts = products.filter(p => {
@@ -230,10 +295,7 @@ export default function CashRegister() {
             </button>
 
             {isAdminOrManager && (
-              <button 
-                onClick={() => router.push('/admin')} 
-                style={{ padding: '8px 14px', background: '#000', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: '600', fontSize: '13px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
-              >
+              <button onClick={() => router.push('/admin')} style={{ padding: '8px 14px', background: '#000', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}>
                 ⚙️ Admin Paneel
               </button>
             )}
@@ -265,28 +327,13 @@ export default function CashRegister() {
                 
                 return (
                   <div key={p.id} onClick={() => handleProductClick(p)} style={{ background: '#fff', border: '1px solid #EAEAEA', borderRadius: '8px', padding: '12px', cursor: 'pointer', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', position: 'relative' }}>
-                    
-                    {/* Voorraad Indicator Badge */}
                     {hasStockManagement && (
-                      <span style={{
-                        position: 'absolute',
-                        top: '8px',
-                        right: '8px',
-                        fontSize: '10px',
-                        fontWeight: '800',
-                        padding: '2px 6px',
-                        borderRadius: '4px',
-                        background: stockQty > 0 ? '#E6F4EA' : '#FCE8E6',
-                        color: stockQty > 0 ? '#137333' : '#C3110C'
-                      }}>
+                      <span style={{ position: 'absolute', top: '8px', right: '8px', fontSize: '10px', fontWeight: '800', padding: '2px 6px', borderRadius: '4px', background: stockQty > 0 ? '#E6F4EA' : '#FCE8E6', color: stockQty > 0 ? '#137333' : '#C3110C' }}>
                         {stockQty} op voorraad
                       </span>
                     )}
 
-                    <div style={{ fontWeight: '600', fontSize: '13px', marginBottom: '12px', paddingRight: hasStockManagement ? '60px' : '0' }}>
-                      {p.name}
-                    </div>
-                    
+                    <div style={{ fontWeight: '600', fontSize: '13px', marginBottom: '12px', paddingRight: hasStockManagement ? '60px' : '0' }}>{p.name}</div>
                     <div style={{ fontWeight: '700', fontSize: '14px', color: '#C3110C' }}>
                       {p.type === 'variable' ? 'Kies opties' : (p.price !== "" && p.price !== null && !isNaN(parseFloat(p.price)) ? `€${parseFloat(p.price).toFixed(2)}` : 'Open Bedrag')}
                     </div>
@@ -325,7 +372,7 @@ export default function CashRegister() {
         </div>
       </div>
 
-      {/* --- POP-UP MODAL: AFREKENEN & WISSELGELD --- */}
+      {/* MODAL: AFREKENEN & WISSELGELD */}
       {showCheckoutModal && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
           <div style={{ background: '#FFF', padding: '25px', borderRadius: '12px', width: '450px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
@@ -366,17 +413,28 @@ export default function CashRegister() {
               </div>
             )}
 
-            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-              <button onClick={() => setShowCheckoutModal(false)} disabled={isProcessingCheckout} style={{ padding: '12px 18px', background: '#F1F3F4', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600' }}>Annuleren</button>
-              <button onClick={handleFinalCheckout} disabled={isProcessingCheckout} style={{ padding: '12px 20px', background: '#C3110C', color: '#FFF', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '700' }}>
-                {isProcessingCheckout ? 'Verwerken...' : 'Betaling Voltooien'}
-              </button>
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '15px' }}>
+              {isProcessingCheckout && paymentMethod === 'sumup' ? (
+                <button 
+                  onClick={handleCancelSumupPayment}
+                  style={{ width: '100%', padding: '12px', background: '#C3110C', color: '#FFF', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '800' }}
+                >
+                  🛑 Betaling op SumUp Annuleren
+                </button>
+              ) : (
+                <>
+                  <button onClick={() => setShowCheckoutModal(false)} disabled={isProcessingCheckout} style={{ padding: '12px 18px', background: '#F1F3F4', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600' }}>Annuleren</button>
+                  <button onClick={handleFinalCheckout} disabled={isProcessingCheckout} style={{ padding: '12px 20px', background: '#C3110C', color: '#FFF', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '700' }}>
+                    {isProcessingCheckout ? 'Wachten op PIN terminal...' : 'Betaling Voltooien'}
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>
       )}
 
-      {/* --- POP-UP MODAL: OPEN BEDRAG (OOK €0.00 IS TOEGESTAAN) --- */}
+      {/* MODAL: OPEN BEDRAG */}
       {showOpenPriceModal && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
           <div style={{ background: '#FFF', padding: '25px', borderRadius: '12px', width: '350px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
@@ -394,7 +452,7 @@ export default function CashRegister() {
         </div>
       )}
 
-      {/* --- POP-UP MODAL: VARIATIES --- */}
+      {/* MODAL: VARIATIES */}
       {showVariationModal && selectedVariableProduct && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
           <div style={{ background: '#FFF', padding: '25px', borderRadius: '12px', width: '400px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
