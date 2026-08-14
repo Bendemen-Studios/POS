@@ -4,7 +4,10 @@ import Link from 'next/link';
 
 export default function POSHome() {
   const router = useRouter();
-  
+
+  // Auth & Sessie Controle
+  const [currentUser, setCurrentUser] = useState(null);
+
   // Producten & Winkelmand
   const [products, setProducts] = useState([]);
   const [cart, setCart] = useState([]);
@@ -24,13 +27,32 @@ export default function POSHome() {
   // Betaling & Status
   const [paymentMethod, setPaymentMethod] = useState('sumup'); // 'sumup', 'manual_pin', 'cash'
   const [loading, setLoading] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [checkoutStatus, setCheckoutStatus] = useState(null);
 
-  // Initialisatie: Producten & Klanten ophalen
+  // Check inlogstatus bij opstarten
   useEffect(() => {
-    fetchProducts();
-    fetchCustomers();
+    const userStr = localStorage.getItem('pos_user');
+    if (!userStr) {
+      router.push('/login');
+    } else {
+      try {
+        setCurrentUser(JSON.parse(userStr));
+      } catch (e) {
+        router.push('/login');
+      }
+    }
+
+    // Ophalen data
+    handleSyncData();
   }, []);
+
+  // Handmatige/Automatische Synchronisatie met WooCommerce
+  const handleSyncData = async () => {
+    setIsSyncing(true);
+    await Promise.all([fetchProducts(), fetchCustomers()]);
+    setIsSyncing(false);
+  };
 
   const fetchProducts = async () => {
     try {
@@ -50,6 +72,12 @@ export default function POSHome() {
     } catch (err) {
       console.error('Fout bij ophalen klanten:', err);
     }
+  };
+
+  // Uitloggen
+  const handleLogout = () => {
+    localStorage.removeItem('pos_user');
+    router.push('/login');
   };
 
   // Cart Handlers
@@ -73,10 +101,9 @@ export default function POSHome() {
     );
   };
 
-  // Rekensom Totalen
+  // Totalen Berekenen
   const subtotal = cart.reduce((acc, item) => acc + parseFloat(item.price || 0) * item.quantity, 0);
 
-  // Handmatige korting berekenen
   let manualDiscountAmount = 0;
   if (discountType === 'percentage') {
     manualDiscountAmount = (subtotal * parseFloat(discountValue || 0)) / 100;
@@ -84,11 +111,10 @@ export default function POSHome() {
     manualDiscountAmount = parseFloat(discountValue || 0);
   }
 
-  // Totale korting (Handmatig + Ingewisselde Punten)
   const totalDiscount = Math.min(subtotal, manualDiscountAmount + parseFloat(redeemedDiscount || 0));
   const finalTotal = Math.max(0, subtotal - totalDiscount);
 
-  // Punten Inwisselen (100 punten = €5, 1 punt = €0.05)
+  // Punten Inwisselen (100 punten = €5 -> 1 punt = €0.05)
   const handleRedeemPoints = () => {
     const pts = parseInt(pointsToRedeem) || 0;
     if (pts <= 0) {
@@ -107,7 +133,7 @@ export default function POSHome() {
     setRedeemedDiscount(discount.toFixed(2));
   };
 
-  // Afrekenen (SumUp / Pin / Contant)
+  // Afrekenen
   const handleCheckout = async () => {
     if (cart.length === 0) {
       alert('Winkelmand is leeg.');
@@ -118,7 +144,6 @@ export default function POSHome() {
     setCheckoutStatus(null);
 
     try {
-      // 1. Als SumUp is geselecteerd, start SumUp transactie
       if (paymentMethod === 'sumup') {
         const sumupRes = await fetch('/api/sumup/create-payment', {
           method: 'POST',
@@ -131,7 +156,6 @@ export default function POSHome() {
         }
       }
 
-      // 2. Maak de order aan in WooCommerce
       const line_items = cart.map((item) => ({
         product_id: item.id,
         quantity: item.quantity,
@@ -161,7 +185,6 @@ export default function POSHome() {
 
       if (data.success) {
         setCheckoutStatus({ success: true, message: `Bestelling #${data.order.id} succesvol verwerkt!` });
-        // Reset state
         setCart([]);
         setSelectedCustomer(null);
         setPointsToRedeem(0);
@@ -169,7 +192,7 @@ export default function POSHome() {
         setDiscountType('none');
         setDiscountValue(0);
       } else {
-        setCheckoutStatus({ success: false, message: data.error || 'Fout bij aanmaken bestelling in WooCommerce.' });
+        setCheckoutStatus({ success: false, message: data.error || 'Fout bij aanmaken bestelling.' });
       }
     } catch (err) {
       console.error(err);
@@ -189,29 +212,54 @@ export default function POSHome() {
 
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col">
-      {/* Header met werkende Admin-knop */}
+      {/* Header met Sync, Admin & Loguit Knoppen */}
       <header className="bg-black text-white p-4 flex justify-between items-center shadow-md">
-        <div className="flex items-center space-x-4">
-          <span className="font-bold text-xl tracking-wider">BDM POS</span>
-        </div>
         <div className="flex items-center space-x-3">
+          <span className="font-bold text-xl tracking-wider">BDM POS</span>
+          {currentUser && (
+            <span className="text-xs bg-gray-800 text-gray-300 px-2 py-1 rounded">
+              {currentUser.username} ({currentUser.role})
+            </span>
+          )}
+        </div>
+        
+        {/* Navigatie Acties */}
+        <div className="flex items-center space-x-2">
+          {/* Sync Knop */}
+          <button
+            onClick={handleSyncData}
+            disabled={isSyncing}
+            className="bg-gray-800 hover:bg-gray-700 text-white px-3 py-2 rounded text-xs font-semibold transition flex items-center space-x-1"
+          >
+            <span>{isSyncing ? '⏳ Syncing...' : '🔄 Sync'}</span>
+          </button>
+
+          {/* Admin Panel Knop */}
           <Link href="/admin">
-            <button className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded text-sm font-semibold transition">
-              Admin Panel
+            <button className="bg-gray-800 hover:bg-gray-700 text-white px-3 py-2 rounded text-xs font-semibold transition">
+              ⚙️ Admin
             </button>
           </Link>
+
+          {/* Loguit Knop */}
+          <button
+            onClick={handleLogout}
+            className="bg-red-700 hover:bg-red-800 text-white px-3 py-2 rounded text-xs font-semibold transition"
+          >
+            🚪 Loguit
+          </button>
         </div>
       </header>
 
-      {/* Content Layout */}
+      {/* Grid Layout */}
       <div className="flex-1 flex flex-col md:flex-row p-4 gap-4 overflow-hidden">
         
-        {/* Linkerkant: Productencatalogus */}
+        {/* Producten Catalogus */}
         <div className="w-full md:w-3/5 flex flex-col bg-white rounded-lg shadow p-4">
           <div className="mb-4">
             <input
               type="text"
-              placeholder="Zoek producten..."
+              placeholder="Zoek producten op naam..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full p-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-black"
@@ -236,12 +284,12 @@ export default function POSHome() {
           </div>
         </div>
 
-        {/* Rechterkant: Winkelmand, Klant, Korting & Afrekenen */}
+        {/* Bestelling, Klant, Korting & Afrekenen */}
         <div className="w-full md:w-2/5 flex flex-col bg-white rounded-lg shadow p-4 justify-between">
           <div>
             <h2 className="text-lg font-bold mb-3 border-b pb-2">Huidige Bestelling</h2>
 
-            {/* Klant Koppeling (voor Punten & Rewards) */}
+            {/* Klant Koppeling */}
             <div className="mb-3 bg-gray-50 p-2 rounded border">
               <label className="text-xs font-bold text-gray-600 block mb-1">Gekoppelde Klant (voor punten):</label>
               {selectedCustomer ? (
@@ -275,7 +323,7 @@ export default function POSHome() {
               )}
             </div>
 
-            {/* Cart Items */}
+            {/* Winkelmand */}
             <div className="overflow-y-auto max-h-40 mb-3 divide-y">
               {cart.length === 0 ? (
                 <p className="text-gray-400 text-sm text-center py-4">Geen artikelen in winkelmand</p>
@@ -296,7 +344,7 @@ export default function POSHome() {
               )}
             </div>
 
-            {/* Kortingen & Punten Inwisselen */}
+            {/* Kortingen & Punten */}
             <div className="border-t pt-2 space-y-2 text-xs">
               <div className="flex justify-between items-center">
                 <span className="font-semibold">Korting / Voucher:</span>
@@ -321,7 +369,7 @@ export default function POSHome() {
                 />
               )}
 
-              {/* Punten inwisselen */}
+              {/* Punten Inwisselen */}
               <div className="bg-gray-50 p-2 rounded border">
                 <span className="font-semibold block mb-1">Punten Inwisselen (100 pnt = €5):</span>
                 <div className="flex space-x-2">
@@ -344,7 +392,7 @@ export default function POSHome() {
             </div>
           </div>
 
-          {/* Betaalmethode Selectie & Totalen */}
+          {/* Betaalmethode & Totalen */}
           <div className="border-t pt-3 mt-2">
             <div className="mb-2">
               <label className="text-xs font-bold text-gray-600 block mb-1">Betaalmethode:</label>
