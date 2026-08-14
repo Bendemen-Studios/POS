@@ -15,33 +15,39 @@ export default function CashierPOS() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [categories, setCategories] = useState([]);
+  
+  // Klant States
   const [customer, setCustomer] = useState(null);
   const [customerSearch, setCustomerSearch] = useState('');
   const [customerResults, setCustomerResults] = useState([]);
   
-  // Kortingen & Punten
+  // Kortingen, Punten & Notities
   const [discount, setDiscount] = useState(0);
   const [pointsUsed, setPointsUsed] = useState(0);
   const [orderNote, setOrderNote] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
 
-  // Custom Artikel Modal
+  // Custom Artikel / Open Bedrag Modal State
   const [showCustomModal, setShowCustomModal] = useState(false);
   const [customName, setCustomName] = useState('');
   const [customPrice, setCustomPrice] = useState('');
 
-  // Filiaal Selectie Modal
+  // Product Variatie Modal State
+  const [showVariationModal, setShowVariationModal] = useState(false);
+  const [activeProductForVariations, setActiveProductForVariations] = useState(null);
+  const [variationsList, setVariationsList] = useState([]);
+  const [loadingVariations, setLoadingVariations] = useState(false);
+
+  // Filiaal Selectie Modal State
   const [showStoreModal, setShowStoreModal] = useState(false);
 
-  // Kassabon / Succes Modal
+  // Kassabon / Succes Modal State
   const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [lastCompletedOrder, setLastCompletedOrder] = useState(null);
 
   // Pickup Orders State
   const [pickupOrders, setPickupOrders] = useState([]);
   const [loadingPickup, setLoadingPickup] = useState(false);
-
-  const receiptPrintRef = useRef();
 
   useEffect(() => {
     const userStr = localStorage.getItem('pos_user');
@@ -76,7 +82,6 @@ export default function CashierPOS() {
       if (res.data.success) {
         const storeList = Array.isArray(res.data.stores) ? res.data.stores : [];
         setAllStores(storeList);
-        // Als er nog geen geselecteerde winkel was, stel de eerste in
         if (!localStorage.getItem('selectedStore') && storeList.length > 0) {
           handleSelectStore(storeList[0]);
         }
@@ -142,14 +147,56 @@ export default function CashierPOS() {
     }
   };
 
-  const addToCart = (product) => {
-    setCart(prev => {
-      const existing = prev.find(item => item.id === product.id);
-      if (existing) {
-        return prev.map(item => item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item);
+  // Product aanklikken: als het variabel is, laad variaties. Anders direct toevoegen aan winkelmand.
+  const handleProductClick = async (product) => {
+    if (product.type === 'variable' && product.variations && product.variations.length > 0) {
+      setActiveProductForVariations(product);
+      setShowVariationModal(true);
+      setLoadingVariations(true);
+      try {
+        const res = await axios.get(`/api/woocommerce/variations?productId=${product.id}`);
+        if (res.data.success) {
+          setVariationsList(res.data.variations || []);
+        } else {
+          setVariationsList([]);
+        }
+      } catch (err) {
+        console.error('Fout bij ophalen variaties:', err);
+        setVariationsList([]);
+      } finally {
+        setLoadingVariations(false);
       }
-      return [...prev, { ...product, quantity: 1, price: parseFloat(product.price || 0) }];
+    } else {
+      addToCart(product);
+    }
+  };
+
+  const addToCart = (product, variation = null) => {
+    const cartItemId = variation ? `${product.id}_var_${variation.id}` : product.id;
+    const itemName = variation ? `${product.name} (${variation.attributes.map(a => a.option).join(', ')})` : product.name;
+    const itemPrice = variation ? parseFloat(variation.price || product.price || 0) : parseFloat(product.price || 0);
+
+    setCart(prev => {
+      const existing = prev.find(item => item.cartItemId === cartItemId);
+      if (existing) {
+        return prev.map(item => item.cartItemId === cartItemId ? { ...item, quantity: item.quantity + 1 } : item);
+      }
+      return [...prev, {
+        cartItemId,
+        id: product.id,
+        variationId: variation ? variation.id : null,
+        name: itemName,
+        price: itemPrice,
+        quantity: 1,
+        images: product.images
+      }];
     });
+
+    if (showVariationModal) {
+      setShowVariationModal(false);
+      setActiveProductForVariations(null);
+      setVariationsList([]);
+    }
   };
 
   const addCustomItem = (e) => {
@@ -162,6 +209,7 @@ export default function CashierPOS() {
     }
 
     const customProduct = {
+      cartItemId: `custom_${Date.now()}`,
       id: `custom_${Date.now()}`,
       name: customName,
       price: priceNum,
@@ -175,9 +223,9 @@ export default function CashierPOS() {
     setShowCustomModal(false);
   };
 
-  const updateQuantity = (id, delta) => {
+  const updateQuantity = (cartItemId, delta) => {
     setCart(prev => prev.map(item => {
-      if (item.id === id) {
+      if (item.cartItemId === cartItemId) {
         const newQty = item.quantity + delta;
         return newQty > 0 ? { ...item, quantity: newQty } : null;
       }
@@ -185,8 +233,8 @@ export default function CashierPOS() {
     }).filter(Boolean));
   };
 
-  const removeFromCart = (id) => {
-    setCart(prev => prev.filter(item => item.id !== id));
+  const removeFromCart = (cartItemId) => {
+    setCart(prev => prev.filter(item => item.cartItemId !== cartItemId));
   };
 
   const clearCart = () => {
@@ -203,7 +251,7 @@ export default function CashierPOS() {
   const calculateTotals = () => {
     const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
     const discountAmount = parseFloat(discount) || 0;
-    const pointsDiscount = (parseFloat(pointsUsed) || 0) * 0.10; // €0.10 per spaarpunt
+    const pointsDiscount = (parseFloat(pointsUsed) || 0) * 0.10; // €0,10 per punt
     const total = Math.max(0, subtotal - discountAmount - pointsDiscount);
     return { subtotal, discountAmount, pointsDiscount, total };
   };
@@ -238,7 +286,6 @@ export default function CashierPOS() {
       const res = await axios.post(endpoint, orderData);
 
       if (res.data.success) {
-        // Sla voltooide bestelling op voor de kassabon modal
         setLastCompletedOrder({
           orderId: res.data.orderId || res.data.number || Date.now(),
           items: [...cart],
@@ -249,14 +296,11 @@ export default function CashierPOS() {
           store: selectedStore
         });
 
-        // Reset winkelmand en opties
         setCart([]);
         setCustomer(null);
         setDiscount(0);
         setPointsUsed(0);
         setOrderNote('');
-
-        // Open Bon / Succes Modal
         setShowReceiptModal(true);
       } else {
         alert('Fout bij plaatsen bestelling: ' + res.data.error);
@@ -294,7 +338,6 @@ export default function CashierPOS() {
 
   const totals = calculateTotals();
 
-  // Filter afhaalbestellingen op basis van het gekoppelde pickup_id
   const filteredPickupOrders = pickupOrders.filter(order => {
     if (!selectedStore?.pickup_id) return true;
     return order.shipping_lines?.some(s => s.meta_data?.some(m => m.key === 'pickup_location_id' && m.value === String(selectedStore.pickup_id)));
@@ -317,7 +360,6 @@ export default function CashierPOS() {
         <div className="flex items-center space-x-3">
           <span className="font-bold text-xl tracking-wider">BDM POS</span>
           
-          {/* Filiaal Badge (Klikbaar om snel te wisselen) */}
           <button
             onClick={() => setShowStoreModal(true)}
             className="text-xs bg-red-600 hover:bg-red-700 text-white px-2.5 py-1 rounded font-bold uppercase flex items-center space-x-1 shadow-sm transition"
@@ -458,7 +500,7 @@ export default function CashierPOS() {
                 onClick={() => setShowCustomModal(true)}
                 className="bg-red-600 hover:bg-red-700 text-white font-bold px-4 py-2 rounded text-xs whitespace-nowrap transition"
               >
-                + Custom Artikel
+                + Custom Artikel / Open Bedrag
               </button>
               <button
                 onClick={() => setShowStoreModal(true)}
@@ -492,9 +534,14 @@ export default function CashierPOS() {
               {filteredProducts.map(product => (
                 <div
                   key={product.id}
-                  onClick={() => addToCart(product)}
-                  className="bg-gray-50 hover:bg-gray-100 border rounded-lg p-3 flex flex-col justify-between cursor-pointer transition shadow-sm hover:shadow-md"
+                  onClick={() => handleProductClick(product)}
+                  className="bg-gray-50 hover:bg-gray-100 border rounded-lg p-3 flex flex-col justify-between cursor-pointer transition shadow-sm hover:shadow-md relative"
                 >
+                  {product.type === 'variable' && (
+                    <span className="absolute top-2 right-2 bg-black text-white text-[9px] px-1.5 py-0.5 rounded font-bold">
+                      Variaties
+                    </span>
+                  )}
                   {product.images?.[0]?.src ? (
                     <div className="w-full h-28 bg-white mb-2 rounded overflow-hidden flex items-center justify-center border">
                       <img src={product.images[0].src} alt={product.name} className="object-cover w-full h-full" />
@@ -506,7 +553,9 @@ export default function CashierPOS() {
                   )}
                   <span className="text-xs font-bold text-gray-800 line-clamp-2">{product.name}</span>
                   <div className="flex justify-between items-center mt-2">
-                    <span className="text-xs font-bold text-red-600">€{parseFloat(product.price || 0).toFixed(2)}</span>
+                    <span className="text-xs font-bold text-red-600">
+                      {product.price ? `€${parseFloat(product.price).toFixed(2)}` : 'Vanaf prijs'}
+                    </span>
                     {product.stock_quantity !== null && (
                       <span className="text-[10px] text-gray-500 font-semibold">Voorraad: {product.stock_quantity}</span>
                     )}
@@ -577,16 +626,16 @@ export default function CashierPOS() {
                   <p className="text-xs text-gray-400 text-center py-8">Winkelmand is leeg</p>
                 ) : (
                   cart.map(item => (
-                    <div key={item.id} className="py-2 flex justify-between items-center text-xs">
+                    <div key={item.cartItemId} className="py-2 flex justify-between items-center text-xs">
                       <div className="flex-1 pr-2">
                         <div className="font-bold text-gray-800">{item.name}</div>
                         <div className="text-gray-500">€{item.price.toFixed(2)} x {item.quantity}</div>
                       </div>
                       <div className="flex items-center space-x-1">
-                        <button onClick={() => updateQuantity(item.id, -1)} className="px-2 py-0.5 bg-gray-200 rounded font-bold hover:bg-gray-300">-</button>
+                        <button onClick={() => updateQuantity(item.cartItemId, -1)} className="px-2 py-0.5 bg-gray-200 rounded font-bold hover:bg-gray-300">-</button>
                         <span className="px-1 font-bold">{item.quantity}</span>
-                        <button onClick={() => updateQuantity(item.id, 1)} className="px-2 py-0.5 bg-gray-200 rounded font-bold hover:bg-gray-300">+</button>
-                        <button onClick={() => removeFromCart(item.id)} className="text-red-600 font-bold px-1 ml-1 hover:bg-red-50 rounded">🗑️</button>
+                        <button onClick={() => updateQuantity(item.cartItemId, 1)} className="px-2 py-0.5 bg-gray-200 rounded font-bold hover:bg-gray-300">+</button>
+                        <button onClick={() => removeFromCart(item.cartItemId)} className="text-red-600 font-bold px-1 ml-1 hover:bg-red-50 rounded">🗑️</button>
                       </div>
                     </div>
                   ))
@@ -679,11 +728,53 @@ export default function CashierPOS() {
         </div>
       )}
 
-      {/* MODAL 1: CUSTOM ARTIKEL */}
+      {/* MODAL 1: VARIATIES KIEZEN */}
+      {showVariationModal && activeProductForVariations && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-55">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full space-y-4 shadow-xl">
+            <h3 className="text-md font-bold">Selecteer Variatie voor: {activeProductForVariations.name}</h3>
+            
+            {loadingVariations ? (
+              <div className="py-8 text-center text-xs text-gray-500">Variaties laden...</div>
+            ) : variationsList.length === 0 ? (
+              <div className="py-8 text-center text-xs text-red-500">Geen variaties gevonden of product heeft geen opties.</div>
+            ) : (
+              <div className="space-y-2 max-h-60 overflow-y-auto">
+                {variationsList.map(variation => (
+                  <button
+                    key={variation.id}
+                    onClick={() => addToCart(activeProductForVariations, variation)}
+                    className="w-full p-3 border rounded text-left hover:bg-gray-50 flex justify-between items-center transition"
+                  >
+                    <div>
+                      <div className="font-bold text-xs">
+                        {variation.attributes.map(a => `${a.name}: ${a.option}`).join(' | ')}
+                      </div>
+                      <div className="text-[10px] text-gray-500">Voorraad: {variation.stock_quantity ?? 'N.v.t.'}</div>
+                    </div>
+                    <span className="font-bold text-red-600 text-sm">€{parseFloat(variation.price || 0).toFixed(2)}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <div className="pt-2">
+              <button
+                onClick={() => { setShowVariationModal(false); setActiveProductForVariations(null); setVariationsList([]); }}
+                className="w-full bg-gray-200 p-2 rounded text-xs font-bold hover:bg-gray-300"
+              >
+                Annuleren
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 2: CUSTOM ARTIKEL / OPEN BEDRAG */}
       {showCustomModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg p-6 max-w-sm w-full space-y-4 shadow-xl">
-            <h3 className="text-md font-bold">Handmatig Custom Artikel Toevoegen</h3>
+            <h3 className="text-md font-bold">Handmatig Custom Artikel / Open Bedrag</h3>
             <form onSubmit={addCustomItem} className="space-y-3">
               <div>
                 <label className="text-xs font-bold text-gray-600 block mb-1">Productnaam / Omschrijving</label>
@@ -729,7 +820,7 @@ export default function CashierPOS() {
         </div>
       )}
 
-      {/* MODAL 2: FILIAAL SELECTIE */}
+      {/* MODAL 3: FILIAAL SELECTIE */}
       {showStoreModal && (
         <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg p-6 max-w-md w-full space-y-4 shadow-2xl">
@@ -770,15 +861,14 @@ export default function CashierPOS() {
         </div>
       )}
 
-      {/* MODAL 3: KASSABON / SUCCES MODAL */}
+      {/* MODAL 4: KASSABON / SUCCES MODAL */}
       {showReceiptModal && lastCompletedOrder && (
         <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg p-6 max-w-sm w-full space-y-4 shadow-2xl text-center">
             <div className="text-green-600 text-4xl">✓</div>
             <h3 className="text-lg font-bold">Bestelling #{lastCompletedOrder.orderId} Geplaatst!</h3>
 
-            {/* Bon Inhoud voor Afdrukken */}
-            <div ref={receiptPrintRef} className="bg-gray-50 p-4 rounded text-left border font-mono text-xs space-y-2">
+            <div className="bg-gray-50 p-4 rounded text-left border font-mono text-xs space-y-2">
               <div className="text-center font-bold text-sm">
                 {lastCompletedOrder.store?.receipt_header || 'BDM POS Store'}
               </div>
