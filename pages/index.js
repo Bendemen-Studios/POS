@@ -245,9 +245,8 @@ export default function CashierPOS() {
         <div className="flex items-center space-x-3">
           <span className="font-bold text-xl tracking-wider">BDM POS</span>
           {selectedStore && (
-            <span className="text-xs bg-red-600 px-2.5 py-1 rounded-md font-bold uppercase flex items-center space-x-1 shadow-sm">
-              <span>📍</span>
-              <span>{selectedStore.store_name}</span>
+            <span className="text-xs bg-red-600 px-2 py-1 rounded font-bold uppercase">
+              📍 {selectedStore.store_name}
             </span>
           )}
           <span className="text-xs bg-gray-800 text-gray-300 px-2 py-1 rounded">
