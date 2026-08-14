@@ -14,8 +14,8 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Zoek de gebruiker in pos_users
-    const [rows] = await pool.execute('SELECT * FROM pos_users WHERE username = ?', [username]);
+    // Zoek de gebruiker op gebruikersnaam óf e-mailadres
+    const [rows] = await pool.execute('SELECT * FROM pos_users WHERE username = ? OR email = ?', [username, username]);
     
     if (rows.length === 0) {
       return res.status(401).json({ success: false, message: 'Ongeldige inloggegevens.' });
@@ -23,15 +23,19 @@ export default async function handler(req, res) {
 
     const user = rows[0];
 
-    // Vergelijk het wachtwoord met password_hash
+    // Vergelijk het ingevoerde wachtwoord met de hash in de database
     const isMatch = await bcrypt.compare(password, user.password_hash);
 
     if (!isMatch) {
       return res.status(401).json({ success: false, message: 'Ongeldige inloggegevens.' });
     }
 
-    // Forceer bendemen altijd naar super_admin
-    const finalRole = (user.username === 'bendemen' || user.email === 'bendemenbv@gmail.com') 
+    // Is het 'bendemen' hoofdaccount ingelogd?
+    const isMainOwnerAccount = user.username === 'bendemen' || user.email === 'info@bendemen.nl';
+
+    // Bepaal de rol: als het het hoofdaccount is -> super_admin. 
+    // Voor alle overige personeelsaccounts gebruiken we dynamisch de rol uit de database!
+    const effectiveRole = isMainOwnerAccount 
       ? 'super_admin' 
       : (user.role || 'cashier');
 
@@ -42,7 +46,8 @@ export default async function handler(req, res) {
         id: user.id,
         username: user.username,
         email: user.email || '',
-        role: finalRole
+        role: effectiveRole,
+        store_id: user.store_id || null
       }
     });
 

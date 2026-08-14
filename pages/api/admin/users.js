@@ -7,27 +7,39 @@ export default async function handler(req, res) {
     try {
       const [users] = await pool.execute('SELECT id, username, email, role, store_id FROM pos_users');
 
-      const formattedUsers = users.map(user => ({
-        ...user,
-        role: (user.username === 'bendemen' || user.email === 'bendemenbv@gmail.com') 
-          ? 'super_admin' 
-          : (user.role || 'cashier')
-      }));
+      const formattedUsers = users.map(user => {
+        const isMainOwner = user.username === 'bendemen' || user.email === 'info@bendemen.nl';
+
+        return {
+          id: user.id,
+          username: user.username,
+          email: isMainOwner ? 'info@bendemen.nl' : (user.email || ''),
+          // Als het de eigenaar is, altijd super_admin. Anders de rol uit de database.
+          role: isMainOwner ? 'super_admin' : (user.role || 'cashier'),
+          store_id: user.store_id || null
+        };
+      });
 
       return res.status(200).json({ success: true, users: formattedUsers });
     } catch (error) {
       console.error("Fetch users error:", error);
-      return res.status(500).json({ success: false, error: 'Fout bij ophalen gebruikers' });
+      return res.status(500).json({ success: false, error: 'Fout bij ophalen gebruikers uit de database.' });
     }
   }
 
-  // POST: Nieuwe gebruiker aanmaken met gekoppelde store_id
+  // POST: Nieuwe gebruiker/personeelslid toevoegen
   if (req.method === 'POST') {
     try {
       const { username, password, role, store_id, email } = req.body;
 
       if (!username || !password) {
-        return res.status(400).json({ success: false, message: 'Gebruikersnaam en wachtwoord verplicht.' });
+        return res.status(400).json({ success: false, message: 'Gebruikersnaam en wachtwoord zijn verplicht.' });
+      }
+
+      // Check of gebruikersnaam al bestaat
+      const [existingUsers] = await pool.execute('SELECT id FROM pos_users WHERE username = ?', [username]);
+      if (existingUsers.length > 0) {
+        return res.status(400).json({ success: false, message: 'Deze gebruikersnaam bestaat al.' });
       }
 
       const hashedPassword = await bcrypt.hash(password, 10);
@@ -44,11 +56,26 @@ export default async function handler(req, res) {
     }
   }
 
-  // DELETE: Gebruiker verwijderen uit pos_users
+  // DELETE: Gebruiker verwijderen (Beveiligd tegen verwijderen van bendemen)
   if (req.method === 'DELETE') {
     try {
       const { id } = req.query;
       if (!id) return res.status(400).json({ success: false, message: 'Geen ID opgegeven.' });
+
+      // Controleer wie er verwijderd dreigt te worden
+      const [targetRows] = await pool.execute('SELECT username, email FROM pos_users WHERE id = ?', [id]);
+      
+      if (targetRows.length > 0) {
+        const targetUser = targetRows[0];
+        const isMainOwner = targetUser.username === 'bendemen' || targetUser.email === 'info@bendemen.nl';
+
+        if (isMainOwner) {
+          return res.status(403).json({ 
+            success: false, 
+            message: 'Het hoofdaccount "bendemen" (info@bendemen.nl) is beveiligd en kan niet worden verwijderd.' 
+          });
+        }
+      }
 
       await pool.execute('DELETE FROM pos_users WHERE id = ?', [id]);
       return res.status(200).json({ success: true, message: 'Gebruiker succesvol verwijderd.' });
