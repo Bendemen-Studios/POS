@@ -2,236 +2,181 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import useSWR from 'swr';
 import axios from 'axios';
-import { fetcher } from '../lib/fetcher';
 
-export default function AdminPanel() {
+const fetcher = (url) => axios.get(url).then((res) => res.data);
+
+export default function AdminDashboard() {
   const router = useRouter();
-  
-  const { data: usersData, mutate: mutateUsers } = useSWR('/api/admin/users', fetcher, { revalidateOnFocus: false });
-  const { data: storesData, mutate: mutateStores } = useSWR('/api/stores', fetcher, { revalidateOnFocus: false });
+  const [mounted, setMounted] = useState(false);
+  const [user, setUser] = useState(null);
+  const [activeTab, setActiveTab] = useState('stores'); // Default op 'stores' gezet
 
-  const users = usersData?.users || [];
-  const stores = storesData?.stores || [];
-  const isLoading = !usersData && !storesData;
+  // Multi-Store State
+  const [stores, setStores] = useState([
+    { id: 1, name: 'Ons Winkeltje', location: 'Hellevoetsluis', email: 'info@onswinkeltje.nl', active: true },
+    { id: 2, name: 'Bendemen HQ', location: 'Hellevoetsluis', email: 'info@bendemen.nl', active: true }
+  ]);
+  const [editingStore, setEditingStore] = useState(null);
+  const [showAddStoreModal, setShowAddStoreModal] = useState(false);
+  const [newStoreData, setNewStoreData] = useState({ name: '', location: '', email: '' });
 
-  const [newStoreName, setNewStoreName] = useState('');
-  const [newStoreLocation, setNewStoreLocation] = useState('');
-
-  // State voor SumUp pairing
-  const [sumupForm, setSumupForm] = useState({
-    storeId: '',
-    pairingCode: '',
-    readerName: ''
-  });
-
-  const [form, setForm] = useState({
-    username: '',
-    email: '',
-    password: '',
-    firstName: '',
-    lastName: '',
-    role: 'cashier',
-    storeId: ''
-  });
+  // Data ophalen via SWR
+  const { data: productsData, mutate: mutateProducts } = useSWR('/api/woocommerce/products', fetcher);
+  const products = Array.isArray(productsData) ? productsData : (productsData?.products || []);
 
   useEffect(() => {
-    const token = localStorage.getItem('pos_token');
-    const rawUser = localStorage.getItem('pos_user');
-    if (!token && !rawUser) {
+    setMounted(true);
+    try {
+      const rawUser = localStorage.getItem('pos_user');
+      if (rawUser && rawUser !== 'undefined') {
+        const parsedUser = JSON.parse(rawUser);
+        setUser(parsedUser);
+        if (parsedUser.role !== 'administrator') {
+          router.push('/');
+        }
+      } else {
+        router.push('/login');
+      }
+    } catch (e) {
       router.push('/login');
     }
+
+    // Laad opgeslagen winkels uit localStorage indien aanwezig
+    try {
+      const savedStores = localStorage.getItem('pos_stores');
+      if (savedStores) setStores(JSON.parse(savedStores));
+    } catch (e) { console.error('Fout bij laden stores:', e); }
   }, [router]);
 
-  useEffect(() => {
-    if (stores.length > 0) {
-      if (!form.storeId) setForm(f => ({ ...f, storeId: stores[0].id }));
-      if (!sumupForm.storeId) setSumupForm(s => ({ ...s, storeId: stores[0].id }));
-    }
-  }, [stores]);
+  if (!mounted || !user) return null;
 
-  const handleAddStore = async (e) => {
-    e.preventDefault();
-    if (!newStoreName) return;
-
-    try {
-      const res = await axios.post('/api/stores', { 
-        name: newStoreName, 
-        location: newStoreLocation || 'Hoofdvestiging' 
-      });
-      if (res.data.success) {
-        setNewStoreName('');
-        setNewStoreLocation('');
-        mutateStores();
-        alert('Winkel succesvol toegevoegd!');
-      }
-    } catch (error) {
-      alert(error.response?.data?.error || 'Fout bij toevoegen van winkel.');
-    }
+  // Multi-Store acties
+  const saveStoresToStorage = (updatedStores) => {
+    setStores(updatedStores);
+    localStorage.setItem('pos_stores', JSON.stringify(updatedStores));
   };
 
-  const handleDeleteStore = async (id, name) => {
-    if (stores.length <= 1) {
-      alert('Je moet minimaal één winkel behouden.');
-      return;
-    }
-    if (!confirm(`Weet je zeker dat je winkel "${name}" wilt verwijderen?`)) return;
-
-    try {
-      const res = await axios.delete(`/api/stores?id=${id}`);
-      if (res.data.success) {
-        mutateStores();
-        alert('Winkel verwijderd.');
-      }
-    } catch (error) {
-      alert(error.response?.data?.error || 'Fout bij verwijderen van winkel.');
-    }
+  const handleToggleStoreActive = (id) => {
+    const updated = stores.map(s => s.id === id ? { ...s, active: !s.active } : s);
+    saveStoresToStorage(updated);
   };
 
-  const handlePairSumUp = async (e) => {
-    e.preventDefault();
-    if (!sumupForm.pairingCode) {
-      alert('Vul de pairing code van het pinapparaat in.');
-      return;
-    }
-
-    try {
-      const res = await axios.post('/api/admin/sumup-pair', sumupForm);
-      if (res.data.success) {
-        alert('Pinapparaat succesvol gekoppeld aan de winkel!');
-        setSumupForm({ storeId: stores[0]?.id || '', pairingCode: '', readerName: '' });
-        mutateStores();
-      }
-    } catch (error) {
-      alert(error.response?.data?.error || 'Fout bij koppelen van SumUp.');
-    }
+  const handleSaveEditStore = () => {
+    if (!editingStore.name) return alert('Vul een winkelnaam in.');
+    const updated = stores.map(s => s.id === editingStore.id ? editingStore : s);
+    saveStoresToStorage(updated);
+    setEditingStore(null);
   };
 
-  const handleCreateUser = async (e) => {
-    e.preventDefault();
-    if (!form.username || !form.email || !form.password) {
-      alert('Vul minimaal gebruikersnaam, e-mail en wachtwoord in.');
-      return;
-    }
-
-    try {
-      const res = await axios.post('/api/admin/users', form);
-      if (res.data.success) {
-        alert('Personeelslid succesvol toegevoegd!');
-        setForm({
-          username: '',
-          email: '',
-          password: '',
-          firstName: '',
-          lastName: '',
-          role: 'cashier',
-          storeId: stores[0]?.id || ''
-        });
-        mutateUsers();
-      }
-    } catch (error) {
-      alert(error.response?.data?.error || 'Fout bij aanmaken van gebruiker.');
-    }
-  };
-
-  const handleDeleteUser = async (id, name) => {
-    if (!confirm(`Weet je zeker dat je ${name} wilt verwijderen?`)) return;
-
-    try {
-      const res = await axios.delete(`/api/admin/users?id=${id}`);
-      if (res.data.success) {
-        alert('Gebruiker verwijderd.');
-        mutateUsers();
-      }
-    } catch (error) {
-      alert(error.response?.data?.error || 'Fout bij verwijderen van gebruiker.');
-    }
+  const handleAddStore = () => {
+    if (!newStoreData.name) return alert('Vul een winkelnaam in.');
+    const newStore = {
+      id: Date.now(),
+      name: newStoreData.name,
+      location: newStoreData.location || 'Onbekend',
+      email: newStoreData.email || '',
+      active: true
+    };
+    const updated = [...stores, newStore];
+    saveStoresToStorage(updated);
+    setNewStoreData({ name: '', location: '', email: '' });
+    setShowAddStoreModal(false);
   };
 
   return (
-    <div style={{ background: '#FFFFFF', color: '#111111', minHeight: '100vh', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', padding: '40px' }}>
-      <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
+    <div style={{ background: '#F8F9FA', minHeight: '100vh', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', padding: '20px' }}>
+      <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
         
         {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px', borderBottom: '1px solid #EAEAEA', paddingBottom: '20px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-            <div style={{ background: '#000', color: '#FFF', padding: '6px 10px', fontWeight: '900', borderRadius: '4px', fontSize: '16px' }}>BDM</div>
-            <h1 style={{ margin: 0, fontSize: '20px', fontWeight: '800' }}>BENDEMEN ADMIN</h1>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#FFF', padding: '20px 25px', borderRadius: '12px', border: '1px solid #EAEAEA', marginBottom: '20px' }}>
+          <div>
+            <h1 style={{ margin: 0, fontSize: '22px', fontWeight: '800' }}>BENDEMEN POS - Admin</h1>
+            <span style={{ fontSize: '13px', color: '#666' }}>Ingelogd als: <strong>{user.name || user.username || 'Administrator'}</strong></span>
           </div>
           <button 
-            onClick={() => router.push('/')}
-            style={{ padding: '10px 16px', background: '#000', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}
+            onClick={() => router.push('/')} 
+            style={{ padding: '10px 18px', background: '#000', color: '#FFF', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '700', fontSize: '13px' }}
           >
             ← Terug naar Kassa
           </button>
         </div>
 
-        {/* Winkel Beheer */}
-        <div style={{ background: '#FAFAFA', padding: '30px', borderRadius: '12px', border: '1px solid #EAEAEA', marginBottom: '30px' }}>
-          <h3 style={{ marginTop: 0, marginBottom: '20px', fontSize: '18px', fontWeight: '800' }}>🏪 Winkel Beheer</h3>
-          
-          <form onSubmit={handleAddStore} style={{ display: 'grid', gridTemplateColumns: '2fr 2fr 1fr', gap: '15px', alignItems: 'flex-end', marginBottom: '20px' }}>
-            <div>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '6px', textTransform: 'uppercase', color: '#333' }}>Winkelnaam</label>
-              <input 
-                type="text" 
-                placeholder="Bijv. Ons Winkeltje"
-                value={newStoreName}
-                onChange={(e) => setNewStoreName(e.target.value)}
-                required
-                style={{ width: '100%', padding: '12px', border: '1px solid #DDD', borderRadius: '8px', boxSizing: 'border-box', fontSize: '14px', outline: 'none' }}
-              />
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '6px', textTransform: 'uppercase', color: '#333' }}>Locatie / Omschrijving</label>
-              <input 
-                type="text" 
-                placeholder="Bijv. Hellevoetsluis"
-                value={newStoreLocation}
-                onChange={(e) => setNewStoreLocation(e.target.value)}
-                style={{ width: '100%', padding: '12px', border: '1px solid #DDD', borderRadius: '8px', boxSizing: 'border-box', fontSize: '14px', outline: 'none' }}
-              />
-            </div>
-            <button 
-              type="submit" 
-              style={{ padding: '12px', background: '#000', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '700', fontSize: '14px', cursor: 'pointer' }}
+        {/* Tab Navigatie */}
+        <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
+          {[
+            { id: 'stores', label: '🏪 Multi-Store Beheer' },
+            { id: 'orders', label: '📊 Bestellingen & Omzet' },
+            { id: 'products', label: '📦 Voorraad & Producten' },
+            { id: 'settings', label: '⚙️ Instellingen' }
+          ].map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              style={{
+                padding: '12px 20px',
+                background: activeTab === tab.id ? '#000' : '#FFF',
+                color: activeTab === tab.id ? '#FFF' : '#333',
+                border: '1px solid #EAEAEA',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontWeight: '700',
+                fontSize: '13px'
+              }}
             >
-              + Winkel Toevoegen
+              {tab.label}
             </button>
-          </form>
+          ))}
+        </div>
 
-          <div style={{ background: '#FFFFFF', border: '1px solid #EAEAEA', borderRadius: '8px', overflow: 'hidden' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '14px' }}>
+        {/* TAB 1: MULTI-STORE BEHEER */}
+        {activeTab === 'stores' && (
+          <div style={{ background: '#FFF', padding: '25px', borderRadius: '12px', border: '1px solid #EAEAEA' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '800' }}>Winkel / Vestigingen Beheer</h3>
+                <p style={{ margin: '4px 0 0 0', color: '#666', fontSize: '13px' }}>Beheer hier de verschillende winkellocaties die gekoppeld zijn aan de kassa.</p>
+              </div>
+              <button 
+                onClick={() => setShowAddStoreModal(true)}
+                style={{ padding: '10px 16px', background: '#C3110C', color: '#FFF', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '700', fontSize: '13px' }}
+              >
+                + Nieuwe Winkel Toevoegen
+              </button>
+            </div>
+
+            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
               <thead>
-                <tr style={{ background: '#FAFAFA', borderBottom: '1px solid #EAEAEA' }}>
-                  <th style={{ padding: '12px 15px', fontWeight: '700' }}>Winkelnaam</th>
-                  <th style={{ padding: '12px 15px', fontWeight: '700' }}>Locatie</th>
-                  <th style={{ padding: '12px 15px', fontWeight: '700' }}>SumUp Reader / Status</th>
-                  <th style={{ padding: '12px 15px', fontWeight: '700', textAlign: 'right' }}>Actie</th>
+                <tr style={{ borderBottom: '2px solid #EAEAEA', background: '#FAFAFA' }}>
+                  <th style={{ padding: '12px' }}>Winkelnaam</th>
+                  <th style={{ padding: '12px' }}>Locatie</th>
+                  <th style={{ padding: '12px' }}>E-mail</th>
+                  <th style={{ padding: '12px' }}>Status</th>
+                  <th style={{ padding: '12px', textAlign: 'right' }}>Acties</th>
                 </tr>
               </thead>
               <tbody>
-                {stores.map(store => (
-                  <tr key={store.id} style={{ borderBottom: '1px solid #F2F2F2' }}>
-                    <td style={{ padding: '12px 15px', fontWeight: '600' }}>{store.name}</td>
-                    <td style={{ padding: '12px 15px', color: '#666' }}>{store.location}</td>
-                    <td style={{ padding: '12px 15px', color: store.sumup_reader_id ? '#0d904f' : '#888', fontWeight: '600' }}>
-                      {store.sumup_reader_id ? `Gekoppeld (${store.sumup_reader_id})` : 'Niet gekoppeld'}
+                {stores.map(s => (
+                  <tr key={s.id} style={{ borderBottom: '1px solid #EAEAEA' }}>
+                    <td style={{ padding: '12px', fontWeight: '700' }}>{s.name}</td>
+                    <td style={{ padding: '12px', color: '#555' }}>{s.location}</td>
+                    <td style={{ padding: '12px', color: '#555' }}>{s.email || '-'}</td>
+                    <td style={{ padding: '12px' }}>
+                      <span style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', background: s.active ? '#E6F4EA' : '#FCE8E6', color: s.active ? '#137333' : '#C3110C' }}>
+                        {s.active ? 'Actief' : 'Inactief'}
+                      </span>
                     </td>
-                    <td style={{ padding: '12px 15px', textAlign: 'right' }}>
-                      <button
-                        onClick={() => handleDeleteStore(store.id, store.name)}
-                        style={{
-                          padding: '5px 10px',
-                          background: '#FCE8E6',
-                          color: '#C3110C',
-                          border: '1px solid #FAD2D1',
-                          borderRadius: '6px',
-                          cursor: 'pointer',
-                          fontSize: '12px',
-                          fontWeight: '600'
-                        }}
+                    <td style={{ padding: '12px', textAlign: 'right' }}>
+                      <button 
+                        onClick={() => setEditingStore(s)}
+                        style={{ padding: '6px 12px', background: '#F1F3F4', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', fontSize: '12px', marginRight: '6px' }}
                       >
-                        Verwijderen
+                        ✏️ Wijzigen
+                      </button>
+                      <button 
+                        onClick={() => handleToggleStoreActive(s.id)}
+                        style={{ padding: '6px 12px', background: s.active ? '#FFF0F0' : '#EAEAEA', color: s.active ? '#C3110C' : '#333', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', fontSize: '12px' }}
+                      >
+                        {s.active ? 'Deactiveren' : 'Activeren'}
                       </button>
                     </td>
                   </tr>
@@ -239,209 +184,161 @@ export default function AdminPanel() {
               </tbody>
             </table>
           </div>
-        </div>
+        )}
 
-        {/* SumUp Pinapparaat Koppelen */}
-        <div style={{ background: '#FAFAFA', padding: '30px', borderRadius: '12px', border: '1px solid #EAEAEA', marginBottom: '30px' }}>
-          <h3 style={{ marginTop: 0, marginBottom: '20px', fontSize: '18px', fontWeight: '800' }}>💳 SumUp Pinapparaat Koppelen</h3>
-          <p style={{ fontSize: '13px', color: '#666', marginBottom: '20px' }}>
-            Zet je SumUp lezer in de API-modus om een pairing code te genereren, selecteer de winkel en vul de code hieronder in.
-          </p>
-
-          <form onSubmit={handlePairSumUp} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px', alignItems: 'flex-end' }}>
-            <div>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '6px', textTransform: 'uppercase', color: '#333' }}>Kies Winkel</label>
-              <select 
-                value={sumupForm.storeId}
-                onChange={(e) => setSumupForm({ ...sumupForm, storeId: e.target.value })}
-                style={{ width: '100%', padding: '12px', border: '1px solid #DDD', borderRadius: '8px', boxSizing: 'border-box', background: '#fff', fontSize: '14px', outline: 'none' }}
-              >
-                {stores.map(store => (
-                  <option key={store.id} value={store.id}>{store.name}</option>
-                ))}
-              </select>
+        {/* TAB 2: BESTELLINGEN */}
+        {activeTab === 'orders' && (
+          <div style={{ background: '#FFF', padding: '25px', borderRadius: '12px', border: '1px solid #EAEAEA' }}>
+            <h3 style={{ marginTop: 0, fontSize: '18px', fontWeight: '800' }}>Verkoopoverzicht</h3>
+            <p style={{ color: '#666', fontSize: '14px' }}>Hier kun je recente transacties inzien die via de kassa of webshop zijn geplaatst.</p>
+            <div style={{ background: '#FAFAFA', padding: '20px', borderRadius: '8px', border: '1px solid #EEE', textAlign: 'center', color: '#888', marginTop: '15px' }}>
+              Wordt gesynchroniseerd met WooCommerce orders...
             </div>
-            <div>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '6px', textTransform: 'uppercase', color: '#333' }}>Pairing Code</label>
-              <input 
-                type="text" 
-                placeholder="Bijv. ABC123XYZ"
-                value={sumupForm.pairingCode}
-                onChange={(e) => setSumupForm({ ...sumupForm, pairingCode: e.target.value })}
-                required
-                style={{ width: '100%', padding: '12px', border: '1px solid #DDD', borderRadius: '8px', boxSizing: 'border-box', fontSize: '14px', outline: 'none' }}
-              />
-            </div>
-            <button 
-              type="submit" 
-              style={{ padding: '12px', background: '#000', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '700', fontSize: '14px', cursor: 'pointer' }}
-            >
-              Pinapparaat Koppelen
-            </button>
-          </form>
-        </div>
+          </div>
+        )}
 
-        {/* Formulier Personeel */}
-        <div style={{ background: '#FAFAFA', padding: '30px', borderRadius: '12px', border: '1px solid #EAEAEA', marginBottom: '30px' }}>
-          <h3 style={{ marginTop: 0, marginBottom: '20px', fontSize: '18px', fontWeight: '800' }}>Nieuw Personeel / Manager Toevoegen</h3>
-          
-          <form onSubmit={handleCreateUser} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
-            <div>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '6px', textTransform: 'uppercase', color: '#333' }}>Gebruikersnaam</label>
-              <input 
-                type="text" 
-                value={form.username}
-                onChange={(e) => setForm({ ...form, username: e.target.value })}
-                required
-                style={{ width: '100%', padding: '12px', border: '1px solid #DDD', borderRadius: '8px', boxSizing: 'border-box', fontSize: '14px', outline: 'none' }}
-              />
+        {/* TAB 3: PRODUCTEN */}
+        {activeTab === 'products' && (
+          <div style={{ background: '#FFF', padding: '25px', borderRadius: '12px', border: '1px solid #EAEAEA' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '800' }}>Producten & Voorraad ({products.length})</h3>
+              <button onClick={() => mutateProducts()} style={{ padding: '8px 14px', background: '#F1F3F4', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', fontSize: '12px' }}>🔄 Verversen</button>
             </div>
-
-            <div>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '6px', textTransform: 'uppercase', color: '#333' }}>E-mailadres</label>
-              <input 
-                type="email" 
-                value={form.email}
-                onChange={(e) => setForm({ ...form, email: e.target.value })}
-                required
-                style={{ width: '100%', padding: '12px', border: '1px solid #DDD', borderRadius: '8px', boxSizing: 'border-box', fontSize: '14px', outline: 'none' }}
-              />
-            </div>
-
-            <div>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '6px', textTransform: 'uppercase', color: '#333' }}>Voornaam</label>
-              <input 
-                type="text" 
-                value={form.firstName}
-                onChange={(e) => setForm({ ...form, firstName: e.target.value })}
-                style={{ width: '100%', padding: '12px', border: '1px solid #DDD', borderRadius: '8px', boxSizing: 'border-box', fontSize: '14px', outline: 'none' }}
-              />
-            </div>
-
-            <div>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '6px', textTransform: 'uppercase', color: '#333' }}>Achternaam</label>
-              <input 
-                type="text" 
-                value={form.lastName}
-                onChange={(e) => setForm({ ...form, lastName: e.target.value })}
-                style={{ width: '100%', padding: '12px', border: '1px solid #DDD', borderRadius: '8px', boxSizing: 'border-box', fontSize: '14px', outline: 'none' }}
-              />
-            </div>
-
-            <div>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '6px', textTransform: 'uppercase', color: '#333' }}>Wachtwoord</label>
-              <input 
-                type="password" 
-                value={form.password}
-                onChange={(e) => setForm({ ...form, password: e.target.value })}
-                required
-                style={{ width: '100%', padding: '12px', border: '1px solid #DDD', borderRadius: '8px', boxSizing: 'border-box', fontSize: '14px', outline: 'none' }}
-              />
-            </div>
-
-            <div>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '6px', textTransform: 'uppercase', color: '#333' }}>Rol / Functie</label>
-              <select 
-                value={form.role}
-                onChange={(e) => setForm({ ...form, role: e.target.value })}
-                style={{ width: '100%', padding: '12px', border: '1px solid #DDD', borderRadius: '8px', boxSizing: 'border-box', background: '#fff', fontSize: '14px', outline: 'none' }}
-              >
-                <option value="cashier">Personeel (Kassa)</option>
-                <option value="shop_manager">Manager</option>
-                <option value="administrator">Administrator</option>
-              </select>
-            </div>
-
-            <div style={{ gridColumn: 'span 2' }}>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '6px', textTransform: 'uppercase', color: '#333' }}>Toegewezen Winkel</label>
-              <select 
-                value={form.storeId}
-                onChange={(e) => setForm({ ...form, storeId: e.target.value })}
-                style={{ width: '100%', padding: '12px', border: '1px solid #DDD', borderRadius: '8px', boxSizing: 'border-box', background: '#fff', fontSize: '14px', outline: 'none' }}
-              >
-                {stores.map(store => (
-                  <option key={store.id} value={store.id}>{store.name}</option>
-                ))}
-              </select>
-            </div>
-
-            <div style={{ gridColumn: 'span 2', marginTop: '10px' }}>
-              <button 
-                type="submit" 
-                style={{ width: '100%', padding: '14px', background: '#C3110C', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '700', fontSize: '15px', cursor: 'pointer' }}
-              >
-                Gebruiker Aanmaken
-              </button>
-            </div>
-          </form>
-        </div>
-
-        {/* Tabel met gebruikers */}
-        <div style={{ background: '#FAFAFA', padding: '30px', borderRadius: '12px', border: '1px solid #EAEAEA' }}>
-          <h3 style={{ marginTop: 0, marginBottom: '20px', fontSize: '18px', fontWeight: '800' }}>Geregistreerd Personeel</h3>
-          {isLoading ? (
-            <p style={{ color: '#666', fontSize: '14px' }}>Laden...</p>
-          ) : users.length === 0 ? (
-            <p style={{ color: '#666', fontSize: '14px' }}>Geen gebruikers gevonden.</p>
-          ) : (
-            <div style={{ background: '#FFFFFF', border: '1px solid #EAEAEA', borderRadius: '8px', overflow: 'hidden' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '14px' }}>
+            <div style={{ maxHeight: '500px', overflowY: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
                 <thead>
-                  <tr style={{ background: '#FAFAFA', borderBottom: '1px solid #EAEAEA' }}>
-                    <th style={{ padding: '15px', fontWeight: '700' }}>Naam</th>
-                    <th style={{ padding: '15px', fontWeight: '700' }}>E-mail</th>
-                    <th style={{ padding: '15px', fontWeight: '700' }}>Rol</th>
-                    <th style={{ padding: '15px', fontWeight: '700' }}>Winkel</th>
-                    <th style={{ padding: '15px', fontWeight: '700', textAlign: 'right' }}>Actie</th>
+                  <tr style={{ borderBottom: '2px solid #EAEAEA', background: '#FAFAFA' }}>
+                    <th style={{ padding: '10px' }}>ID</th>
+                    <th style={{ padding: '10px' }}>Naam</th>
+                    <th style={{ padding: '10px' }}>Prijs</th>
+                    <th style={{ padding: '10px' }}>Type</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {users.map(u => {
-                    const matchedStore = stores.find(s => s.id === u.storeId);
-                    return (
-                      <tr key={u.id} style={{ borderBottom: '1px solid #F2F2F2' }}>
-                        <td style={{ padding: '15px', fontWeight: '600' }}>{u.name}</td>
-                        <td style={{ padding: '15px', color: '#666' }}>{u.email}</td>
-                        <td style={{ padding: '15px' }}>
-                          <span style={{ 
-                            padding: '4px 8px', 
-                            borderRadius: '4px', 
-                            fontSize: '11px', 
-                            fontWeight: '700',
-                            background: u.role === 'administrator' ? '#FCE8E6' : u.role === 'shop_manager' ? '#E8F0FE' : '#F1F3F4',
-                            color: u.role === 'administrator' ? '#C3110C' : u.role === 'shop_manager' ? '#1A73E8' : '#333'
-                          }}>
-                            {u.role}
-                          </span>
-                        </td>
-                        <td style={{ padding: '15px', color: '#666' }}>{matchedStore ? matchedStore.name : u.storeId}</td>
-                        <td style={{ padding: '15px', textAlign: 'right' }}>
-                          <button
-                            onClick={() => handleDeleteUser(u.id, u.name)}
-                            style={{
-                              padding: '6px 12px',
-                              background: '#FCE8E6',
-                              color: '#C3110C',
-                              border: '1px solid #FAD2D1',
-                              borderRadius: '6px',
-                              cursor: 'pointer',
-                              fontSize: '12px',
-                              fontWeight: '600'
-                            }}
-                          >
-                            Verwijderen
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {products.map(p => (
+                    <tr key={p.id} style={{ borderBottom: '1px solid #EAEAEA' }}>
+                      <td style={{ padding: '10px', color: '#888' }}>#{p.id}</td>
+                      <td style={{ padding: '10px', fontWeight: '600' }}>{p.name}</td>
+                      <td style={{ padding: '10px', color: '#C3110C', fontWeight: 'bold' }}>{parseFloat(p.price) > 0 ? `€${p.price}` : 'Open Bedrag'}</td>
+                      <td style={{ padding: '10px' }}><span style={{ padding: '3px 8px', background: '#F1F3F4', borderRadius: '4px', fontSize: '11px', fontWeight: '600' }}>{p.type}</span></td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
-          )}
-        </div>
+          </div>
+        )}
+
+        {/* TAB 4: INSTELLINGEN */}
+        {activeTab === 'settings' && (
+          <div style={{ background: '#FFF', padding: '25px', borderRadius: '12px', border: '1px solid #EAEAEA' }}>
+            <h3 style={{ marginTop: 0, fontSize: '18px', fontWeight: '800' }}>Algemene Instellingen</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', maxWidth: '400px', marginTop: '15px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '5px' }}>Standaard Betaalmethode</label>
+                <select style={{ width: '100%', padding: '10px', border: '1px solid #DDD', borderRadius: '6px' }}>
+                  <option>SumUp PIN</option>
+                  <option>PIN Handmatig</option>
+                  <option>Contant</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        )}
 
       </div>
+
+      {/* --- POP-UP MODAL: WINKEL WIJZIGEN --- */}
+      {editingStore && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
+          <div style={{ background: '#FFF', padding: '25px', borderRadius: '12px', width: '400px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
+            <h3 style={{ marginTop: 0, fontSize: '18px', fontWeight: '800' }}>Winkel Wijzigen</h3>
+            
+            <div style={{ margin: '15px 0', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '4px' }}>Winkelnaam</label>
+                <input 
+                  type="text" 
+                  value={editingStore.name} 
+                  onChange={(e) => setEditingStore({ ...editingStore, name: e.target.value })} 
+                  style={{ width: '100%', padding: '10px', border: '1px solid #CCC', borderRadius: '6px', boxSizing: 'border-box' }}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '4px' }}>Locatie / Stad</label>
+                <input 
+                  type="text" 
+                  value={editingStore.location} 
+                  onChange={(e) => setEditingStore({ ...editingStore, location: e.target.value })} 
+                  style={{ width: '100%', padding: '10px', border: '1px solid #CCC', borderRadius: '6px', boxSizing: 'border-box' }}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '4px' }}>E-mailadres</label>
+                <input 
+                  type="email" 
+                  value={editingStore.email} 
+                  onChange={(e) => setEditingStore({ ...editingStore, email: e.target.value })} 
+                  style={{ width: '100%', padding: '10px', border: '1px solid #CCC', borderRadius: '6px', boxSizing: 'border-box' }}
+                />
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+              <button onClick={() => setEditingStore(null)} style={{ padding: '10px 15px', background: '#F1F3F4', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600' }}>Annuleren</button>
+              <button onClick={handleSaveEditStore} style={{ padding: '10px 15px', background: '#000', color: '#FFF', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600' }}>Opslaan</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- POP-UP MODAL: NIEUWE WINKEL TOEVOEGEN --- */}
+      {showAddStoreModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
+          <div style={{ background: '#FFF', padding: '25px', borderRadius: '12px', width: '400px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
+            <h3 style={{ marginTop: 0, fontSize: '18px', fontWeight: '800' }}>Nieuwe Winkel Toevoegen</h3>
+            
+            <div style={{ margin: '15px 0', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '4px' }}>Winkelnaam</label>
+                <input 
+                  type="text" 
+                  placeholder="bijv. Bendemen Pop-Up Store" 
+                  value={newStoreData.name} 
+                  onChange={(e) => setNewStoreData({ ...newStoreData, name: e.target.value })} 
+                  style={{ width: '100%', padding: '10px', border: '1px solid #CCC', borderRadius: '6px', boxSizing: 'border-box' }}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '4px' }}>Locatie / Stad</label>
+                <input 
+                  type="text" 
+                  placeholder="bijv. Hellevoetsluis" 
+                  value={newStoreData.location} 
+                  onChange={(e) => setNewStoreData({ ...newStoreData, location: e.target.value })} 
+                  style={{ width: '100%', padding: '10px', border: '1px solid #CCC', borderRadius: '6px', boxSizing: 'border-box' }}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '4px' }}>E-mailadres</label>
+                <input 
+                  type="email" 
+                  placeholder="winkel@bendemen.nl" 
+                  value={newStoreData.email} 
+                  onChange={(e) => setNewStoreData({ ...newStoreData, email: e.target.value })} 
+                  style={{ width: '100%', padding: '10px', border: '1px solid #CCC', borderRadius: '6px', boxSizing: 'border-box' }}
+                />
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+              <button onClick={() => setShowAddStoreModal(false)} style={{ padding: '10px 15px', background: '#F1F3F4', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600' }}>Annuleren</button>
+              <button onClick={handleAddStore} style={{ padding: '10px 15px', background: '#C3110C', color: '#FFF', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600' }}>Toevoegen</button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
