@@ -25,6 +25,9 @@ export default function POSHome() {
   const [customItem, setCustomItem] = useState({ name: '', price: '' });
   const [showStoreModal, setShowStoreModal] = useState(false);
 
+  // Negatieve voorraad / waarschuwingspopup state
+  const [stockWarningModal, setStockWarningModal] = useState({ show: false, product: null, variation: null, price: 0 });
+
   // Klanten & Punten
   const [customers, setCustomers] = useState([]);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
@@ -191,7 +194,14 @@ export default function POSHome() {
       return;
     }
 
+    const stock = product.stock_quantity;
     const pPrice = parseFloat(product.price || 0);
+
+    if (stock !== null && stock <= 0) {
+      setStockWarningModal({ show: true, product, variation: null, price: pPrice });
+      return;
+    }
+
     if (product.price === '' || product.price === null || (pPrice === 0 && !product.is_fixed_zero)) {
       setOpenAmountProduct(product);
       setCustomPriceInput('');
@@ -205,6 +215,14 @@ export default function POSHome() {
     const enteredPrice = parseFloat(customPriceInput);
     if (isNaN(enteredPrice) || enteredPrice < 0) {
       alert('Voer een geldig bedrag in (0 of hoger).');
+      return;
+    }
+
+    const stock = openAmountProduct.stock_quantity;
+    if (stock !== null && stock <= 0) {
+      setStockWarningModal({ show: true, product: openAmountProduct, variation: null, price: enteredPrice });
+      setOpenAmountProduct(null);
+      setCustomPriceInput('');
       return;
     }
 
@@ -239,6 +257,14 @@ export default function POSHome() {
 
   const handleSelectVariation = (variation) => {
     const varPrice = parseFloat(variation.price || selectedProductForVariations.price || 0);
+    const varStock = variation.stock_quantity;
+
+    if (varStock !== null && varStock <= 0) {
+      setSelectedProductForVariations(null);
+      setStockWarningModal({ show: true, product: selectedProductForVariations, variation, price: varPrice });
+      return;
+    }
+
     const varName = `${selectedProductForVariations.name} - ${variation.attributes ? variation.attributes.map(a => a.option).join('/') : 'Variatie'}`;
 
     const cartItem = {
@@ -252,6 +278,25 @@ export default function POSHome() {
 
     addToCartCustom(cartItem);
     setSelectedProductForVariations(null);
+  };
+
+  const handleConfirmStockWarning = () => {
+    const { product, variation, price } = stockWarningModal;
+    if (variation) {
+      const varName = `${product.name} - ${variation.attributes ? variation.attributes.map(a => a.option).join('/') : 'Variatie'}`;
+      const cartItem = {
+        ...product,
+        id: `${product.id}_var_${variation.id}`,
+        product_id: product.id,
+        variation_id: variation.id,
+        name: varName,
+        price: price
+      };
+      addToCartCustom(cartItem);
+    } else {
+      addToCart(product, price);
+    }
+    setStockWarningModal({ show: false, product: null, variation: null, price: 0 });
   };
 
   const addToCart = (product, overridePrice = null) => {
@@ -654,6 +699,7 @@ export default function POSHome() {
                 const imageUrl = product.images && product.images.length > 0 ? product.images[0].src : null;
                 const hasVariations = product.variations && product.variations.length > 0;
                 const isPriceZero = parseFloat(product.price || 0) === 0;
+                const stockQty = product.stock_quantity;
 
                 return (
                   <div
@@ -668,7 +714,7 @@ export default function POSHome() {
                     )}
 
                     <div>
-                      <div className="w-full aspect-square bg-gray-200 rounded mb-2 overflow-hidden flex items-center justify-center">
+                      <div className="w-full aspect-square bg-gray-200 rounded mb-2 overflow-hidden flex items-center justify-center relative">
                         {imageUrl ? (
                           <img
                             src={imageUrl}
@@ -677,6 +723,11 @@ export default function POSHome() {
                           />
                         ) : (
                           <span className="text-gray-400 text-xs font-bold">GEEN FOTO</span>
+                        )}
+                        {stockQty !== null && (
+                          <span className={`absolute bottom-1 right-1 text-[10px] px-1.5 py-0.5 rounded font-bold ${stockQty <= 0 ? 'bg-red-600 text-white' : 'bg-black text-white'}`}>
+                            Voorraad: {stockQty}
+                          </span>
                         )}
                       </div>
                       <h3 className="font-semibold text-xs line-clamp-2">{product.name}</h3>
@@ -930,7 +981,10 @@ export default function POSHome() {
                     onClick={() => handleSelectVariation(v)}
                     className="w-full text-left p-3 border rounded hover:border-black flex justify-between items-center bg-gray-50 font-semibold text-xs"
                   >
-                    <span>{v.attributes ? v.attributes.map(a => a.option).join(' / ') : `Variatie #${v.id}`}</span>
+                    <div>
+                      <div>{v.attributes ? v.attributes.map(a => a.option).join(' / ') : `Variatie #${v.id}`}</div>
+                      <div className="text-[10px] text-gray-500">Voorraad: {v.stock_quantity ?? 'N.v.t.'}</div>
+                    </div>
                     <span className="text-red-600 font-bold">€{parseFloat(v.price || selectedProductForVariations.price).toFixed(2)}</span>
                   </button>
                 ))
@@ -945,6 +999,36 @@ export default function POSHome() {
             >
               Sluiten
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 3B: NEGATIEVE VOORRAAD WAARSCHUWING */}
+      {stockWarningModal.show && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-55">
+          <div className="bg-white rounded-lg shadow-2xl max-w-sm w-full p-6 space-y-4 text-center">
+            <div className="text-red-600 text-4xl">⚠️</div>
+            <h3 className="text-lg font-bold">Voorraad Waarschuwing</h3>
+            <p className="text-xs text-gray-600">
+              Dit product ({stockWarningModal.variation ? `${stockWarningModal.product.name} - ${stockWarningModal.variation.attributes.map(a=>a.option).join('/')}` : stockWarningModal.product.name}) heeft een voorraad van <strong>{stockWarningModal.variation ? stockWarningModal.variation.stock_quantity : stockWarningModal.product.stock_quantity}</strong>.
+            </p>
+            <p className="text-xs font-bold text-gray-800 bg-yellow-50 p-2 rounded border border-yellow-200">
+              Weet je zeker dat je dit product hebt en wilt afrekenen?
+            </p>
+            <div className="flex space-x-2 pt-2">
+              <button
+                onClick={() => setStockWarningModal({ show: false, product: null, variation: null, price: 0 })}
+                className="w-1/2 bg-gray-200 text-black font-bold py-2 rounded text-xs"
+              >
+                Nee, Annuleren
+              </button>
+              <button
+                onClick={handleConfirmStockWarning}
+                className="w-1/2 bg-red-600 text-white font-bold py-2 rounded text-xs"
+              >
+                Ja, Toevoegen
+              </button>
+            </div>
           </div>
         </div>
       )}
