@@ -8,11 +8,11 @@ export default async function handler(req, res) {
       
       const formattedStores = rows.map(s => ({
         ...s,
-        // Gebruik eerst store_name, anders name, en pas als beidde echt leeg zijn een lege string
         store_name: s.store_name ?? s.name ?? '',
         address: s.address ?? s.location ?? '',
         receipt_header: s.receipt_header ?? '',
-        receipt_footer: s.receipt_footer ?? ''
+        receipt_footer: s.receipt_footer ?? '',
+        pickup_id: s.pickup_id ?? ''
       }));
 
       return res.status(200).json({ success: true, stores: formattedStores });
@@ -25,9 +25,8 @@ export default async function handler(req, res) {
   // POST: Opslaan / Bewerken
   if (req.method === 'POST') {
     try {
-      const { id, store_name, name, address, receipt_header, receipt_footer } = req.body;
+      const { id, store_name, name, address, receipt_header, receipt_footer, pickup_id } = req.body;
       
-      // Pak de ingevoerde naam (bijv. "test") direct op
       const finalName = store_name || name;
 
       if (!finalName) {
@@ -35,38 +34,39 @@ export default async function handler(req, res) {
       }
 
       const storeId = id ? String(id) : `store_${Date.now()}`;
+      const finalPickupId = pickup_id || '';
 
       if (id) {
-        // Probeer update op store_name en name
+        // Probeer update inclusief pickup_id
         try {
+          await pool.execute(
+            `UPDATE pos_stores 
+             SET store_name = ?, name = ?, address = ?, receipt_header = ?, receipt_footer = ?, pickup_id = ? 
+             WHERE id = ?`,
+            [finalName, finalName, address || '', receipt_header || '', receipt_footer || '', finalPickupId, storeId]
+          );
+        } catch (err) {
+          // Fallback als pickup_id kolom onverhoopt toch niet bestaat
           await pool.execute(
             `UPDATE pos_stores 
              SET store_name = ?, name = ?, address = ?, receipt_header = ?, receipt_footer = ? 
              WHERE id = ?`,
             [finalName, finalName, address || '', receipt_header || '', receipt_footer || '', storeId]
           );
-        } catch (err) {
-          // Fallback als store_name kolom niet bestaat
-          await pool.execute(
-            `UPDATE pos_stores 
-             SET name = ?, address = ?, receipt_header = ?, receipt_footer = ? 
-             WHERE id = ?`,
-            [finalName, address || '', receipt_header || '', receipt_footer || '', storeId]
-          );
         }
       } else {
-        // Nieuwe winkel invoegen met ingegeven naam
+        // Nieuwe winkel invoegen inclusief pickup_id
         try {
+          await pool.execute(
+            `INSERT INTO pos_stores (id, store_name, name, address, receipt_header, receipt_footer, pickup_id) 
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [storeId, finalName, finalName, address || '', receipt_header || '', receipt_footer || '', finalPickupId]
+          );
+        } catch (err) {
           await pool.execute(
             `INSERT INTO pos_stores (id, store_name, name, address, receipt_header, receipt_footer) 
              VALUES (?, ?, ?, ?, ?, ?)`,
             [storeId, finalName, finalName, address || '', receipt_header || '', receipt_footer || '']
-          );
-        } catch (err) {
-          await pool.execute(
-            `INSERT INTO pos_stores (id, name, address, receipt_header, receipt_footer) 
-             VALUES (?, ?, ?, ?, ?)`,
-            [storeId, finalName, address || '', receipt_header || '', receipt_footer || '']
           );
         }
       }
