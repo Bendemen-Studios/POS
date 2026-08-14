@@ -1,18 +1,37 @@
 #!/bin/bash
+set -e
+
 echo "🚀 Start deployment..."
+
+# Ga naar de juiste projectmap op de VPS
+cd /var/www/bendemen-pos
 
 # 1. Haal laatste code op van GitHub
 git pull origin main
 
 # 2. Controleer of .env bestaat, zo niet, maak hem aan vanuit .env.example
 if [ ! -f .env ]; then
-  cp .env.example .env
-  echo "⚠️ .env bestand ontbrak en is aangemaakt. Vul handmatig je gegevens in!"
+  if [ -f .env.example ]; then
+    cp .env.example .env
+    echo "⚠️ .env bestand ontbrak en is aangemaakt vanuit .env.example!"
+  else
+    touch .env
+    echo "⚠️ .env bestand ontbrak en is leeg aangemaakt!"
+  fi
+  echo "👉 Vergeet niet je gegevens in te vullen via: nano .env"
 fi
 
 # 3. Installeer dependencies, bouw en herstart PM2
 npm install
 npm run build
-pm2 restart bendemen-pos
 
-echo "✨ Deployment voltooid!"
+# Herstart PM2 of start hem als hij nog niet draait
+if pm2 describe bendemen-pos > /dev/null 2>&1; then
+  pm2 restart bendemen-pos
+else
+  pm2 start ecosystem.config.js
+fi
+
+pm2 save
+
+echo "✨ Deployment succesvol voltooid!"
