@@ -50,7 +50,12 @@ export default function CashRegister() {
     try {
       const rawUser = localStorage.getItem('pos_user');
       if (rawUser && rawUser !== 'undefined') {
-        setUser(JSON.parse(rawUser));
+        const parsedUser = JSON.parse(rawUser);
+        // Standaard rol instellen op 'cashier' (kassamedewerker) als deze ontbreekt
+        if (!parsedUser.role) {
+          parsedUser.role = 'cashier';
+        }
+        setUser(parsedUser);
       } else {
         router.push('/login');
       }
@@ -64,7 +69,6 @@ export default function CashRegister() {
       if (rawStore && rawStore !== 'undefined') setStore(JSON.parse(rawStore));
     } catch (e) { console.error('Fout bij parsen selectedStore:', e); }
 
-    // Luister naar netwerk status voor offline mode / sync
     const handleOnline = () => {
       setIsOfflineMode(false);
       syncOfflineOrders();
@@ -82,19 +86,33 @@ export default function CashRegister() {
 
   if (!mounted) return null;
 
-  const isAdminOrManager = user?.role === 'administrator' || user?.role === 'manager' || user?.role === 'shop_manager';
+  // Rol permissies (Super Admin, Administrator, Manager hebben toegang tot admin panel)
+  const userRole = user?.role || 'cashier';
+  const isSuperAdminOrAdmin = ['super_admin', 'administrator', 'manager', 'shop_manager'].includes(userRole);
+  
+  // Vriendelijke weergave van de rol op het scherm
+  const getRoleDisplayName = (role) => {
+    switch (role) {
+      case 'super_admin': return 'Super Admin';
+      case 'administrator': return 'Administrator';
+      case 'manager':
+      case 'shop_manager': return 'Manager';
+      case 'cashier':
+      default: return 'Kassamedewerker';
+    }
+  };
+
   const categories = [...new Set(products.map(p => (p.categories && p.categories.length > 0) ? p.categories[0].name : 'Algemeen'))].sort();
 
-  // Loguit Functie
   const handleLogout = () => {
     if (confirm('Weet je zeker dat je wilt uitloggen uit de kassa?')) {
       localStorage.removeItem('pos_user');
       localStorage.removeItem('selectedStore');
+      localStorage.removeItem('pos_token');
       router.push('/login');
     }
   };
 
-  // Offline Sync Functie
   const syncOfflineOrders = async () => {
     const pendingOrders = await getOfflineOrders();
     if (!pendingOrders || pendingOrders.length === 0) return;
@@ -109,7 +127,7 @@ export default function CashRegister() {
     }
 
     await clearOfflineOrders();
-    alert('Alle offline opgeslagen bestellingen zijn succesvol gesynchroniseerd met de server!');
+    alert('Alle offline opgeslagen bestellingen zijn succesvol gesynchroniseerd met de WooCommerce server!');
     mutateProducts();
   };
 
@@ -117,7 +135,7 @@ export default function CashRegister() {
     try {
       setIsSyncing(true);
       await mutateProducts();
-      alert('Producten succesvol ververst!');
+      alert('Producten succesvol gesynchroniseerd via WooCommerce API!');
     } catch (err) {
       alert('Fout bij synchroniseren van producten.');
     } finally {
@@ -126,7 +144,6 @@ export default function CashRegister() {
   };
 
   const handleProductClick = (product) => {
-    // 1. Variabele producten met opties
     if (product.type === 'variable' && product.attributes?.length > 0) {
       setSelectedVariableProduct(product);
       const initAttrs = {};
@@ -138,7 +155,6 @@ export default function CashRegister() {
       return;
     }
 
-    // 2. Als er geen prijs is ingevuld
     if (product.price === "" || product.price === null || product.price === undefined) {
       setOpenPriceProduct(product);
       setCustomPriceInput('');
@@ -148,7 +164,6 @@ export default function CashRegister() {
 
     const priceNum = parseFloat(product.price);
 
-    // 3. Product van 0 euro of ongeldige prijs opent Open Bedrag modal
     if (isNaN(priceNum) || priceNum === 0) {
       setOpenPriceProduct(product);
       setCustomPriceInput('0.00');
@@ -156,7 +171,6 @@ export default function CashRegister() {
       return;
     }
 
-    // 4. Standaard product met vaste prijs
     addToCart({ ...product, price: priceNum, cartItemId: product.id, isOpenPrice: false });
   };
 
@@ -203,7 +217,6 @@ export default function CashRegister() {
   const parsedCashGiven = parseFloat(cashGiven.replace(',', '.')) || 0;
   const changeAmount = Math.max(0, parsedCashGiven - totalPrice);
 
-  // Bonnenprinter afdrukfunctie
   const handlePrintReceipt = (orderId, cartItems, totalPaid, cashAmount, changeVal, storeName) => {
     const printWindow = window.open('', '_blank', 'width=400,height=600');
     
@@ -278,7 +291,6 @@ export default function CashRegister() {
     try {
       setIsProcessingCheckout(true);
 
-      // --- 1. SUMUP PIN BETALING AFHANDELING ---
       if (paymentMethod === 'sumup') {
         const controller = new AbortController();
         setSumupCancelToken(controller);
@@ -311,12 +323,11 @@ export default function CashRegister() {
         }
       }
 
-      // --- 2. ORDER OPSLAAN IN WOOCOMMERCE OF OFFLINE ---
       try {
         const res = await axios.post('/api/woocommerce/orders', orderPayload, { timeout: 4000 });
 
         if (res.data.success) {
-          if (confirm(`Bestelling #${res.data.orderId} succesvol afgerond!\n\nWilt u een kassabon afdrukken?`)) {
+          if (confirm(`Bestelling #${res.data.orderId} succesvol verwerkt in WooCommerce!\n\nWilt u een kassabon afdrukken?`)) {
             handlePrintReceipt(res.data.orderId, cart, totalPrice, parsedCashGiven, changeAmount, store?.name);
           }
           setCart([]);
@@ -327,7 +338,7 @@ export default function CashRegister() {
         }
       } catch (orderErr) {
         const savedLocal = await saveOfflineOrder(orderPayload);
-        if (confirm(`⚠️ OFFLINE MODUS\nBetaling gelukt! Order lokaal opgeslagen (${savedLocal.localId}).\n\nKassabon afdrukken?`)) {
+        if (confirm(`⚠️ OFFLINE MODUS (WooCommerce niet bereikbaar)\nBetaling gelukt! Order lokaal opgeslagen (${savedLocal.localId}).\n\nKassabon afdrukken?`)) {
           handlePrintReceipt(savedLocal.localId, cart, totalPrice, parsedCashGiven, changeAmount, store?.name);
         }
         setCart([]);
@@ -371,7 +382,7 @@ export default function CashRegister() {
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px' }}>
                 <span style={{ height: '8px', width: '8px', borderRadius: '50%', background: isOfflineMode ? '#C3110C' : '#137333', display: 'inline-block' }}></span>
                 <span style={{ fontSize: '13px', color: '#555' }}>
-                  Actieve winkel: <strong style={{ color: '#000' }}>{store?.name || 'Ons Winkeltje'}</strong> {isOfflineMode && '(OFFLINE MODUS)'}
+                  Winkel: <strong style={{ color: '#000' }}>{store?.name || 'Ons Winkeltje'}</strong> | Rol: <strong style={{ textTransform: 'uppercase' }}>{getRoleDisplayName(userRole)}</strong> {isOfflineMode && '(OFFLINE)'}
                 </span>
               </div>
             </div>
@@ -379,10 +390,10 @@ export default function CashRegister() {
           
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
             <button onClick={handleSyncProducts} disabled={isSyncing} style={{ padding: '8px 14px', background: '#F1F3F4', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', fontSize: '13px' }}>
-              {isSyncing ? 'Bezig...' : '🔄 Sync'}
+              {isSyncing ? 'Bezig...' : '🔄 API Sync'}
             </button>
 
-            {isAdminOrManager && (
+            {isSuperAdminOrAdmin && (
               <button onClick={() => router.push('/admin')} style={{ padding: '8px 14px', background: '#000', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}>
                 ⚙️ Admin Paneel
               </button>
@@ -406,7 +417,7 @@ export default function CashRegister() {
           
           {/* Producten Grid */}
           <div style={{ background: '#FAFAFA', padding: '20px', borderRadius: '12px', border: '1px solid #EAEAEA', height: 'calc(100vh - 140px)', display: 'flex', flexDirection: 'column' }}>
-            <input type="text" placeholder="Zoek producten..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ width: '100%', padding: '10px', border: '1px solid #DDD', borderRadius: '8px', marginBottom: '12px', fontSize: '14px', outline: 'none', boxSizing: 'border-box' }} />
+            <input type="text" placeholder="Zoek WooCommerce producten..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ width: '100%', padding: '10px', border: '1px solid #DDD', borderRadius: '8px', marginBottom: '12px', fontSize: '14px', outline: 'none', boxSizing: 'border-box' }} />
 
             <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', marginBottom: '15px', paddingBottom: '4px' }}>
               <button onClick={() => setSelectedCategory('Alle')} style={{ padding: '6px 12px', background: selectedCategory === 'Alle' ? '#000' : '#FFF', color: selectedCategory === 'Alle' ? '#FFF' : '#333', border: '1px solid #DDD', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: '600', whiteSpace: 'nowrap' }}>Alle</button>
@@ -426,7 +437,7 @@ export default function CashRegister() {
                   <div key={p.id} onClick={() => handleProductClick(p)} style={{ background: '#fff', border: '1px solid #EAEAEA', borderRadius: '8px', padding: '12px', cursor: 'pointer', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', position: 'relative' }}>
                     {hasStockManagement && (
                       <span style={{ position: 'absolute', top: '8px', right: '8px', fontSize: '10px', fontWeight: '800', padding: '2px 6px', borderRadius: '4px', background: stockQty > 0 ? '#E6F4EA' : '#FCE8E6', color: stockQty > 0 ? '#137333' : '#C3110C' }}>
-                        {stockQty} op voorraad
+                        {stockQty} voorraad
                       </span>
                     )}
 
@@ -481,7 +492,7 @@ export default function CashRegister() {
             </div>
 
             <div style={{ marginBottom: '20px' }}>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '8px', color: '#333' }}>Betaalmethode Kies:</label>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '8px', color: '#333' }}>Betaalmethode:</label>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
                 <button onClick={() => setPaymentMethod('sumup')} style={{ padding: '12px 8px', border: paymentMethod === 'sumup' ? '2px solid #000' : '1px solid #DDD', background: paymentMethod === 'sumup' ? '#000' : '#FFF', color: paymentMethod === 'sumup' ? '#FFF' : '#333', borderRadius: '8px', cursor: 'pointer', fontWeight: '700', fontSize: '12px' }}>💳 PIN SumUp</button>
                 <button onClick={() => setPaymentMethod('pin_manual')} style={{ padding: '12px 8px', border: paymentMethod === 'pin_manual' ? '2px solid #000' : '1px solid #DDD', background: paymentMethod === 'pin_manual' ? '#000' : '#FFF', color: paymentMethod === 'pin_manual' ? '#FFF' : '#333', borderRadius: '8px', cursor: 'pointer', fontWeight: '700', fontSize: '12px' }}>📟 PIN Handmatig</button>
