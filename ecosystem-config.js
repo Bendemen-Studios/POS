@@ -1,3 +1,4 @@
+cat << 'EOF' > ecosystem.config.js
 module.exports = {
   apps: [
     {
@@ -6,10 +7,13 @@ module.exports = {
       args: 'start',
       cwd: '/var/www/bendemen-pos',
       instances: 1,
+      exec_mode: 'fork',
       autorestart: true,
       env: {
-        NODE_ENV: 'production'
+        NODE_ENV: 'production',
+        PORT: 3000
       }
     }
   ]
 };
+EOF
