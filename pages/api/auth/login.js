@@ -1,10 +1,9 @@
-cat << 'EOF' > /var/www/bendemen-pos/pages/api/auth/login.js
 import pool from '../../../lib/db';
 import bcrypt from 'bcryptjs';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
-    return res.status(405).json({ message: 'Method not allowed' });
+    return res.status(405).json({ success: false, message: 'Method not allowed' });
   }
 
   const { username, password } = req.body;
@@ -40,4 +39,3 @@ export default async function handler(req, res) {
     return res.status(500).json({ success: false, message: 'Interne serverfout bij inloggen.' });
   }
 }
-EOF
