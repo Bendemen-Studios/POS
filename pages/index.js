@@ -126,6 +126,7 @@ export default function CashRegister() {
   };
 
   const handleProductClick = (product) => {
+    // 1. Variabele producten met opties
     if (product.type === 'variable' && product.attributes?.length > 0) {
       setSelectedVariableProduct(product);
       const initAttrs = {};
@@ -137,6 +138,7 @@ export default function CashRegister() {
       return;
     }
 
+    // 2. Als er geen prijs is ingevuld (null / undefined / lege string)
     if (product.price === "" || product.price === null || product.price === undefined) {
       setOpenPriceProduct(product);
       setCustomPriceInput('');
@@ -145,13 +147,16 @@ export default function CashRegister() {
     }
 
     const priceNum = parseFloat(product.price);
-    if (isNaN(priceNum)) {
+
+    // 3. ZORG dat elk product van 0 euro (of met ongeldige prijs) het Open Bedrag modal opent
+    if (isNaN(priceNum) || priceNum === 0) {
       setOpenPriceProduct(product);
       setCustomPriceInput('0.00');
       setShowOpenPriceModal(true);
       return;
     }
 
+    // 4. Standaard product met vaste prijs
     addToCart({ ...product, price: priceNum, cartItemId: product.id, isOpenPrice: false });
   };
 
@@ -418,6 +423,8 @@ export default function CashRegister() {
               {filteredProducts.map((p) => {
                 const hasStockManagement = p.manage_stock === true || p.stock_quantity !== null;
                 const stockQty = p.stock_quantity !== null ? p.stock_quantity : 0;
+                const parsedPPrice = parseFloat(p.price);
+                const isOpenPriceProduct = p.price === "" || p.price === null || p.price === undefined || isNaN(parsedPPrice) || parsedPPrice === 0;
                 
                 return (
                   <div key={p.id} onClick={() => handleProductClick(p)} style={{ background: '#fff', border: '1px solid #EAEAEA', borderRadius: '8px', padding: '12px', cursor: 'pointer', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', position: 'relative' }}>
@@ -429,7 +436,7 @@ export default function CashRegister() {
 
                     <div style={{ fontWeight: '600', fontSize: '13px', marginBottom: '12px', paddingRight: hasStockManagement ? '60px' : '0' }}>{p.name}</div>
                     <div style={{ fontWeight: '700', fontSize: '14px', color: '#C3110C' }}>
-                      {p.type === 'variable' ? 'Kies opties' : (p.price !== "" && p.price !== null && !isNaN(parseFloat(p.price)) ? `€${parseFloat(p.price).toFixed(2)}` : 'Open Bedrag')}
+                      {p.type === 'variable' ? 'Kies opties' : (isOpenPriceProduct ? 'Open Bedrag' : `€${parsedPPrice.toFixed(2)}`)}
                     </div>
                   </div>
                 );
@@ -572,4 +579,4 @@ export default function CashRegister() {
 
     </div>
   );
-}
+}}
