@@ -45,15 +45,23 @@ export default async function handler(req, res) {
       set_paid: true,
       status: 'completed',
       customer_id: customerId || 0,
-      line_items: orderItems.map(item => ({
-        product_id: item.product_id || item.id,
-        variation_id: item.variation_id || 0,
-        quantity: item.quantity || 1,
-        // Dwing de ingevoerde kassa/open prijs af in WooCommerce
-        price: String(item.price),
-        subtotal: String(parseFloat(item.price) * item.quantity),
-        total: String(parseFloat(item.price) * item.quantity)
-      })),
+      line_items: orderItems.map(item => {
+        const lineItem = {
+          quantity: item.quantity || 1,
+          price: String(item.price),
+          subtotal: String(parseFloat(item.price) * item.quantity),
+          total: String(parseFloat(item.price) * item.quantity)
+        };
+
+        if (!item.product_id || String(item.id).startsWith('custom_')) {
+          lineItem.name = item.name;
+        } else {
+          lineItem.product_id = item.product_id || item.id;
+          lineItem.variation_id = item.variation_id || 0;
+        }
+
+        return lineItem;
+      }),
       fee_lines: feeLines,
       meta_data: metaData
     };
@@ -61,6 +69,7 @@ export default async function handler(req, res) {
     const response = await api.post("orders", orderData);
     const createdOrder = response.data;
 
+    // Punten bijwerken op WooCommerce
     if (customerId > 0) {
       try {
         const customerRes = await api.get(`customers/${customerId}`);
