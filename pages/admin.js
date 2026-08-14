@@ -33,9 +33,12 @@ export default function AdminDashboard() {
   const [pairingCode, setPairingCode] = useState('');
   const [isPairingSumup, setIsPairingSumup] = useState(false);
 
-  // WooCommerce Producten ophalen
+  // WooCommerce Data ophalen via SWR
   const { data: productsData, mutate: mutateProducts } = useSWR('/api/woocommerce/products', fetcher);
   const products = Array.isArray(productsData) ? productsData : (productsData?.products || []);
+
+  const { data: ordersData, mutate: mutateOrders } = useSWR('/api/woocommerce/orders', fetcher, { refreshInterval: 10000 });
+  const orders = ordersData?.orders || [];
 
   useEffect(() => {
     setMounted(true);
@@ -201,7 +204,7 @@ export default function AdminDashboard() {
             { id: 'stores', label: '🏪 Multi-Store' },
             { id: 'staff', label: '👥 Personeel' },
             { id: 'sumup', label: '💳 SumUp per Locatie' },
-            { id: 'orders', label: '📊 Bestellingen' },
+            { id: 'orders', label: '📊 Bestellingen & Omzet' },
             { id: 'products', label: '📦 Voorraad' }
           ].map(tab => (
             <button
@@ -277,7 +280,6 @@ export default function AdminDashboard() {
                         {s.active ? 'Deactiveren' : 'Activeren'}
                       </button>
                       
-                      {/* Verwijderknop */}
                       <button 
                         onClick={() => handleDeleteStore(s.id)}
                         style={{ padding: '6px 12px', background: '#FCE8E6', color: '#C3110C', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '700', fontSize: '12px' }}
@@ -350,7 +352,6 @@ export default function AdminDashboard() {
 
             <div style={{ background: '#FAFAFA', padding: '20px', borderRadius: '8px', border: '1px solid #EAEAEA', maxWidth: '500px' }}>
               
-              {/* Locatie Kiezer */}
               <div style={{ marginBottom: '15px' }}>
                 <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '5px' }}>Kies Winkellocatie</label>
                 <select 
@@ -366,7 +367,6 @@ export default function AdminDashboard() {
                 </select>
               </div>
 
-              {/* Pairing Code Invoer */}
               <div style={{ marginBottom: '20px' }}>
                 <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '6px' }}>SumUp Pairing Code (van terminal scherm)</label>
                 <input 
@@ -389,11 +389,64 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* --- TAB 4: BESTELLINGEN --- */}
+        {/* --- TAB 4: BESTELLINGEN & OMZET SYNCHRONISATIE --- */}
         {activeTab === 'orders' && (
           <div style={{ background: '#FFF', padding: '25px', borderRadius: '12px', border: '1px solid #EAEAEA' }}>
-            <h3 style={{ marginTop: 0, fontSize: '18px', fontWeight: '800' }}>Verkoopoverzicht</h3>
-            <p style={{ color: '#666', fontSize: '14px' }}>Hier kun je recente kassa-transacties inzien die doorgestuurd zijn naar WooCommerce.</p>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '800' }}>Gesynchroniseerde Bestellingen ({orders.length})</h3>
+                <p style={{ margin: '4px 0 0 0', color: '#666', fontSize: '13px' }}>Live verkoopoverzicht vanuit WooCommerce.</p>
+              </div>
+              <button 
+                onClick={() => mutateOrders()} 
+                style={{ padding: '8px 14px', background: '#F1F3F4', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', fontSize: '12px' }}
+              >
+                🔄 Verversen
+              </button>
+            </div>
+
+            <div style={{ maxHeight: '550px', overflowY: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
+                <thead>
+                  <tr style={{ borderBottom: '2px solid #EAEAEA', background: '#FAFAFA' }}>
+                    <th style={{ padding: '12px' }}>Order ID</th>
+                    <th style={{ padding: '12px' }}>Datum</th>
+                    <th style={{ padding: '12px' }}>Betaalmethode</th>
+                    <th style={{ padding: '12px' }}>Status</th>
+                    <th style={{ padding: '12px', textAlign: 'right' }}>Totaalbedrag</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {orders.length === 0 ? (
+                    <tr>
+                      <td colSpan="5" style={{ padding: '20px', textAlign: 'center', color: '#888' }}>Geen bestellingen gevonden of bezig met laden...</td>
+                    </tr>
+                  ) : (
+                    orders.map(order => (
+                      <tr key={order.id} style={{ borderBottom: '1px solid #EAEAEA' }}>
+                        <td style={{ padding: '12px', fontWeight: '700' }}>#{order.id}</td>
+                        <td style={{ padding: '12px', color: '#555' }}>
+                          {new Date(order.date_created).toLocaleString('nl-NL', { dateStyle: 'short', timeStyle: 'short' })}
+                        </td>
+                        <td style={{ padding: '12px' }}>
+                          <span style={{ padding: '4px 8px', background: '#F1F3F4', borderRadius: '4px', fontSize: '11px', fontWeight: '600' }}>
+                            {order.payment_method_title || order.payment_method || 'Kassa'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '12px' }}>
+                          <span style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', background: order.status === 'completed' ? '#E6F4EA' : '#FFF3C4', color: order.status === 'completed' ? '#137333' : '#B45309' }}>
+                            {order.status}
+                          </span>
+                        </td>
+                        <td style={{ padding: '12px', textAlign: 'right', fontWeight: '800', color: '#C3110C' }}>
+                          €{parseFloat(order.total).toFixed(2)}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 
