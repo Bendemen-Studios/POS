@@ -113,11 +113,30 @@ export default function AdminDashboard() {
 
   const fetchOrders = async () => {
     try {
-      const res = await fetch('/api/woocommerce/pickup-orders');
+      const res = await fetch('/api/woocommerce/orders');
       const data = await res.json();
       if (data.success) setOrders(data.orders || []);
     } catch (err) {
       console.error('Fout bij ophalen bestellingen:', err);
+    }
+  };
+
+  const handleUpdateOrderStatus = async (id, newStatus) => {
+    try {
+      const res = await fetch('/api/woocommerce/orders', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, status: newStatus })
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert('Status bijgewerkt!');
+        fetchOrders();
+      } else {
+        alert('Fout bij updaten status: ' + (data.error || 'Onbekende fout'));
+      }
+    } catch (err) {
+      alert('Fout bij updaten status.');
     }
   };
 
@@ -155,8 +174,6 @@ export default function AdminDashboard() {
         store_id: editingUser.store_id !== '' && editingUser.store_id !== null && editingUser.store_id !== 'null' ? Number(editingUser.store_id) : null
       };
       
-      console.log('Sending user update payload:', payload);
-
       const res = await fetch('/api/admin/users', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -531,7 +548,21 @@ export default function AdminDashboard() {
                           <tr key={o.id} className="hover:bg-gray-50">
                             <td className="p-3 font-bold">#{o.number || o.id}</td>
                             <td className="p-3">{o.billing?.first_name} {o.billing?.last_name}</td>
-                            <td className="p-3"><span className="bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded font-bold">{o.status}</span></td>
+                            <td className="p-3">
+                              <select 
+                                value={o.status} 
+                                onChange={(e) => handleUpdateOrderStatus(o.id, e.target.value)}
+                                className="border rounded p-1 text-xs font-bold bg-white"
+                              >
+                                <option value="pending">Pending</option>
+                                <option value="processing">Processing</option>
+                                <option value="on-hold">On Hold</option>
+                                <option value="completed">Completed</option>
+                                <option value="cancelled">Cancelled</option>
+                                <option value="refunded">Refunded</option>
+                                <option value="failed">Failed</option>
+                              </select>
+                            </td>
                             <td className="p-3 font-bold text-red-600">€{parseFloat(o.total || 0).toFixed(2)}</td>
                           </tr>
                         ))
