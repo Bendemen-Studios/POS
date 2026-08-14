@@ -1,77 +1,65 @@
-import pool from '../../../lib/db';
+import pool from '../../../../lib/db';
 import bcrypt from 'bcryptjs';
 
 export default async function handler(req, res) {
+  // GET: Haal alle gebruikers op
   if (req.method === 'GET') {
     try {
-      // Vang eventuele database kolomfouten op met een schone fallback
-      const [users] = await pool.execute('SELECT * FROM pos_users');
-
-      const formattedUsers = users.map(user => {
-        const isMainOwner = user.username === 'bendemen' || user.email === 'info@bendemen.nl';
-
-        return {
-          id: user.id,
-          username: user.username,
-          email: isMainOwner ? 'info@bendemen.nl' : (user.email || 'info@bendemen.nl'),
-          role: isMainOwner ? 'super_admin' : (user.role || 'cashier'),
-          store_id: user.store_id || null
-        };
-      });
-
-      return res.status(200).json({ success: true, users: formattedUsers });
+      const [rows] = await pool.execute('SELECT id, username, email, role, store_id FROM pos_users ORDER BY id ASC');
+      return res.status(200).json({ success: true, users: rows });
     } catch (error) {
-      console.error("Fetch users error:", error);
-      return res.status(500).json({ success: false, error: 'Databasefout bij ophalen gebruikers.' });
+      console.error("Users GET Error:", error);
+      return res.status(500).json({ success: false, error: 'Fout bij ophalen gebruikers.' });
     }
   }
 
+  // POST: Nieuwe gebruiker aanmaken met geselecteerde rol
   if (req.method === 'POST') {
     try {
-      const { username, password, role, store_id, email } = req.body;
+      const { username, password, role, store_id } = req.body;
 
       if (!username || !password) {
-        return res.status(400).json({ success: false, message: 'Gebruikersnaam en wachtwoord verplicht.' });
+        return res.status(400).json({ success: false, message: 'Gebruikersnaam en wachtwoord zijn verplicht.' });
       }
 
+      const assignedRole = role || 'cashier';
+      const assignedStoreId = store_id ? String(store_id) : null;
       const hashedPassword = await bcrypt.hash(password, 10);
 
       await pool.execute(
-        'INSERT INTO pos_users (username, password_hash, email, role, store_id) VALUES (?, ?, ?, ?, ?)',
-        [username, hashedPassword, email || 'info@bendemen.nl', role || 'cashier', store_id || null]
+        `INSERT INTO pos_users (username, password_hash, role, store_id) VALUES (?, ?, ?, ?)`,
+        [username.trim(), hashedPassword, assignedRole, assignedStoreId]
       );
 
-      return res.status(200).json({ success: true, message: 'Gebruiker aangemaakt!' });
+      return res.status(200).json({ success: true, message: 'Medewerker succesvol aangemaakt!' });
     } catch (error) {
-      console.error("Create user error:", error);
-      return res.status(500).json({ success: false, message: 'Fout bij aanmaken gebruiker.' });
+      console.error("Users POST Error:", error);
+      return res.status(500).json({ success: false, error: 'Fout bij aanmaken medewerker.' });
     }
   }
 
+  // DELETE: Verwijder gebruiker (behalve het hoofdaccount 'bendemen')
   if (req.method === 'DELETE') {
     try {
       const { id } = req.query;
       if (!id) return res.status(400).json({ success: false, message: 'Geen ID opgegeven.' });
 
-      const [targetRows] = await pool.execute('SELECT username, email FROM pos_users WHERE id = ?', [id]);
-      
-      if (targetRows.length > 0) {
-        const targetUser = targetRows[0];
-        const isMainOwner = targetUser.username === 'bendemen' || targetUser.email === 'info@bendemen.nl';
+      // Haal de gebruiker op om te controleren of het bendemen is
+      const [users] = await pool.execute('SELECT username FROM pos_users WHERE id = ?', [id]);
+      if (users.length === 0) {
+        return res.status(404).json({ success: false, message: 'Gebruiker niet gevonden.' });
+      }
 
-        if (isMainOwner) {
-          return res.status(403).json({ 
-            success: false, 
-            message: 'Het hoofdaccount "bendemen" is beveiligd en kan niet worden verwijderd.' 
-          });
-        }
+      const targetUsername = users[0].username.toLowerCase();
+      if (targetUsername === 'bendemen') {
+        return res.status(403).json({ success: false, message: 'Het hoofdaccount bendemen kan niet worden verwijderd.' });
       }
 
       await pool.execute('DELETE FROM pos_users WHERE id = ?', [id]);
-      return res.status(200).json({ success: true, message: 'Gebruiker verwijderd.' });
+      return res.status(200).json({ success: true, message: 'Gebruiker succesvol verwijderd.' });
     } catch (error) {
-      console.error("Delete user error:", error);
-      return res.status(500).json({ success: false, message: 'Fout bij verwijderen gebruiker.' });
+      console.error("Users DELETE Error:", error);
+      return res.status(500).json({ success: false, error: 'Fout bij verwijderen gebruiker.' });
     }
   }
 

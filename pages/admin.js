@@ -51,7 +51,6 @@ export default function AdminDashboard() {
     }
   };
 
-  // Status wijzigen van een order in WooCommerce
   const handleUpdateOrderStatus = async (orderId, newStatus) => {
     try {
       const res = await axios.post('/api/woocommerce/update-order-status', {
@@ -173,6 +172,7 @@ export default function AdminDashboard() {
       const res = await fetch(`/api/admin/users?id=${id}`, { method: 'DELETE' });
       const data = await res.json();
       if (data.success) mutateUsers();
+      else alert(data.message || 'Kan deze gebruiker niet verwijderen.');
     } catch (err) {
       alert('Fout bij verwijderen medewerker.');
     }
@@ -207,7 +207,6 @@ export default function AdminDashboard() {
 
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col">
-      {/* Header */}
       <header className="bg-black text-white p-4 flex justify-between items-center shadow-md">
         <div className="flex items-center space-x-3">
           <span className="font-bold text-xl tracking-wider">BDM POS — ADMIN</span>
@@ -220,7 +219,6 @@ export default function AdminDashboard() {
         </Link>
       </header>
 
-      {/* Navigation Tabs */}
       <div className="bg-white border-b px-6 py-2 flex space-x-2 overflow-x-auto">
         {[
           { id: 'stores', label: '🏪 Locaties & Filialen' },
@@ -239,22 +237,15 @@ export default function AdminDashboard() {
         ))}
       </div>
 
-      {/* Main Content */}
       <div className="p-6 max-w-6xl mx-auto w-full">
-
-        {/* TAB 1: LOCATIES BEHEREN */}
         {activeTab === 'stores' && (
           <div className="bg-white p-6 rounded-lg shadow space-y-4">
             <div className="flex justify-between items-center mb-2">
               <h2 className="text-lg font-bold">🏪 Winkel & Filiaal Locaties</h2>
-              <button
-                onClick={() => setShowAddStoreModal(true)}
-                className="bg-red-600 hover:bg-red-700 text-white font-bold px-4 py-2 rounded text-xs transition"
-              >
+              <button onClick={() => setShowAddStoreModal(true)} className="bg-red-600 hover:bg-red-700 text-white font-bold px-4 py-2 rounded text-xs transition">
                 + Nieuwe Locatie Toevoegen
               </button>
             </div>
-
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs divide-y">
                 <thead>
@@ -268,7 +259,7 @@ export default function AdminDashboard() {
                 </thead>
                 <tbody className="divide-y">
                   {stores.length === 0 ? (
-                    <tr><td colSpan="5" className="p-4 text-center text-gray-500">Geen locaties gevonden in database.</td></tr>
+                    <tr><td colSpan="5" className="p-4 text-center text-gray-500">Geen locaties gevonden.</td></tr>
                   ) : (
                     stores.map((s) => (
                       <tr key={s.id}>
@@ -277,18 +268,8 @@ export default function AdminDashboard() {
                         <td className="p-3 font-mono text-blue-600">{s.pickup_id || '—'}</td>
                         <td className="p-3 text-gray-600">{s.receipt_header || '—'}</td>
                         <td className="p-3 text-right space-x-2">
-                          <button
-                            onClick={() => setEditingStore(s)}
-                            className="bg-gray-100 hover:bg-gray-200 text-black font-bold px-3 py-1 rounded text-xs"
-                          >
-                            ✏️ Bewerken
-                          </button>
-                          <button
-                            onClick={() => handleDeleteStore(s.id)}
-                            className="bg-red-100 hover:bg-red-200 text-red-700 font-bold px-3 py-1 rounded text-xs"
-                          >
-                            🗑️ Verwijderen
-                          </button>
+                          <button onClick={() => setEditingStore(s)} className="bg-gray-100 hover:bg-gray-200 text-black font-bold px-3 py-1 rounded text-xs">✏️ Bewerken</button>
+                          <button onClick={() => handleDeleteStore(s.id)} className="bg-red-100 hover:bg-red-200 text-red-700 font-bold px-3 py-1 rounded text-xs">🗑️ Verwijderen</button>
                         </td>
                       </tr>
                     ))
@@ -299,19 +280,14 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* TAB 2: PERSONEEL BEHEREN */}
         {activeTab === 'users' && (
           <div className="bg-white p-6 rounded-lg shadow space-y-4">
             <div className="flex justify-between items-center mb-2">
               <h2 className="text-lg font-bold">👥 Personeel & Gebruikersbeheer</h2>
-              <button
-                onClick={() => setShowAddUserModal(true)}
-                className="bg-black hover:bg-gray-800 text-white font-bold px-4 py-2 rounded text-xs transition"
-              >
+              <button onClick={() => setShowAddUserModal(true)} className="bg-black hover:bg-gray-800 text-white font-bold px-4 py-2 rounded text-xs transition">
                 + Medewerker Toevoegen
               </button>
             </div>
-
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs divide-y">
                 <thead>
@@ -325,7 +301,8 @@ export default function AdminDashboard() {
                 <tbody className="divide-y">
                   {usersList.map((u) => {
                     const assignedStore = stores.find(s => s.id === u.store_id);
-                    const isProtectedUser = u.username === 'bendemen' || u.email === 'info@bendemen.nl';
+                    // Alleen 'bendemen' is beschermd als hoofdaccount
+                    const isProtectedUser = u.username.toLowerCase() === 'bendemen';
 
                     return (
                       <tr key={u.id}>
@@ -343,10 +320,7 @@ export default function AdminDashboard() {
                               🔒 Systeem Account
                             </span>
                           ) : (
-                            <button
-                              onClick={() => handleDeleteUser(u.id)}
-                              className="bg-red-100 hover:bg-red-200 text-red-700 font-bold px-3 py-1 rounded text-xs"
-                            >
+                            <button onClick={() => handleDeleteUser(u.id)} className="bg-red-100 hover:bg-red-200 text-red-700 font-bold px-3 py-1 rounded text-xs">
                               🗑️ Verwijderen
                             </button>
                           )}
@@ -360,60 +334,35 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* TAB 3: SUMUP PER LOCATIE */}
         {activeTab === 'sumup' && (
           <div className="bg-white p-6 rounded-lg shadow max-w-lg space-y-4">
             <h2 className="text-lg font-bold">💳 SumUp Terminal Koppelen per Locatie</h2>
-            <p className="text-xs text-gray-600">Koppel een specifieke SumUp Solo kaartlezer aan een gekozen vestiging.</p>
-            
             <div>
               <label className="text-xs font-bold text-gray-600 block mb-1">Selecteer Locatie</label>
-              <select
-                value={selectedStoreForSumup}
-                onChange={(e) => setSelectedStoreForSumup(e.target.value)}
-                className="w-full p-2 border rounded text-sm font-bold"
-              >
+              <select value={selectedStoreForSumup} onChange={(e) => setSelectedStoreForSumup(e.target.value)} className="w-full p-2 border rounded text-sm font-bold">
                 {stores.map(s => (
                   <option key={s.id} value={s.id}>{s.store_name} ({s.address || 'Geen adres'})</option>
                 ))}
               </select>
             </div>
-
             <div>
               <label className="text-xs font-bold text-gray-600 block mb-1">SumUp Pairing Code</label>
-              <input
-                type="text"
-                placeholder="Voer koppelcode in"
-                value={pairingCode}
-                onChange={(e) => setPairingCode(e.target.value)}
-                className="w-full p-2 border-2 border-black rounded text-base font-mono font-bold"
-              />
+              <input type="text" placeholder="Voer koppelcode in" value={pairingCode} onChange={(e) => setPairingCode(e.target.value)} className="w-full p-2 border-2 border-black rounded text-base font-mono font-bold" />
             </div>
-
-            <button
-              onClick={handlePairSumup}
-              disabled={isPairingSumup}
-              className="w-full bg-black text-white font-bold py-2 rounded text-sm hover:bg-gray-800 transition"
-            >
+            <button onClick={handlePairSumup} disabled={isPairingSumup} className="w-full bg-black text-white font-bold py-2 rounded text-sm hover:bg-gray-800 transition">
               {isPairingSumup ? 'Koppelen...' : '🔗 Koppel Terminal aan Locatie'}
             </button>
           </div>
         )}
 
-        {/* TAB 4: LIVE BESTELLINGEN (MET STATUS WIJZIGEN EN SEQUENTIAL ORDER NUMBERS) */}
         {activeTab === 'orders' && (
           <div className="bg-white p-6 rounded-lg shadow space-y-4">
             <div className="flex justify-between items-center">
               <h2 className="text-lg font-bold">📊 Live Bestellingen ({liveOrders.length})</h2>
-              <button 
-                onClick={fetchLiveOrders} 
-                disabled={loadingOrders}
-                className="bg-gray-100 hover:bg-gray-200 text-xs font-bold px-3 py-1.5 rounded transition flex items-center space-x-1"
-              >
-                <span>{loadingOrders ? '⏳ Laden...' : '🔄 Verversen'}</span>
+              <button onClick={fetchLiveOrders} disabled={loadingOrders} className="bg-gray-100 hover:bg-gray-200 text-xs font-bold px-3 py-1.5 rounded transition">
+                {loadingOrders ? '⏳ Laden...' : '🔄 Verversen'}
               </button>
             </div>
-
             <div className="overflow-x-auto max-h-[500px]">
               <table className="w-full text-left text-xs divide-y">
                 <thead>
@@ -427,7 +376,7 @@ export default function AdminDashboard() {
                 </thead>
                 <tbody className="divide-y">
                   {liveOrders.length === 0 ? (
-                    <tr><td colSpan="5" className="p-6 text-center text-gray-500">Geen bestellingen gevonden of bezig met synchroniseren...</td></tr>
+                    <tr><td colSpan="5" className="p-6 text-center text-gray-500">Geen bestellingen gevonden...</td></tr>
                   ) : (
                     liveOrders.map((o) => (
                       <tr key={o.id} className="hover:bg-gray-50">
@@ -435,12 +384,8 @@ export default function AdminDashboard() {
                         <td className="p-3 text-gray-500">{new Date(o.date_created || Date.now()).toLocaleString('nl-NL')}</td>
                         <td className="p-3 font-medium">{o.payment_method_title || o.payment_method || 'Kassa'}</td>
                         <td className="p-3">
-                          <select
-                            value={o.status}
-                            onChange={(e) => handleUpdateOrderStatus(o.id, e.target.value)}
-                            className="border p-1.5 rounded text-xs font-bold bg-white shadow-sm cursor-pointer"
-                          >
-                            <option value="pending">In afwachting van betaling</option>
+                          <select value={o.status} onChange={(e) => handleUpdateOrderStatus(o.id, e.target.value)} className="border p-1.5 rounded text-xs font-bold bg-white shadow-sm cursor-pointer">
+                            <option value="pending">In afwachting</option>
                             <option value="processing">In behandeling</option>
                             <option value="completed">Voltooid</option>
                             <option value="cancelled">Geannuleerd</option>
@@ -458,7 +403,6 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* TAB 5: VOORRAAD */}
         {activeTab === 'products' && (
           <div className="bg-white p-6 rounded-lg shadow">
             <div className="flex justify-between items-center mb-4">
@@ -468,12 +412,7 @@ export default function AdminDashboard() {
             <div className="overflow-x-auto max-h-96">
               <table className="w-full text-left text-xs divide-y">
                 <thead>
-                  <tr className="bg-gray-50">
-                    <th className="p-2">ID</th>
-                    <th className="p-2">Naam</th>
-                    <th className="p-2">Prijs</th>
-                    <th className="p-2">Voorraad</th>
-                  </tr>
+                  <tr className="bg-gray-50"><th className="p-2">ID</th><th className="p-2">Naam</th><th className="p-2">Prijs</th><th className="p-2">Voorraad</th></tr>
                 </thead>
                 <tbody className="divide-y">
                   {products.map((p) => (
@@ -489,65 +428,19 @@ export default function AdminDashboard() {
             </div>
           </div>
         )}
-
       </div>
 
-      {/* POP-UP MODAL: LOCATIE AANMAKEN / BEWERKEN */}
+      {/* MODAL: LOCATIE */}
       {(showAddStoreModal || editingStore) && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg p-6 max-w-md w-full">
-            <h3 className="text-lg font-bold mb-4">{editingStore ? 'Locatie Bewerken' : 'Nieuwe Locatie Toevoegen'}</h3>
+            <h3 className="text-lg font-bold mb-4">{editingStore ? 'Locatie Bewerken' : 'Nieuwe Locatie'}</h3>
             <form onSubmit={handleSaveStore} className="space-y-3">
-              <div>
-                <label className="text-xs font-bold text-gray-600 block mb-1">Locatienaam / Winkelnaam</label>
-                <input
-                  type="text"
-                  value={editingStore ? editingStore.store_name : newStoreData.store_name}
-                  onChange={(e) => editingStore ? setEditingStore({ ...editingStore, store_name: e.target.value }) : setNewStoreData({ ...newStoreData, store_name: e.target.value })}
-                  placeholder="Bijv. Ons Winkeltje"
-                  className="w-full p-2 border rounded text-sm"
-                  required
-                />
-              </div>
-              <div>
-                <label className="text-xs font-bold text-gray-600 block mb-1">Adres</label>
-                <input
-                  type="text"
-                  value={editingStore ? editingStore.address : newStoreData.address}
-                  onChange={(e) => editingStore ? setEditingStore({ ...editingStore, address: e.target.value }) : setNewStoreData({ ...newStoreData, address: e.target.value })}
-                  placeholder="Bijv. Centrum Hellevoetsluis"
-                  className="w-full p-2 border rounded text-sm"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-bold text-gray-600 block mb-1">Local Pickup Plus Location ID</label>
-                <input
-                  type="text"
-                  value={editingStore ? (editingStore.pickup_id || '') : newStoreData.pickup_id}
-                  onChange={(e) => editingStore ? setEditingStore({ ...editingStore, pickup_id: e.target.value }) : setNewStoreData({ ...newStoreData, pickup_id: e.target.value })}
-                  placeholder="Bijv. 342428"
-                  className="w-full p-2 border rounded text-sm font-mono"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-bold text-gray-600 block mb-1">Kassabon Header</label>
-                <input
-                  type="text"
-                  value={editingStore ? editingStore.receipt_header : newStoreData.receipt_header}
-                  onChange={(e) => editingStore ? setEditingStore({ ...editingStore, receipt_header: e.target.value }) : setNewStoreData({ ...newStoreData, receipt_header: e.target.value })}
-                  className="w-full p-2 border rounded text-sm"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-bold text-gray-600 block mb-1">Kassabon Footer</label>
-                <input
-                  type="text"
-                  value={editingStore ? editingStore.receipt_footer : newStoreData.receipt_footer}
-                  onChange={(e) => editingStore ? setEditingStore({ ...editingStore, receipt_footer: e.target.value }) : setNewStoreData({ ...newStoreData, receipt_footer: e.target.value })}
-                  className="w-full p-2 border rounded text-sm"
-                />
-              </div>
-
+              <input type="text" value={editingStore ? editingStore.store_name : newStoreData.store_name} onChange={(e) => editingStore ? setEditingStore({ ...editingStore, store_name: e.target.value }) : setNewStoreData({ ...newStoreData, store_name: e.target.value })} placeholder="Winkelnaam" className="w-full p-2 border rounded text-sm" required />
+              <input type="text" value={editingStore ? editingStore.address : newStoreData.address} onChange={(e) => editingStore ? setEditingStore({ ...editingStore, address: e.target.value }) : setNewStoreData({ ...newStoreData, address: e.target.value })} placeholder="Adres" className="w-full p-2 border rounded text-sm" />
+              <input type="text" value={editingStore ? (editingStore.pickup_id || '') : newStoreData.pickup_id} onChange={(e) => editingStore ? setEditingStore({ ...editingStore, pickup_id: e.target.value }) : setNewStoreData({ ...newStoreData, pickup_id: e.target.value })} placeholder="Pickup ID (bijv. 342428)" className="w-full p-2 border rounded text-sm font-mono" />
+              <input type="text" value={editingStore ? editingStore.receipt_header : newStoreData.receipt_header} onChange={(e) => editingStore ? setEditingStore({ ...editingStore, receipt_header: e.target.value }) : setNewStoreData({ ...newStoreData, receipt_header: e.target.value })} placeholder="Kassabon Header" className="w-full p-2 border rounded text-sm" />
+              <input type="text" value={editingStore ? editingStore.receipt_footer : newStoreData.receipt_footer} onChange={(e) => editingStore ? setEditingStore({ ...editingStore, receipt_footer: e.target.value }) : setNewStoreData({ ...newStoreData, receipt_footer: e.target.value })} placeholder="Kassabon Footer" className="w-full p-2 border rounded text-sm" />
               <div className="flex space-x-2 pt-2">
                 <button type="button" onClick={() => { setEditingStore(null); setShowAddStoreModal(false); }} className="w-1/2 bg-gray-200 p-2 rounded text-xs font-bold">Annuleren</button>
                 <button type="submit" className="w-1/2 bg-red-600 text-white p-2 rounded text-xs font-bold">Opslaan</button>
@@ -557,58 +450,31 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {/* POP-UP MODAL: MEDEWERKER TOEVOEGEN */}
+      {/* MODAL: MEDEWERKER */}
       {showAddUserModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg p-6 max-w-md w-full">
-            <h3 className="text-lg font-bold mb-4">Nieuwe Medewerker Toevoegen</h3>
+            <h3 className="text-lg font-bold mb-4">Nieuwe Medewerker</h3>
             <form onSubmit={handleAddUser} className="space-y-3">
+              <input type="text" placeholder="Gebruikersnaam" value={newUserData.username} onChange={(e) => setNewUserData({ ...newUserData, username: e.target.value })} className="w-full p-2 border rounded text-sm" required />
+              <input type="password" placeholder="Wachtwoord" value={newUserData.password} onChange={(e) => setNewUserData({ ...newUserData, password: e.target.value })} className="w-full p-2 border rounded text-sm" required />
               <div>
-                <label className="text-xs font-bold text-gray-600 block mb-1">Gebruikersnaam</label>
-                <input
-                  type="text"
-                  value={newUserData.username}
-                  onChange={(e) => setNewUserData({ ...newUserData, username: e.target.value })}
-                  className="w-full p-2 border rounded text-sm"
-                  required
-                />
-              </div>
-              <div>
-                <label className="text-xs font-bold text-gray-600 block mb-1">Wachtwoord</label>
-                <input
-                  type="password"
-                  value={newUserData.password}
-                  onChange={(e) => setNewUserData({ ...newUserData, password: e.target.value })}
-                  className="w-full p-2 border rounded text-sm"
-                  required
-                />
-              </div>
-              <div>
-                <label className="text-xs font-bold text-gray-600 block mb-1">Rol</label>
-                <select
-                  value={newUserData.role}
-                  onChange={(e) => setNewUserData({ ...newUserData, role: e.target.value })}
-                  className="w-full p-2 border rounded text-sm"
-                >
-                  <option value="cashier">Caissière (Kassa Only)</option>
+                <label className="text-xs font-bold text-gray-600 block mb-1">Gekozen Rol</label>
+                <select value={newUserData.role} onChange={(e) => setNewUserData({ ...newUserData, role: e.target.value })} className="w-full p-2 border rounded text-sm">
+                  <option value="cashier">Caissière</option>
                   <option value="admin">Admin</option>
                   <option value="super_admin">Super Admin</option>
                 </select>
               </div>
               <div>
-                <label className="text-xs font-bold text-gray-600 block mb-1">Winkellocatie Toewijzen</label>
-                <select
-                  value={newUserData.store_id}
-                  onChange={(e) => setNewUserData({ ...newUserData, store_id: e.target.value })}
-                  className="w-full p-2 border rounded text-sm font-semibold"
-                >
-                  <option value="">Alle Locaties (Geen Beperking)</option>
+                <label className="text-xs font-bold text-gray-600 block mb-1">Winkellocatie</label>
+                <select value={newUserData.store_id} onChange={(e) => setNewUserData({ ...newUserData, store_id: e.target.value })} className="w-full p-2 border rounded text-sm">
+                  <option value="">Alle Locaties</option>
                   {stores.map(s => (
                     <option key={s.id} value={s.id}>📍 {s.store_name}</option>
                   ))}
                 </select>
               </div>
-
               <div className="flex space-x-2 pt-2">
                 <button type="button" onClick={() => setShowAddUserModal(false)} className="w-1/2 bg-gray-200 p-2 rounded text-xs font-bold">Annuleren</button>
                 <button type="submit" className="w-1/2 bg-black text-white p-2 rounded text-xs font-bold">Toevoegen</button>
@@ -617,7 +483,6 @@ export default function AdminDashboard() {
           </div>
         </div>
       )}
-
     </div>
   );
 }
