@@ -20,6 +20,14 @@ export default function AdminDashboard() {
   // Form states voor nieuwe winkel
   const [newStore, setNewStore] = useState({ store_name: '', address: '', receipt_header: '', receipt_footer: '', pickup_id: '' });
 
+  // Bewerk states (Modalen)
+  const [editingUser, setEditingUser] = useState(null);
+  const [editingStore, setEditingStore] = useState(null);
+
+  // Paginering Orders
+  const [currentPage, setCurrentPage] = useState(1);
+  const ordersPerPage = 10;
+
   useEffect(() => {
     const userStr = localStorage.getItem('pos_user');
     if (!userStr) {
@@ -79,7 +87,25 @@ export default function AdminDashboard() {
     try {
       const res = await fetch('/api/woocommerce/products');
       const data = await res.json();
-      if (data.success) setProducts(data.products || []);
+      if (data.success) {
+        const rawProducts = data.products || [];
+        setProducts(rawProducts);
+
+        // Laad asynchroon variaties indien nodig
+        rawProducts.forEach(async (prod) => {
+          if (prod.type === 'variable' && (!prod.variations_data || prod.variations_data.length === 0) && (!prod.variations || prod.variations.length === 0)) {
+            try {
+              const varRes = await fetch(`/api/woocommerce/variations?productId=${prod.id}`);
+              const varData = await varRes.json();
+              if (varData.success && varData.variations) {
+                setProducts(prev => prev.map(p => p.id === prod.id ? { ...p, variations: varData.variations } : p));
+              }
+            } catch (e) {
+              console.error(`Fout bij laden variaties voor product ${prod.id}`, e);
+            }
+          }
+        });
+      }
     } catch (err) {
       console.error('Fout bij ophalen producten:', err);
     }
@@ -95,6 +121,7 @@ export default function AdminDashboard() {
     }
   };
 
+  // --- GEBRUIKER ACTIES ---
   const handleCreateUser = async (e) => {
     e.preventDefault();
     try {
@@ -113,6 +140,27 @@ export default function AdminDashboard() {
       }
     } catch (err) {
       alert('Fout bij aanmaken medewerker.');
+    }
+  };
+
+  const handleUpdateUser = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await fetch('/api/admin/users', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editingUser)
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert('Medewerker succesvol bijgewerkt!');
+        setEditingUser(null);
+        fetchUsers();
+      } else {
+        alert('Fout: ' + (data.error || data.message));
+      }
+    } catch (err) {
+      alert('Fout bij bijwerken medewerker.');
     }
   };
 
@@ -136,6 +184,7 @@ export default function AdminDashboard() {
     }
   };
 
+  // --- WINKEL ACTIES ---
   const handleCreateStore = async (e) => {
     e.preventDefault();
     try {
@@ -157,6 +206,33 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleUpdateStore = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await fetch('/api/admin/store', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editingStore)
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert('Filiaal succesvol bijgewerkt!');
+        setEditingStore(null);
+        fetchStores();
+      } else {
+        alert('Fout: ' + data.error);
+      }
+    } catch (err) {
+      alert('Fout bij bijwerken filiaal.');
+    }
+  };
+
+  // --- PAGINERING LOGICA ---
+  const indexOfLastOrder = currentPage * ordersPerPage;
+  const indexOfFirstOrder = indexOfLastOrder - ordersPerPage;
+  const currentOrders = orders.slice(indexOfFirstOrder, indexOfLastOrder);
+  const totalPages = Math.ceil(orders.length / ordersPerPage);
+
   if (!currentUser) return <div className="p-8 text-center font-bold">Laden...</div>;
 
   return (
@@ -176,36 +252,36 @@ export default function AdminDashboard() {
       </header>
 
       {/* Nav Tabs */}
-      <div className="bg-white border-b px-6 py-2 flex space-x-4 shadow-sm">
+      <div className="bg-white border-b px-6 py-2 flex space-x-4 shadow-sm overflow-x-auto">
         <button
           onClick={() => setActiveTab('users')}
-          className={`px-4 py-2 rounded text-xs font-bold transition ${activeTab === 'users' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+          className={`px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'users' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
         >
           👥 Medewerkers & Toegang
         </button>
         <button
           onClick={() => setActiveTab('stores')}
-          className={`px-4 py-2 rounded text-xs font-bold transition ${activeTab === 'stores' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+          className={`px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'stores' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
         >
           📍 Filialen Beheren
         </button>
         <button
           onClick={() => setActiveTab('sumup')}
-          className={`px-4 py-2 rounded text-xs font-bold transition ${activeTab === 'sumup' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+          className={`px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'sumup' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
         >
           💳 SumUp per Locatie
         </button>
         <button
           onClick={() => setActiveTab('orders')}
-          className={`px-4 py-2 rounded text-xs font-bold transition ${activeTab === 'orders' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+          className={`px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'orders' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
         >
           📦 Bestellingen Live
         </button>
         <button
           onClick={() => setActiveTab('inventory')}
-          className={`px-4 py-2 rounded text-xs font-bold transition ${activeTab === 'inventory' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+          className={`px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'inventory' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
         >
-          📦 Voorraad
+          📦 Voorraad & Variaties
         </button>
       </div>
 
@@ -272,7 +348,7 @@ export default function AdminDashboard() {
                           <th className="p-3">Gebruikersnaam</th>
                           <th className="p-3">Rol</th>
                           <th className="p-3">Filiaal ID</th>
-                          <th className="p-3 text-right">Actie</th>
+                          <th className="p-3 text-right">Acties</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y">
@@ -282,7 +358,10 @@ export default function AdminDashboard() {
                             <td className="p-3 font-bold">{u.username}</td>
                             <td className="p-3"><span className="bg-gray-200 px-2 py-0.5 rounded uppercase font-semibold text-[10px]">{u.role}</span></td>
                             <td className="p-3">{u.store_id || 'Geen'}</td>
-                            <td className="p-3 text-right">
+                            <td className="p-3 text-right space-x-2">
+                              <button onClick={() => setEditingUser(u)} className="text-blue-600 font-bold hover:underline">
+                                Bewerken
+                              </button>
                               {u.username.toLowerCase() !== 'bendemen' && (
                                 <button onClick={() => handleDeleteUser(u.id, u.username)} className="text-red-600 font-bold hover:underline">
                                   Verwijderen
@@ -342,6 +421,11 @@ export default function AdminDashboard() {
                           <div className="text-xs text-gray-500 mt-1">📍 {s.address || 'Geen adres'}</div>
                           <div className="text-xs text-gray-400 mt-0.5">Pickup ID: {s.pickup_id || 'N.v.t.'}</div>
                         </div>
+                        <div className="mt-3 text-right">
+                          <button onClick={() => setEditingStore(s)} className="text-xs bg-black text-white px-3 py-1 rounded font-bold hover:bg-gray-800">
+                            Bewerken
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -368,36 +452,55 @@ export default function AdminDashboard() {
               </div>
             )}
 
-            {/* 4. ORDERS TAB */}
+            {/* 4. ORDERS TAB (Met Paginering & Sequential Order Number) */}
             {activeTab === 'orders' && (
               <div className="bg-white rounded-lg shadow p-6">
                 <h3 className="text-md font-bold mb-4">📦 Live Webshop Bestellingen ({orders.length})</h3>
                 <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs divide-y">
+                  <table className="w-full text-left text-xs divide-y mb-4">
                     <thead>
                       <tr className="bg-gray-50">
-                        <th className="p-3">Order ID</th>
+                        <th className="p-3">Order # (Volgnummer)</th>
                         <th className="p-3">Klant</th>
                         <th className="p-3">Status</th>
                         <th className="p-3">Totaal</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y">
-                      {orders.map(o => (
-                        <tr key={o.id} className="hover:bg-gray-50">
-                          <td className="p-3 font-bold">#{o.number || o.id}</td>
-                          <td className="p-3">{o.billing?.first_name} {o.billing?.last_name}</td>
-                          <td className="p-3"><span className="bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded font-bold">{o.status}</span></td>
-                          <td className="p-3 font-bold text-red-600">€{parseFloat(o.total || 0).toFixed(2)}</td>
-                        </tr>
-                      ))}
+                      {currentOrders.length === 0 ? (
+                        <tr><td colSpan="4" className="p-6 text-center text-gray-400">Geen bestellingen gevonden.</td></tr>
+                      ) : (
+                        currentOrders.map(o => (
+                          <tr key={o.id} className="hover:bg-gray-50">
+                            <td className="p-3 font-bold">#{o.number || o.id}</td>
+                            <td className="p-3">{o.billing?.first_name} {o.billing?.last_name}</td>
+                            <td className="p-3"><span className="bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded font-bold">{o.status}</span></td>
+                            <td className="p-3 font-bold text-red-600">€{parseFloat(o.total || 0).toFixed(2)}</td>
+                          </tr>
+                        ))
+                      )}
                     </tbody>
                   </table>
+
+                  {/* Paginering Knoppen */}
+                  {totalPages > 1 && (
+                    <div className="flex justify-center space-x-1 pt-2">
+                      {[...Array(totalPages).keys()].map(num => (
+                        <button
+                          key={num}
+                          onClick={() => setCurrentPage(num + 1)}
+                          className={`px-3 py-1 text-xs font-bold border rounded ${currentPage === num + 1 ? 'bg-black text-white' : 'bg-white text-black hover:bg-gray-100'}`}
+                        >
+                          {num + 1}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
 
-            {/* 5. INVENTORY / VOORRAAD TAB (Inclusief Variaties) */}
+            {/* 5. INVENTORY / VOORRAAD TAB (Inclusief Variaties & Attributen) */}
             {activeTab === 'inventory' && (
               <div className="bg-white rounded-lg shadow p-6">
                 <h3 className="text-md font-bold mb-4">📦 Producten & Voorraad (Inclusief Variaties) ({products.length})</h3>
@@ -412,40 +515,51 @@ export default function AdminDashboard() {
                       </tr>
                     </thead>
                     <tbody className="divide-y">
-                      {products.map(product => (
-                        <>
-                          <tr key={product.id} className="hover:bg-gray-50 font-semibold">
-                            <td className="p-3">#{product.id}</td>
-                            <td className="p-3">
-                              {product.name} 
-                              {product.type === 'variable' && (
-                                <span className="text-[10px] bg-black text-white px-1.5 py-0.5 rounded ml-2 uppercase">Variabel</span>
-                              )}
-                            </td>
-                            <td className="p-3 text-red-600">€{parseFloat(product.price || 0).toFixed(2)}</td>
-                            <td className="p-3">
-                              {product.stock_quantity !== null && product.stock_quantity !== undefined 
-                                ? <span className={`px-2 py-0.5 rounded text-white font-bold ${product.stock_quantity <= 0 ? 'bg-red-600' : 'bg-green-600'}`}>{product.stock_quantity}</span>
-                                : 'N.v.t.'}
-                            </td>
-                          </tr>
-                          {/* Variaties onder het hoofdproduct tonen */}
-                          {product.variations && product.variations.map(v => (
-                            <tr key={`var_${v.id}`} className="bg-gray-50 text-gray-600">
-                              <td className="p-3 pl-6">↳ #{v.id}</td>
-                              <td className="p-3 italic">
-                                &nbsp;&nbsp;└ {v.attributes ? v.attributes.map(a => `${a.name}: ${a.option}`).join(', ') : 'Variatie'}
-                              </td>
-                              <td className="p-3">€{parseFloat(v.price || product.price || 0).toFixed(2)}</td>
+                      {products.map(product => {
+                        const productVariations = product.variations_data || product.variations || [];
+                        return (
+                          <>
+                            <tr key={product.id} className="hover:bg-gray-50 font-semibold">
+                              <td className="p-3">#{product.id}</td>
                               <td className="p-3">
-                                {v.stock_quantity !== null && v.stock_quantity !== undefined 
-                                  ? <span className={`px-2 py-0.5 rounded text-white font-bold text-[10px] ${v.stock_quantity <= 0 ? 'bg-red-500' : 'bg-green-500'}`}>{v.stock_quantity}</span>
+                                {product.name} 
+                                {product.type === 'variable' && (
+                                  <span className="text-[10px] bg-black text-white px-1.5 py-0.5 rounded ml-2 uppercase">Variabel</span>
+                                )}
+                              </td>
+                              <td className="p-3 text-red-600">
+                                {product.price ? `€${parseFloat(product.price).toFixed(2)}` : 'Vanaf prijs'}
+                              </td>
+                              <td className="p-3">
+                                {product.stock_quantity !== null && product.stock_quantity !== undefined 
+                                  ? <span className={`px-2 py-0.5 rounded text-white font-bold ${product.stock_quantity <= 0 ? 'bg-red-600' : 'bg-green-600'}`}>{product.stock_quantity}</span>
                                   : 'N.v.t.'}
                               </td>
                             </tr>
-                          ))}
-                        </>
-                      ))}
+                            
+                            {product.type === 'variable' && productVariations.map(v => {
+                              const attrText = v.attributes && v.attributes.length > 0 
+                                ? v.attributes.map(a => `${a.name}: ${a.option}`).join(' | ') 
+                                : `Variatie #${v.id}`;
+
+                              return (
+                                <tr key={`var_${v.id}`} className="bg-gray-50 text-gray-600">
+                                  <td className="p-3 pl-6 font-mono text-[11px]">↳ #{v.id}</td>
+                                  <td className="p-3 italic">
+                                    &nbsp;&nbsp;└ {attrText}
+                                  </td>
+                                  <td className="p-3">€{parseFloat(v.price || product.price || 0).toFixed(2)}</td>
+                                  <td className="p-3">
+                                    {v.stock_quantity !== null && v.stock_quantity !== undefined 
+                                      ? <span className={`px-2 py-0.5 rounded text-white font-bold text-[10px] ${v.stock_quantity <= 0 ? 'bg-red-500' : 'bg-green-500'}`}>{v.stock_quantity}</span>
+                                      : 'N.v.t.'}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -454,6 +568,82 @@ export default function AdminDashboard() {
           </>
         )}
       </div>
+
+      {/* MODAL: GEBRUIKER BEWERKEN */}
+      {editingUser && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+          <form onSubmit={handleUpdateUser} className="bg-white rounded-lg p-6 max-w-sm w-full space-y-3 shadow-2xl">
+            <h3 className="text-md font-bold mb-2">Medewerker Bewerken: {editingUser.username}</h3>
+            <div>
+              <label className="text-xs font-bold text-gray-600 block mb-1">Rol</label>
+              <select
+                value={editingUser.role}
+                onChange={(e) => setEditingUser({...editingUser, role: e.target.value})}
+                className="w-full p-2 border rounded text-xs"
+              >
+                <option value="cashier">Cashier</option>
+                <option value="admin">Admin</option>
+                <option value="super_admin">Super Admin</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-bold text-gray-600 block mb-1">Koppel Filiaal ID</label>
+              <input
+                type="text"
+                value={editingUser.store_id || ''}
+                onChange={(e) => setEditingUser({...editingUser, store_id: e.target.value})}
+                className="w-full p-2 border rounded text-xs"
+              />
+            </div>
+            <div className="flex space-x-2 pt-2">
+              <button type="button" onClick={() => setEditingUser(null)} className="w-1/2 bg-gray-200 p-2 rounded text-xs font-bold">Annuleren</button>
+              <button type="submit" className="w-1/2 bg-red-600 text-white p-2 rounded text-xs font-bold">Opslaan</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* MODAL: WINKEL BEWERKEN */}
+      {editingStore && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+          <form onSubmit={handleUpdateStore} className="bg-white rounded-lg p-6 max-w-sm w-full space-y-3 shadow-2xl">
+            <h3 className="text-md font-bold mb-2">Filiaal Bewerken</h3>
+            <div>
+              <label className="text-xs font-bold text-gray-600 block mb-1">Naam Filiaal</label>
+              <input
+                type="text"
+                value={editingStore.store_name || editingStore.name || ''}
+                onChange={(e) => setEditingStore({...editingStore, store_name: e.target.value, name: e.target.value})}
+                className="w-full p-2 border rounded text-xs"
+                required
+              />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-gray-600 block mb-1">Adres</label>
+              <input
+                type="text"
+                value={editingStore.address || ''}
+                onChange={(e) => setEditingStore({...editingStore, address: e.target.value})}
+                className="w-full p-2 border rounded text-xs"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-gray-600 block mb-1">Local Pickup Plus ID</label>
+              <input
+                type="text"
+                value={editingStore.pickup_id || ''}
+                onChange={(e) => setEditingStore({...editingStore, pickup_id: e.target.value})}
+                className="w-full p-2 border rounded text-xs"
+              />
+            </div>
+            <div className="flex space-x-2 pt-2">
+              <button type="button" onClick={() => setEditingStore(null)} className="w-1/2 bg-gray-200 p-2 rounded text-xs font-bold">Annuleren</button>
+              <button type="submit" className="w-1/2 bg-red-600 text-white p-2 rounded text-xs font-bold">Opslaan</button>
+            </div>
+          </form>
+        </div>
+      )}
+
     </div>
   );
 }
