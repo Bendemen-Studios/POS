@@ -26,33 +26,46 @@ export default function AdminDashboard() {
   const [pairingCode, setPairingCode] = useState('');
   const [isPairingSumup, setIsPairingSumup] = useState(false);
 
-  // SWR Data Fetching
+  // Live Orders State & Functies
+  const [liveOrders, setLiveOrders] = useState([]);
+  const [loadingOrders, setLoadingOrders] = useState(false);
+
+  // SWR Data Fetching voor Users & Products
   const { data: usersData, mutate: mutateUsers } = useSWR('/api/admin/users', fetcher);
   const usersList = usersData?.users || [];
 
   const { data: productsData, mutate: mutateProducts } = useSWR('/api/woocommerce/products', fetcher);
   const products = productsData?.products || [];
 
-  // Live Orders Fix: Ophalen via WooCommerce Products / Orders API met live refresh
-  const { data: ordersData, mutate: mutateOrders } = useSWR('/api/woocommerce/products', async () => {
-    try {
-      const res = await axios.get('/api/woocommerce/products'); // Fallback of roep orders aan
-      return res.data;
-    } catch (e) {
-      return { success: false };
-    }
-  }, { refreshInterval: 5000 });
-
-  // Ophalen echte bestellingen
-  const [liveOrders, setLiveOrders] = useState([]);
-
   const fetchLiveOrders = async () => {
     try {
-      const res = await fetch('/api/woocommerce/products'); // Of je specifieke WooCommerce orders endpoint
-      const data = await res.json();
-      if (data.orders) setLiveOrders(data.orders);
+      setLoadingOrders(true);
+      const res = await axios.get('/api/woocommerce/orders'); // Haalt echte orders op uit WooCommerce
+      if (res.data.success && res.data.orders) {
+        setLiveOrders(res.data.orders);
+      }
     } catch (err) {
       console.error('Fout bij ophalen live orders:', err);
+    } finally {
+      setLoadingOrders(false);
+    }
+  };
+
+  // Status wijzigen van een order in WooCommerce
+  const handleUpdateOrderStatus = async (orderId, newStatus) => {
+    try {
+      const res = await axios.post('/api/woocommerce/update-order-status', {
+        orderId,
+        status: newStatus
+      });
+      if (res.data.success) {
+        // Update direct lokaal voor snelle feedback
+        setLiveOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: newStatus } : o));
+      } else {
+        alert('Kon status niet wijzigen: ' + (res.data.error || 'Onbekende fout'));
+      }
+    } catch (err) {
+      alert('Fout bij updaten orderstatus: ' + (err.response?.data?.error || err.message));
     }
   };
 
@@ -77,6 +90,15 @@ export default function AdminDashboard() {
       router.push('/login');
     }
   }, []);
+
+  // Automatisch live verversen van orders elke 15 seconden indien op de orders tab
+  useEffect(() => {
+    if (activeTab !== 'orders') return;
+    const interval = setInterval(() => {
+      fetchLiveOrders();
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [activeTab]);
 
   const fetchStores = async () => {
     try {
@@ -378,35 +400,55 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* TAB 4: LIVE BESTELLINGEN */}
+        {/* TAB 4: LIVE BESTELLINGEN (MET STATUS WIJZIGEN) */}
         {activeTab === 'orders' && (
-          <div className="bg-white p-6 rounded-lg shadow">
-            <div className="flex justify-between items-center mb-4">
+          <div className="bg-white p-6 rounded-lg shadow space-y-4">
+            <div className="flex justify-between items-center">
               <h2 className="text-lg font-bold">📊 Live Bestellingen ({liveOrders.length})</h2>
-              <button onClick={fetchLiveOrders} className="bg-gray-100 hover:bg-gray-200 text-xs font-bold px-3 py-1 rounded">🔄 Verversen</button>
+              <button 
+                onClick={fetchLiveOrders} 
+                disabled={loadingOrders}
+                className="bg-gray-100 hover:bg-gray-200 text-xs font-bold px-3 py-1.5 rounded transition flex items-center space-x-1"
+              >
+                <span>{loadingOrders ? '⏳ Laden...' : '🔄 Verversen'}</span>
+              </button>
             </div>
-            <div className="overflow-x-auto max-h-96">
+
+            <div className="overflow-x-auto max-h-[500px]">
               <table className="w-full text-left text-xs divide-y">
                 <thead>
                   <tr className="bg-gray-50">
-                    <th className="p-2">Order ID</th>
-                    <th className="p-2">Datum</th>
-                    <th className="p-2">Betaalmethode</th>
-                    <th className="p-2">Status</th>
-                    <th className="p-2 text-right">Totaal</th>
+                    <th className="p-3">Order ID</th>
+                    <th className="p-3">Datum</th>
+                    <th className="p-3">Betaalmethode</th>
+                    <th className="p-3">Status Wijzigen</th>
+                    <th className="p-3 text-right">Totaal</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
                   {liveOrders.length === 0 ? (
-                    <tr><td colSpan="5" className="p-4 text-center text-gray-500">Geen bestellingen gevonden of bezig met synchroniseren...</td></tr>
+                    <tr><td colSpan="5" className="p-6 text-center text-gray-500">Geen bestellingen gevonden of bezig met synchroniseren...</td></tr>
                   ) : (
                     liveOrders.map((o) => (
-                      <tr key={o.id}>
-                        <td className="p-2 font-bold">#{o.id}</td>
-                        <td className="p-2 text-gray-500">{new Date(o.date_created || Date.now()).toLocaleString('nl-NL')}</td>
-                        <td className="p-2">{o.payment_method_title || o.payment_method || 'Kassa'}</td>
-                        <td className="p-2"><span className="bg-green-100 text-green-800 px-2 py-0.5 rounded font-bold">{o.status || 'completed'}</span></td>
-                        <td className="p-2 text-right font-bold text-red-600">€{parseFloat(o.total || 0).toFixed(2)}</td>
+                      <tr key={o.id} className="hover:bg-gray-50">
+                        <td className="p-3 font-bold">#{o.id}</td>
+                        <td className="p-3 text-gray-500">{new Date(o.date_created || Date.now()).toLocaleString('nl-NL')}</td>
+                        <td className="p-3 font-medium">{o.payment_method_title || o.payment_method || 'Kassa'}</td>
+                        <td className="p-3">
+                          <select
+                            value={o.status}
+                            onChange={(e) => handleUpdateOrderStatus(o.id, e.target.value)}
+                            className="border p-1.5 rounded text-xs font-bold bg-white shadow-sm cursor-pointer"
+                          >
+                            <option value="pending">In afwachting van betaling</option>
+                            <option value="processing">In behandeling</option>
+                            <option value="completed">Voltooid</option>
+                            <option value="cancelled">Geannuleerd</option>
+                            <option value="refunded">Teruggestort</option>
+                            <option value="failed">Mislukt</option>
+                          </select>
+                        </td>
+                        <td className="p-3 text-right font-bold text-red-600">€{parseFloat(o.total || 0).toFixed(2)}</td>
                       </tr>
                     ))
                   )}
