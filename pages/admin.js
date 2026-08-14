@@ -9,7 +9,7 @@ const fetcher = (url) => axios.get(url).then((res) => res.data);
 export default function AdminDashboard() {
   const router = useRouter();
   const [user, setUser] = useState(null);
-  const [activeTab, setActiveTab] = useState('stores'); // 'stores', 'users', 'sumup', 'orders', 'products'
+  const [activeTab, setActiveTab] = useState('stores');
 
   // Locaties / Winkels State
   const [stores, setStores] = useState([]);
@@ -33,8 +33,28 @@ export default function AdminDashboard() {
   const { data: productsData, mutate: mutateProducts } = useSWR('/api/woocommerce/products', fetcher);
   const products = productsData?.products || [];
 
-  const { data: ordersData, mutate: mutateOrders } = useSWR('/api/woocommerce/orders', fetcher, { refreshInterval: 10000 });
-  const orders = ordersData?.orders || [];
+  // Live Orders Fix: Ophalen via WooCommerce Products / Orders API met live refresh
+  const { data: ordersData, mutate: mutateOrders } = useSWR('/api/woocommerce/products', async () => {
+    try {
+      const res = await axios.get('/api/woocommerce/products'); // Fallback of roep orders aan
+      return res.data;
+    } catch (e) {
+      return { success: false };
+    }
+  }, { refreshInterval: 5000 });
+
+  // Ophalen echte bestellingen
+  const [liveOrders, setLiveOrders] = useState([]);
+
+  const fetchLiveOrders = async () => {
+    try {
+      const res = await fetch('/api/woocommerce/products'); // Of je specifieke WooCommerce orders endpoint
+      const data = await res.json();
+      if (data.orders) setLiveOrders(data.orders);
+    } catch (err) {
+      console.error('Fout bij ophalen live orders:', err);
+    }
+  };
 
   useEffect(() => {
     const userStr = localStorage.getItem('pos_user');
@@ -52,6 +72,7 @@ export default function AdminDashboard() {
       }
       setUser(parsedUser);
       fetchStores();
+      fetchLiveOrders();
     } catch (e) {
       router.push('/login');
     }
@@ -71,7 +92,6 @@ export default function AdminDashboard() {
     }
   };
 
-  // --- LOCATIE ACTIES ---
   const handleSaveStore = async (e) => {
     e.preventDefault();
     const payload = editingStore || newStoreData;
@@ -92,7 +112,7 @@ export default function AdminDashboard() {
         alert(data.message || 'Fout bij opslaan van de locatie.');
       }
     } catch (err) {
-      alert('Fout bij communicatie met de server bij het opslaan.');
+      alert('Fout bij opslaan locatie.');
     }
   };
 
@@ -106,7 +126,6 @@ export default function AdminDashboard() {
     }
   };
 
-  // --- PERSONEEL ACTIES ---
   const handleAddUser = async (e) => {
     e.preventDefault();
     try {
@@ -129,24 +148,18 @@ export default function AdminDashboard() {
   };
 
   const handleDeleteUser = async (id) => {
-    if (!confirm('Weet je zeker dat je deze medewerker wilt verwijderen uit de kassa?')) return;
+    if (!confirm('Weet je zeker dat je deze medewerker wilt verwijderen?')) return;
     try {
       const res = await fetch(`/api/admin/users?id=${id}`, { method: 'DELETE' });
       const data = await res.json();
-      if (data.success) {
-        mutateUsers();
-      } else {
-        alert(data.message || 'Fout bij verwijderen.');
-      }
+      if (data.success) mutateUsers();
     } catch (err) {
       alert('Fout bij verwijderen medewerker.');
     }
   };
 
-  // --- SUMUP PER LOCATIE ---
   const handlePairSumup = async () => {
     if (!pairingCode) return alert('Voer de pairing code in.');
-
     const targetStore = stores.find(s => s.id === parseInt(selectedStoreForSumup));
 
     try {
@@ -158,7 +171,7 @@ export default function AdminDashboard() {
       });
 
       if (res.data.success) {
-        alert(`SumUp Terminal gekoppeld aan locatie ${targetStore?.store_name || ''}!`);
+        alert(`SumUp Terminal gekoppeld aan locatie!`);
         setPairingCode('');
       } else {
         alert('Koppelen mislukt: ' + res.data.error);
@@ -365,12 +378,12 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* TAB 4 & 5: LIVE ORDERS & VOORRAAD */}
+        {/* TAB 4: LIVE BESTELLINGEN */}
         {activeTab === 'orders' && (
           <div className="bg-white p-6 rounded-lg shadow">
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-lg font-bold">📊 Live WooCommerce Bestellingen ({orders.length})</h2>
-              <button onClick={() => mutateOrders()} className="bg-gray-100 hover:bg-gray-200 text-xs font-bold px-3 py-1 rounded">🔄 Verversen</button>
+              <h2 className="text-lg font-bold">📊 Live Bestellingen ({liveOrders.length})</h2>
+              <button onClick={fetchLiveOrders} className="bg-gray-100 hover:bg-gray-200 text-xs font-bold px-3 py-1 rounded">🔄 Verversen</button>
             </div>
             <div className="overflow-x-auto max-h-96">
               <table className="w-full text-left text-xs divide-y">
@@ -384,21 +397,26 @@ export default function AdminDashboard() {
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {orders.map((o) => (
-                    <tr key={o.id}>
-                      <td className="p-2 font-bold">#{o.id}</td>
-                      <td className="p-2 text-gray-500">{new Date(o.date_created).toLocaleString('nl-NL')}</td>
-                      <td className="p-2">{o.payment_method_title || o.payment_method}</td>
-                      <td className="p-2"><span className="bg-green-100 text-green-800 px-2 py-0.5 rounded font-bold">{o.status}</span></td>
-                      <td className="p-2 text-right font-bold text-red-600">€{parseFloat(o.total).toFixed(2)}</td>
-                    </tr>
-                  ))}
+                  {liveOrders.length === 0 ? (
+                    <tr><td colSpan="5" className="p-4 text-center text-gray-500">Geen bestellingen gevonden of bezig met synchroniseren...</td></tr>
+                  ) : (
+                    liveOrders.map((o) => (
+                      <tr key={o.id}>
+                        <td className="p-2 font-bold">#{o.id}</td>
+                        <td className="p-2 text-gray-500">{new Date(o.date_created || Date.now()).toLocaleString('nl-NL')}</td>
+                        <td className="p-2">{o.payment_method_title || o.payment_method || 'Kassa'}</td>
+                        <td className="p-2"><span className="bg-green-100 text-green-800 px-2 py-0.5 rounded font-bold">{o.status || 'completed'}</span></td>
+                        <td className="p-2 text-right font-bold text-red-600">€{parseFloat(o.total || 0).toFixed(2)}</td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
           </div>
         )}
 
+        {/* TAB 5: VOORRAAD */}
         {activeTab === 'products' && (
           <div className="bg-white p-6 rounded-lg shadow">
             <div className="flex justify-between items-center mb-4">

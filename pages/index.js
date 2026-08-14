@@ -9,10 +9,11 @@ export default function POSHome() {
   const [currentUser, setCurrentUser] = useState(null);
   const [selectedStore, setSelectedStore] = useState(null);
 
-  // Producten & Cart
+  // Producten & Cart & Categorieën
   const [products, setProducts] = useState([]);
   const [cart, setCart] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('ALL');
 
   // Klanten & Punten
   const [customers, setCustomers] = useState([]);
@@ -30,9 +31,9 @@ export default function POSHome() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [checkoutStatus, setCheckoutStatus] = useState(null);
 
-  // Modal & Wisselgeld State
+  // Modal & Wisselgeld
   const [showPaymentModal, setShowPaymentModal] = useState(false);
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState('sumup'); // 'sumup', 'manual_pin', 'cash'
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState('sumup');
   const [cashGiven, setCashGiven] = useState('');
 
   useEffect(() => {
@@ -87,6 +88,19 @@ export default function POSHome() {
     localStorage.removeItem('pos_token');
     router.push('/login');
   };
+
+  // Bepaal Primary Category per product
+  const getProductCategory = (product) => {
+    if (product.categories && product.categories.length > 0) {
+      return product.categories[0].name || 'Overige';
+    }
+    return 'Overige';
+  };
+
+  // Unieke categorieën ophalen uit de productenlijst
+  const categoriesList = Array.from(
+    new Set(products.map((p) => getProductCategory(p)))
+  );
 
   const addToCart = (product) => {
     setCart((prev) => {
@@ -158,7 +172,6 @@ export default function POSHome() {
     }
   };
 
-  // Open Betaling Modal
   const handleOpenPaymentModal = () => {
     if (cart.length === 0) {
       alert('Winkelmand is leeg.');
@@ -168,7 +181,6 @@ export default function POSHome() {
     setShowPaymentModal(true);
   };
 
-  // Definitieve Afrekening
   const handleProcessPayment = async () => {
     if (selectedPaymentMethod === 'cash' && cashGivenFloat < finalTotal) {
       alert('Het ingegeven contante bedrag is lager dan het totaalbedrag.');
@@ -179,7 +191,6 @@ export default function POSHome() {
     setCheckoutStatus(null);
 
     try {
-      // 1. SumUp betaling
       if (selectedPaymentMethod === 'sumup') {
         const sumupRes = await fetch('/api/sumup/checkout', {
           method: 'POST',
@@ -194,7 +205,6 @@ export default function POSHome() {
           throw new Error(sumupData.error || 'SumUp betaling kon niet worden gestart.');
         }
 
-        // Stuur ook door naar de algemene order endpoint
         await fetch('/api/woocommerce/order', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -213,9 +223,7 @@ export default function POSHome() {
             }
           }),
         });
-      } 
-      // 2. Handmatige Pin of Contant (Via aparte endpoint manual-order.js)
-      else {
+      } else {
         const res = await fetch('/api/woocommerce/manual-order', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -240,13 +248,9 @@ export default function POSHome() {
         });
 
         const data = await res.json();
-
-        if (!data.success) {
-          throw new Error(data.error || 'Fout bij verwerken van de bestelling.');
-        }
+        if (!data.success) throw new Error(data.error || 'Fout bij verwerken van de bestelling.');
       }
 
-      // Afgerond!
       const changeText = selectedPaymentMethod === 'cash' && changeDue > 0 ? ` (Wisselgeld: €${changeDue.toFixed(2)})` : '';
       setCheckoutStatus({ success: true, message: `Bestelling succesvol afgerond!${changeText}` });
       
@@ -267,9 +271,13 @@ export default function POSHome() {
     }
   };
 
-  const filteredProducts = products.filter((p) =>
-    p.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  // Filteren op Zoekterm & Categorie
+  const filteredProducts = products.filter((p) => {
+    const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase());
+    const pCat = getProductCategory(p);
+    const matchesCategory = selectedCategory === 'ALL' || pCat === selectedCategory;
+    return matchesSearch && matchesCategory;
+  });
 
   const filteredCustomers = customers.filter((c) =>
     `${c.first_name || ''} ${c.last_name || ''} ${c.email || ''}`.toLowerCase().includes(customerSearch.toLowerCase())
@@ -320,9 +328,11 @@ export default function POSHome() {
       {/* Grid Layout */}
       <div className="flex-1 flex flex-col md:flex-row p-4 gap-4 overflow-hidden">
         
-        {/* Catalogus */}
+        {/* Producten & Categorieën Catalogus */}
         <div className="w-full md:w-3/5 flex flex-col bg-white rounded-lg shadow p-4">
-          <div className="mb-4">
+          
+          {/* Zoekbalk */}
+          <div className="mb-3">
             <input
               type="text"
               placeholder="Zoek producten op naam..."
@@ -332,21 +342,73 @@ export default function POSHome() {
             />
           </div>
 
-          <div className="flex-1 overflow-y-auto grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[calc(100vh-220px)]">
-            {filteredProducts.map((product) => (
-              <div
-                key={product.id}
-                onClick={() => addToCart(product)}
-                className="bg-gray-50 border border-gray-200 rounded p-3 flex flex-col justify-between cursor-pointer hover:border-black transition"
-              >
-                <div>
-                  <h3 className="font-semibold text-sm line-clamp-2">{product.name}</h3>
+          {/* Categorie Tegels */}
+          <div className="flex space-x-2 overflow-x-auto pb-3 mb-3 border-b">
+            <button
+              onClick={() => setSelectedCategory('ALL')}
+              className={`px-4 py-2 rounded text-xs font-bold whitespace-nowrap transition ${
+                selectedCategory === 'ALL'
+                  ? 'bg-black text-white'
+                  : 'bg-gray-100 text-gray-800 hover:bg-gray-200'
+              }`}
+            >
+              📦 Alle Producten ({products.length})
+            </button>
+            {categoriesList.map((cat) => {
+              const count = products.filter((p) => getProductCategory(p) === cat).length;
+              return (
+                <button
+                  key={cat}
+                  onClick={() => setSelectedCategory(cat)}
+                  className={`px-4 py-2 rounded text-xs font-bold whitespace-nowrap transition ${
+                    selectedCategory === cat
+                      ? 'bg-red-600 text-white'
+                      : 'bg-gray-100 text-gray-800 hover:bg-gray-200'
+                  }`}
+                >
+                  {cat} ({count})
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Producten Tegels (Met Afbeeldingen) */}
+          <div className="flex-1 overflow-y-auto grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[calc(100vh-280px)]">
+            {filteredProducts.map((product) => {
+              const imageUrl = product.images && product.images.length > 0 ? product.images[0].src : null;
+
+              return (
+                <div
+                  key={product.id}
+                  onClick={() => addToCart(product)}
+                  className="bg-gray-50 border border-gray-200 rounded-lg p-2 flex flex-col justify-between cursor-pointer hover:border-black transition shadow-sm hover:shadow"
+                >
+                  <div>
+                    {/* Afbeelding van product */}
+                    <div className="w-full h-28 bg-gray-200 rounded mb-2 overflow-hidden flex items-center justify-center">
+                      {imageUrl ? (
+                        <img
+                          src={imageUrl}
+                          alt={product.name}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <span className="text-gray-400 text-xs font-bold">GEEN FOTO</span>
+                      )}
+                    </div>
+                    <h3 className="font-semibold text-xs line-clamp-2">{product.name}</h3>
+                  </div>
+                  <div className="mt-2 flex justify-between items-center">
+                    <span className="text-[10px] text-gray-500 font-bold uppercase truncate max-w-[80px]">
+                      {getProductCategory(product)}
+                    </span>
+                    <span className="font-bold text-sm text-red-600">
+                      €{parseFloat(product.price || 0).toFixed(2)}
+                    </span>
+                  </div>
                 </div>
-                <div className="mt-2 text-right font-bold text-red-600">
-                  €{parseFloat(product.price || 0).toFixed(2)}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 
@@ -524,7 +586,6 @@ export default function POSHome() {
               </button>
             </div>
 
-            {/* Slimme Wisselgeld Berekenaar voor Contant */}
             {selectedPaymentMethod === 'cash' && (
               <div className="bg-gray-50 p-4 rounded border mb-4 space-y-3">
                 <div className="flex justify-between items-center text-sm font-bold">
@@ -543,7 +604,6 @@ export default function POSHome() {
                   />
                 </div>
 
-                {/* Snel-keuze knoppen */}
                 <div className="grid grid-cols-4 gap-1">
                   {[finalTotal, 5, 10, 20, 50, 100].map((amt, idx) => (
                     amt >= finalTotal && (
@@ -558,7 +618,6 @@ export default function POSHome() {
                   ))}
                 </div>
 
-                {/* Wisselgeld Weergave */}
                 <div className="bg-black text-white p-3 rounded flex justify-between items-center mt-2">
                   <span className="text-xs font-bold uppercase">Teruggeven Wisselgeld:</span>
                   <span className="text-xl font-black text-green-400">€{changeDue.toFixed(2)}</span>
