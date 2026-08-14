@@ -5,49 +5,57 @@ import Link from 'next/link';
 export default function POSHome() {
   const router = useRouter();
 
-  // Auth & Sessie Controle
+  // Auth & Sessie
   const [currentUser, setCurrentUser] = useState(null);
+  const [selectedStore, setSelectedStore] = useState(null);
 
-  // Producten & Winkelmand
+  // Producten & Cart
   const [products, setProducts] = useState([]);
   const [cart, setCart] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Klanten & Punten (WooCommerce Points & Rewards)
+  // Klanten & Punten
   const [customers, setCustomers] = useState([]);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [customerSearch, setCustomerSearch] = useState('');
   const [pointsToRedeem, setPointsToRedeem] = useState(0);
   const [redeemedDiscount, setRedeemedDiscount] = useState(0);
 
-  // Kortingen & Vouchers
-  const [discountType, setDiscountType] = useState('none'); // 'none', 'percentage', 'fixed'
+  // Kortingen
+  const [discountType, setDiscountType] = useState('none');
   const [discountValue, setDiscountValue] = useState(0);
 
-  // Betaling & Status
-  const [paymentMethod, setPaymentMethod] = useState('sumup'); // 'sumup', 'manual_pin', 'cash'
+  // Status & Sync
   const [loading, setLoading] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [checkoutStatus, setCheckoutStatus] = useState(null);
 
-  // Check inlogstatus bij opstarten
+  // Modal & Wisselgeld State
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState('sumup'); // 'sumup', 'manual_pin', 'cash'
+  const [cashGiven, setCashGiven] = useState('');
+
   useEffect(() => {
     const userStr = localStorage.getItem('pos_user');
     if (!userStr) {
       router.push('/login');
-    } else {
-      try {
-        setCurrentUser(JSON.parse(userStr));
-      } catch (e) {
-        router.push('/login');
-      }
+      return;
+    }
+    try {
+      setCurrentUser(JSON.parse(userStr));
+    } catch (e) {
+      router.push('/login');
+      return;
     }
 
-    // Ophalen data
+    const storeStr = localStorage.getItem('selectedStore');
+    if (storeStr) {
+      try { setSelectedStore(JSON.parse(storeStr)); } catch (e) {}
+    }
+
     handleSyncData();
   }, []);
 
-  // Handmatige/Automatische Synchronisatie met WooCommerce
   const handleSyncData = async () => {
     setIsSyncing(true);
     await Promise.all([fetchProducts(), fetchCustomers()]);
@@ -74,13 +82,12 @@ export default function POSHome() {
     }
   };
 
-  // Uitloggen
   const handleLogout = () => {
     localStorage.removeItem('pos_user');
+    localStorage.removeItem('pos_token');
     router.push('/login');
   };
 
-  // Cart Handlers
   const addToCart = (product) => {
     setCart((prev) => {
       const existing = prev.find((item) => item.id === product.id);
@@ -89,7 +96,7 @@ export default function POSHome() {
           item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
         );
       }
-      return [...prev, { ...product, quantity: 1 }];
+      return [...prev, { ...product, quantity: 1, product_id: product.id }];
     });
   };
 
@@ -101,7 +108,7 @@ export default function POSHome() {
     );
   };
 
-  // Totalen Berekenen
+  // Totalen
   const subtotal = cart.reduce((acc, item) => acc + parseFloat(item.price || 0) * item.quantity, 0);
 
   let manualDiscountAmount = 0;
@@ -114,8 +121,11 @@ export default function POSHome() {
   const totalDiscount = Math.min(subtotal, manualDiscountAmount + parseFloat(redeemedDiscount || 0));
   const finalTotal = Math.max(0, subtotal - totalDiscount);
 
-  // Punten Inwisselen (100 punten = €5 -> 1 punt = €0.05)
-  const handleRedeemPoints = () => {
+  // Wisselgeld berekening
+  const cashGivenFloat = parseFloat(cashGiven) || 0;
+  const changeDue = Math.max(0, cashGivenFloat - finalTotal);
+
+  const handleRedeemPoints = async () => {
     const pts = parseInt(pointsToRedeem) || 0;
     if (pts <= 0) {
       setRedeemedDiscount(0);
@@ -125,18 +135,43 @@ export default function POSHome() {
       alert('Koppel eerst een klant voordat je punten kunt inwisselen.');
       return;
     }
-    const discount = pts * 0.05;
-    if (discount > subtotal) {
-      alert('De korting door punten kan niet hoger zijn dan het subtotaal.');
-      return;
+
+    try {
+      const res = await fetch('/api/woocommerce/points', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customerId: selectedCustomer.id,
+          pointsToRedeem: pts,
+          action: 'redeem'
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setRedeemedDiscount(data.discountAmount);
+      } else {
+        alert(data.message || 'Fout bij inwisselen punten.');
+      }
+    } catch (e) {
+      const discount = pts * 0.05;
+      setRedeemedDiscount(discount.toFixed(2));
     }
-    setRedeemedDiscount(discount.toFixed(2));
   };
 
-  // Afrekenen
-  const handleCheckout = async () => {
+  // Open Betaling Modal
+  const handleOpenPaymentModal = () => {
     if (cart.length === 0) {
       alert('Winkelmand is leeg.');
+      return;
+    }
+    setCashGiven(finalTotal.toFixed(2));
+    setShowPaymentModal(true);
+  };
+
+  // Definitieve Afrekening
+  const handleProcessPayment = async () => {
+    if (selectedPaymentMethod === 'cash' && cashGivenFloat < finalTotal) {
+      alert('Het ingegeven contante bedrag is lager dan het totaalbedrag.');
       return;
     }
 
@@ -144,59 +179,89 @@ export default function POSHome() {
     setCheckoutStatus(null);
 
     try {
-      if (paymentMethod === 'sumup') {
-        const sumupRes = await fetch('/api/sumup/create-payment', {
+      // 1. SumUp betaling
+      if (selectedPaymentMethod === 'sumup') {
+        const sumupRes = await fetch('/api/sumup/checkout', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ amount: finalTotal.toFixed(2), currency: 'EUR' }),
+          body: JSON.stringify({ 
+            totalAmount: finalTotal.toFixed(2),
+            terminalId: localStorage.getItem('pos_fallback_terminal_id') || 'SOLO_READER_1'
+          }),
         });
         const sumupData = await sumupRes.json();
         if (!sumupData.success) {
           throw new Error(sumupData.error || 'SumUp betaling kon niet worden gestart.');
         }
+
+        // Stuur ook door naar de algemene order endpoint
+        await fetch('/api/woocommerce/order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            orderItems: cart,
+            paymentMethod: 'sumup',
+            storeId: selectedStore?.id || 1,
+            cashierId: currentUser?.id || 1,
+            customerId: selectedCustomer ? selectedCustomer.id : 0,
+            totals: {
+              subtotal,
+              discountAmount: manualDiscountAmount,
+              pointsDiscount: parseFloat(redeemedDiscount || 0),
+              pointsUsed: parseInt(pointsToRedeem || 0),
+              totalPaid: finalTotal
+            }
+          }),
+        });
+      } 
+      // 2. Handmatige Pin of Contant (Via aparte endpoint manual-order.js)
+      else {
+        const res = await fetch('/api/woocommerce/manual-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            orderItems: cart,
+            paymentMethod: selectedPaymentMethod,
+            storeId: selectedStore?.id || 1,
+            cashierId: currentUser?.id || 1,
+            customerId: selectedCustomer ? selectedCustomer.id : 0,
+            totals: {
+              subtotal,
+              discountAmount: manualDiscountAmount,
+              pointsDiscount: parseFloat(redeemedDiscount || 0),
+              pointsUsed: parseInt(pointsToRedeem || 0),
+              totalPaid: finalTotal
+            },
+            cashDetails: selectedPaymentMethod === 'cash' ? {
+              cashGiven: cashGivenFloat.toFixed(2),
+              changeDue: changeDue.toFixed(2)
+            } : null
+          }),
+        });
+
+        const data = await res.json();
+
+        if (!data.success) {
+          throw new Error(data.error || 'Fout bij verwerken van de bestelling.');
+        }
       }
 
-      const line_items = cart.map((item) => ({
-        product_id: item.id,
-        quantity: item.quantity,
-      }));
+      // Afgerond!
+      const changeText = selectedPaymentMethod === 'cash' && changeDue > 0 ? ` (Wisselgeld: €${changeDue.toFixed(2)})` : '';
+      setCheckoutStatus({ success: true, message: `Bestelling succesvol afgerond!${changeText}` });
+      
+      setShowPaymentModal(false);
+      setCart([]);
+      setSelectedCustomer(null);
+      setPointsToRedeem(0);
+      setRedeemedDiscount(0);
+      setDiscountType('none');
+      setDiscountValue(0);
+      setCashGiven('');
 
-      const orderData = {
-        payment_method: paymentMethod,
-        payment_method_title: paymentMethod === 'sumup' ? 'SumUp Kaartlezer' : (paymentMethod === 'cash' ? 'Contant' : 'Handmatige Pin'),
-        set_paid: true,
-        customer_id: selectedCustomer ? selectedCustomer.id : 0,
-        line_items: line_items,
-        fee_lines: totalDiscount > 0 ? [
-          {
-            name: `Korting & Rewards (${pointsToRedeem ? pointsToRedeem + ' pnt' : 'Actie'})`,
-            total: (-totalDiscount).toFixed(2),
-          }
-        ] : []
-      };
-
-      const res = await fetch('/api/woocommerce/create-order', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(orderData),
-      });
-
-      const data = await res.json();
-
-      if (data.success) {
-        setCheckoutStatus({ success: true, message: `Bestelling #${data.order.id} succesvol verwerkt!` });
-        setCart([]);
-        setSelectedCustomer(null);
-        setPointsToRedeem(0);
-        setRedeemedDiscount(0);
-        setDiscountType('none');
-        setDiscountValue(0);
-      } else {
-        setCheckoutStatus({ success: false, message: data.error || 'Fout bij aanmaken bestelling.' });
-      }
     } catch (err) {
       console.error(err);
-      setCheckoutStatus({ success: false, message: err.message || 'Fout tijdens afrekenen.' });
+      alert(err.message || 'Fout tijdens afrekenen.');
     } finally {
       setLoading(false);
     }
@@ -207,12 +272,12 @@ export default function POSHome() {
   );
 
   const filteredCustomers = customers.filter((c) =>
-    `${c.first_name} ${c.last_name} ${c.email}`.toLowerCase().includes(customerSearch.toLowerCase())
+    `${c.first_name || ''} ${c.last_name || ''} ${c.email || ''}`.toLowerCase().includes(customerSearch.toLowerCase())
   );
 
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col">
-      {/* Header met Sync, Admin & Loguit Knoppen */}
+      {/* Header */}
       <header className="bg-black text-white p-4 flex justify-between items-center shadow-md">
         <div className="flex items-center space-x-3">
           <span className="font-bold text-xl tracking-wider">BDM POS</span>
@@ -221,11 +286,14 @@ export default function POSHome() {
               {currentUser.username} ({currentUser.role})
             </span>
           )}
+          {selectedStore && (
+            <span className="text-xs bg-red-700 text-white px-2 py-1 rounded font-bold">
+              📍 {selectedStore.name}
+            </span>
+          )}
         </div>
         
-        {/* Navigatie Acties */}
         <div className="flex items-center space-x-2">
-          {/* Sync Knop */}
           <button
             onClick={handleSyncData}
             disabled={isSyncing}
@@ -234,14 +302,12 @@ export default function POSHome() {
             <span>{isSyncing ? '⏳ Syncing...' : '🔄 Sync'}</span>
           </button>
 
-          {/* Admin Panel Knop */}
           <Link href="/admin">
             <button className="bg-gray-800 hover:bg-gray-700 text-white px-3 py-2 rounded text-xs font-semibold transition">
               ⚙️ Admin
             </button>
           </Link>
 
-          {/* Loguit Knop */}
           <button
             onClick={handleLogout}
             className="bg-red-700 hover:bg-red-800 text-white px-3 py-2 rounded text-xs font-semibold transition"
@@ -254,7 +320,7 @@ export default function POSHome() {
       {/* Grid Layout */}
       <div className="flex-1 flex flex-col md:flex-row p-4 gap-4 overflow-hidden">
         
-        {/* Producten Catalogus */}
+        {/* Catalogus */}
         <div className="w-full md:w-3/5 flex flex-col bg-white rounded-lg shadow p-4">
           <div className="mb-4">
             <input
@@ -262,7 +328,7 @@ export default function POSHome() {
               placeholder="Zoek producten op naam..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full p-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-black"
+              className="w-full p-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-black text-sm"
             />
           </div>
 
@@ -284,7 +350,7 @@ export default function POSHome() {
           </div>
         </div>
 
-        {/* Bestelling, Klant, Korting & Afrekenen */}
+        {/* Winkelmand */}
         <div className="w-full md:w-2/5 flex flex-col bg-white rounded-lg shadow p-4 justify-between">
           <div>
             <h2 className="text-lg font-bold mb-3 border-b pb-2">Huidige Bestelling</h2>
@@ -295,7 +361,7 @@ export default function POSHome() {
               {selectedCustomer ? (
                 <div className="flex justify-between items-center text-sm">
                   <span className="font-semibold text-black">{selectedCustomer.first_name} {selectedCustomer.last_name}</span>
-                  <button onClick={() => setSelectedCustomer(null)} className="text-red-500 text-xs underline">Ontkoppel</button>
+                  <button onClick={() => { setSelectedCustomer(null); setPointsToRedeem(0); setRedeemedDiscount(0); }} className="text-red-500 text-xs underline">Ontkoppel</button>
                 </div>
               ) : (
                 <div>
@@ -323,7 +389,7 @@ export default function POSHome() {
               )}
             </div>
 
-            {/* Winkelmand */}
+            {/* Cart Items */}
             <div className="overflow-y-auto max-h-40 mb-3 divide-y">
               {cart.length === 0 ? (
                 <p className="text-gray-400 text-sm text-center py-4">Geen artikelen in winkelmand</p>
@@ -344,7 +410,7 @@ export default function POSHome() {
               )}
             </div>
 
-            {/* Kortingen & Punten */}
+            {/* Kortingen */}
             <div className="border-t pt-2 space-y-2 text-xs">
               <div className="flex justify-between items-center">
                 <span className="font-semibold">Korting / Voucher:</span>
@@ -369,7 +435,6 @@ export default function POSHome() {
                 />
               )}
 
-              {/* Punten Inwisselen */}
               <div className="bg-gray-50 p-2 rounded border">
                 <span className="font-semibold block mb-1">Punten Inwisselen (100 pnt = €5):</span>
                 <div className="flex space-x-2">
@@ -392,32 +457,8 @@ export default function POSHome() {
             </div>
           </div>
 
-          {/* Betaalmethode & Totalen */}
+          {/* Totalen & Knop */}
           <div className="border-t pt-3 mt-2">
-            <div className="mb-2">
-              <label className="text-xs font-bold text-gray-600 block mb-1">Betaalmethode:</label>
-              <div className="grid grid-cols-3 gap-1">
-                <button
-                  onClick={() => setPaymentMethod('sumup')}
-                  className={`p-2 text-xs font-bold border rounded ${paymentMethod === 'sumup' ? 'bg-black text-white' : 'bg-gray-100 text-black'}`}
-                >
-                  SumUp
-                </button>
-                <button
-                  onClick={() => setPaymentMethod('manual_pin')}
-                  className={`p-2 text-xs font-bold border rounded ${paymentMethod === 'manual_pin' ? 'bg-black text-white' : 'bg-gray-100 text-black'}`}
-                >
-                  Handmatige Pin
-                </button>
-                <button
-                  onClick={() => setPaymentMethod('cash')}
-                  className={`p-2 text-xs font-bold border rounded ${paymentMethod === 'cash' ? 'bg-black text-white' : 'bg-gray-100 text-black'}`}
-                >
-                  Contant
-                </button>
-              </div>
-            </div>
-
             <div className="flex justify-between text-sm mb-1">
               <span>Subtotaal:</span>
               <span>€{subtotal.toFixed(2)}</span>
@@ -446,15 +487,110 @@ export default function POSHome() {
             )}
 
             <button
-              onClick={handleCheckout}
+              onClick={handleOpenPaymentModal}
               disabled={loading || cart.length === 0}
               className="w-full bg-red-600 hover:bg-red-700 disabled:bg-gray-300 text-white font-bold py-3 rounded transition text-sm uppercase tracking-wider"
             >
-              {loading ? 'Verwerken...' : `Afrekenen (€${finalTotal.toFixed(2)})`}
+              Afrekenen (€{finalTotal.toFixed(2)})
             </button>
           </div>
         </div>
       </div>
+
+      {/* POP-UP MODAL: BETAALMETHODE & SLIMME WISSELGELD BEREKENAAR */}
+      {showPaymentModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-bold mb-4 border-b pb-2">Kies Betaalmethode</h3>
+
+            <div className="grid grid-cols-3 gap-2 mb-4">
+              <button
+                onClick={() => setSelectedPaymentMethod('sumup')}
+                className={`p-3 text-xs font-bold border rounded transition ${selectedPaymentMethod === 'sumup' ? 'bg-black text-white' : 'bg-gray-100 text-black'}`}
+              >
+                💳 SumUp
+              </button>
+              <button
+                onClick={() => setSelectedPaymentMethod('manual_pin')}
+                className={`p-3 text-xs font-bold border rounded transition ${selectedPaymentMethod === 'manual_pin' ? 'bg-black text-white' : 'bg-gray-100 text-black'}`}
+              >
+                📌 Handmatige Pin
+              </button>
+              <button
+                onClick={() => setSelectedPaymentMethod('cash')}
+                className={`p-3 text-xs font-bold border rounded transition ${selectedPaymentMethod === 'cash' ? 'bg-black text-white' : 'bg-gray-100 text-black'}`}
+              >
+                💵 Contant
+              </button>
+            </div>
+
+            {/* Slimme Wisselgeld Berekenaar voor Contant */}
+            {selectedPaymentMethod === 'cash' && (
+              <div className="bg-gray-50 p-4 rounded border mb-4 space-y-3">
+                <div className="flex justify-between items-center text-sm font-bold">
+                  <span>Te Betalen:</span>
+                  <span className="text-red-600 font-extrabold text-base">€{finalTotal.toFixed(2)}</span>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-gray-600 block mb-1">Ontvangen Bedrag (€):</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={cashGiven}
+                    onChange={(e) => setCashGiven(e.target.value)}
+                    className="w-full p-2 border border-black rounded text-lg font-bold"
+                  />
+                </div>
+
+                {/* Snel-keuze knoppen */}
+                <div className="grid grid-cols-4 gap-1">
+                  {[finalTotal, 5, 10, 20, 50, 100].map((amt, idx) => (
+                    amt >= finalTotal && (
+                      <button
+                        key={idx}
+                        onClick={() => setCashGiven(amt.toFixed(2))}
+                        className="bg-white border hover:bg-gray-100 text-xs font-bold py-1.5 rounded"
+                      >
+                        €{amt.toFixed(2)}
+                      </button>
+                    )
+                  ))}
+                </div>
+
+                {/* Wisselgeld Weergave */}
+                <div className="bg-black text-white p-3 rounded flex justify-between items-center mt-2">
+                  <span className="text-xs font-bold uppercase">Teruggeven Wisselgeld:</span>
+                  <span className="text-xl font-black text-green-400">€{changeDue.toFixed(2)}</span>
+                </div>
+              </div>
+            )}
+
+            {(selectedPaymentMethod === 'cash' || selectedPaymentMethod === 'manual_pin') && (
+              <div className="text-xs text-gray-500 mb-4 bg-blue-50 p-2 rounded text-blue-800">
+                ℹ️ Handmatige Pin en Contant betalingen vereisen géén bon.
+              </div>
+            )}
+
+            <div className="flex space-x-2">
+              <button
+                onClick={() => setShowPaymentModal(false)}
+                className="w-1/3 bg-gray-200 hover:bg-gray-300 text-black font-bold py-3 rounded text-xs uppercase"
+              >
+                Annuleren
+              </button>
+              <button
+                onClick={handleProcessPayment}
+                disabled={loading}
+                className="w-2/3 bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded text-xs uppercase transition tracking-wider"
+              >
+                {loading ? 'Verwerken...' : 'Betaling Voltooien'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

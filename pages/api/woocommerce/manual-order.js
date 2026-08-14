@@ -12,7 +12,7 @@ const api = new WooCommerce({
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ message: 'Method not allowed' });
 
-  const { orderItems, paymentMethod, storeId, cashierId, customerId, totals } = req.body;
+  const { orderItems, paymentMethod, storeId, cashierId, customerId, totals, cashDetails } = req.body;
 
   try {
     const feeLines = [];
@@ -25,10 +25,23 @@ export default async function handler(req, res) {
       feeLines.push({ name: 'Punten Ingewisseld', total: `-${totals.pointsDiscount.toFixed(2)}` });
     }
 
-    let paymentTitle = paymentMethod === 'sumup' ? 'Pin (SumUp)' : paymentMethod === 'manual_pin' ? 'Pin (Handmatig)' : 'Contant (Kassa)';
+    const paymentTitle = paymentMethod === 'cash' ? 'Contant (Kassa)' : 'Pin (Handmatig)';
+
+    const metaData = [
+      { key: '_pos_store_id', value: storeId || 1 },
+      { key: '_pos_cashier_id', value: cashierId || 1 },
+      { key: '_created_via_bendemen_pos', value: 'yes' },
+      { key: '_pos_receipt_required', value: 'no' }
+    ];
+
+    // Sla contant- en wisselgeldgegevens op in metadata indien contant
+    if (paymentMethod === 'cash' && cashDetails) {
+      metaData.push({ key: '_pos_cash_given', value: cashDetails.cashGiven });
+      metaData.push({ key: '_pos_change_due', value: cashDetails.changeDue });
+    }
 
     const orderData = {
-      payment_method: paymentMethod === 'manual_pin' ? 'pin' : paymentMethod,
+      payment_method: paymentMethod === 'cash' ? 'cash' : 'pin',
       payment_method_title: paymentTitle,
       set_paid: true,
       status: 'completed',
@@ -39,17 +52,12 @@ export default async function handler(req, res) {
         quantity: item.quantity || 1
       })),
       fee_lines: feeLines,
-      meta_data: [
-        { key: '_pos_store_id', value: storeId || 1 },
-        { key: '_pos_cashier_id', value: cashierId || 1 },
-        { key: '_created_via_bendemen_pos', value: 'yes' }
-      ]
+      meta_data: metaData
     };
 
     const response = await api.post("orders", orderData);
     const createdOrder = response.data;
-
-    // Punten synchronisatie met WooCommerce
+    // Punten bijwerken op WooCommerce
     if (customerId > 0) {
       try {
         const customerRes = await api.get(`customers/${customerId}`);
@@ -57,7 +65,6 @@ export default async function handler(req, res) {
         const pointsMeta = customer.meta_data.find(meta => meta.key === 'wc_points_balance');
         let currentPoints = pointsMeta ? parseInt(pointsMeta.value) : 0;
 
-        // Inwisselen aftrekken & sparen optellen (1 euro = 1 punt)
         let pointsBalance = currentPoints - (totals.pointsUsed || 0);
         if (pointsBalance < 0) pointsBalance = 0;
 
@@ -72,9 +79,13 @@ export default async function handler(req, res) {
       }
     }
 
-    res.status(200).json({ success: true, orderId: createdOrder.id });
+    res.status(200).json({ 
+      success: true, 
+      orderId: createdOrder.id,
+      changeDue: cashDetails?.changeDue || '0.00'
+    });
   } catch (error) {
-    console.error("WooCommerce API Error:", error.response?.data || error.message);
-    res.status(500).json({ success: false, error: 'Fout bij aanmaken order in WooCommerce' });
+    console.error("WooCommerce Manual Order Error:", error.response?.data || error.message);
+    res.status(500).json({ success: false, error: 'Fout bij verwerken van handmatige bestelling.' });
   }
 }

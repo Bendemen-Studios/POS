@@ -14,7 +14,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Zoek de gebruiker in de juiste tabel (pos_users)
+    // Zoek de gebruiker in pos_users
     const [rows] = await pool.execute('SELECT * FROM pos_users WHERE username = ?', [username]);
     
     if (rows.length === 0) {
@@ -23,7 +23,7 @@ export default async function handler(req, res) {
 
     const user = rows[0];
 
-    // Vergelijk het wachtwoord met de juiste kolom (password_hash)
+    // Vergelijk het wachtwoord met password_hash
     const isMatch = await bcrypt.compare(password, user.password_hash);
 
     if (!isMatch) {
@@ -37,6 +37,7 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       success: true,
+      token: `pos_session_${user.id}_${Date.now()}`,
       user: {
         id: user.id,
         username: user.username,

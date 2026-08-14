@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
+import Link from 'next/link';
 import useSWR from 'swr';
 import axios from 'axios';
 
@@ -7,426 +8,338 @@ const fetcher = (url) => axios.get(url).then((res) => res.data);
 
 export default function AdminDashboard() {
   const router = useRouter();
-  const [mounted, setMounted] = useState(false);
   const [user, setUser] = useState(null);
-  const [activeTab, setActiveTab] = useState('stores'); // 'stores', 'staff', 'sumup', 'orders', 'products'
+  const [activeTab, setActiveTab] = useState('store'); // 'store', 'users', 'sumup', 'orders', 'products'
 
-  // Multi-Store State
-  const [stores, setStores] = useState([
-    { id: 1, name: 'Ons Winkeltje', location: 'Hellevoetsluis', email: 'info@onswinkeltje.nl', active: true, sumupReaderId: '' },
-    { id: 2, name: 'Bendemen HQ', location: 'Hellevoetsluis', email: 'info@bendemen.nl', active: true, sumupReaderId: '' }
-  ]);
-  const [editingStore, setEditingStore] = useState(null);
-  const [showAddStoreModal, setShowAddStoreModal] = useState(false);
-  const [newStoreData, setNewStoreData] = useState({ name: '', location: '', email: '' });
+  // Winkelbeheer DB State
+  const [storeId, setStoreId] = useState(null);
+  const [storeName, setStoreName] = useState('');
+  const [storeAddress, setStoreAddress] = useState('');
+  const [registerStatus, setRegisterStatus] = useState('open');
+  const [receiptHeader, setReceiptHeader] = useState('');
+  const [receiptFooter, setReceiptFooter] = useState('');
+  const [storeStatusMsg, setStoreStatusMsg] = useState('');
 
-  // Personeelsbeheer State
-  const [staffList, setStaffList] = useState([
-    { id: 1, name: 'Ben van der Leeden', role: 'administrator', pin: '1234', active: true },
-    { id: 2, name: 'Kassamedewerker 1', role: 'cashier', pin: '0000', active: true }
-  ]);
-  const [showAddStaffModal, setShowAddStaffModal] = useState(false);
-  const [newStaffData, setNewStaffData] = useState({ name: '', role: 'cashier', pin: '' });
-
-  // SumUp Pairing per Locatie State
-  const [selectedStoreForSumup, setSelectedStoreForSumup] = useState('1');
+  // SumUp State
   const [pairingCode, setPairingCode] = useState('');
   const [isPairingSumup, setIsPairingSumup] = useState(false);
 
-  // WooCommerce Data via SWR
+  // WooCommerce Live Data
   const { data: productsData, mutate: mutateProducts } = useSWR('/api/woocommerce/products', fetcher);
-  const products = Array.isArray(productsData) ? productsData : (productsData?.products || []);
+  const products = productsData?.products || [];
 
   const { data: ordersData, mutate: mutateOrders } = useSWR('/api/woocommerce/orders', fetcher, { refreshInterval: 10000 });
   const orders = ordersData?.orders || [];
 
+  // Gebruikers DB
+  const { data: usersData, mutate: mutateUsers } = useSWR('/api/admin/users', fetcher);
+  const usersList = Array.isArray(usersData) ? usersData : (usersData?.users || []);
+
   useEffect(() => {
-    setMounted(true);
+    const userStr = localStorage.getItem('pos_user');
+    if (!userStr) {
+      router.push('/login');
+      return;
+    }
 
     try {
-      const rawUser = localStorage.getItem('pos_user');
-      if (rawUser && rawUser !== 'undefined') {
-        const parsedUser = JSON.parse(rawUser);
-        setUser(parsedUser);
-        if (parsedUser.role !== 'administrator' && parsedUser.role !== 'manager' && parsedUser.role !== 'shop_manager') {
-          router.push('/');
-        }
-      } else {
-        router.push('/login');
+      const parsedUser = JSON.parse(userStr);
+      // Accepteer super_admin en admin
+      if (parsedUser.role !== 'admin' && parsedUser.role !== 'super_admin') {
+        alert('Geen toegang tot het Admin Panel.');
+        router.push('/');
+        return;
       }
+      setUser(parsedUser);
+      fetchStoreSettings();
     } catch (e) {
       router.push('/login');
     }
+  }, []);
+
+  const fetchStoreSettings = async () => {
+    try {
+      const res = await fetch('/api/admin/store');
+      const data = await res.json();
+      if (data.success && data.store) {
+        setStoreId(data.store.id || null);
+        setStoreName(data.store.store_name || '');
+        setStoreAddress(data.store.address || '');
+        setRegisterStatus(data.store.register_status || 'open');
+        setReceiptHeader(data.store.receipt_header || '');
+        setReceiptFooter(data.store.receipt_footer || '');
+      }
+    } catch (err) {
+      console.error('Fout bij laden winkelbeheer:', err);
+    }
+  };
+
+  const handleSaveStore = async (e) => {
+    e.preventDefault();
+    setStoreStatusMsg('Opslaan...');
 
     try {
-      const savedStores = localStorage.getItem('pos_stores');
-      if (savedStores) {
-        const parsedStores = JSON.parse(savedStores);
-        setStores(parsedStores);
-        if (parsedStores.length > 0) setSelectedStoreForSumup(parsedStores[0].id.toString());
+      const res = await fetch('/api/admin/store', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: storeId,
+          store_name: storeName,
+          address: storeAddress,
+          register_status: registerStatus,
+          receipt_header: receiptHeader,
+          receipt_footer: receiptFooter
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setStoreStatusMsg('Winkelinstellingen opgeslagen!');
+        fetchStoreSettings();
+        setTimeout(() => setStoreStatusMsg(''), 3000);
       }
-
-      const savedStaff = localStorage.getItem('pos_staff');
-      if (savedStaff) setStaffList(JSON.parse(savedStaff));
-    } catch (e) { 
-      console.error('Fout bij laden admin data:', e); 
-    }
-  }, [router]);
-
-  if (!mounted || !user) return null;
-
-  // --- 1. MULTI-STORE BEHEER ---
-  const saveStoresToStorage = (updatedStores) => {
-    setStores(updatedStores);
-    localStorage.setItem('pos_stores', JSON.stringify(updatedStores));
-  };
-
-  const handleToggleStoreActive = (id) => {
-    const updated = stores.map(s => s.id === id ? { ...s, active: !s.active } : s);
-    saveStoresToStorage(updated);
-  };
-
-  const handleDeleteStore = (id) => {
-    if (confirm('Weet je zeker dat je deze winkel definitief wilt verwijderen?')) {
-      const updated = stores.filter(s => s.id !== id);
-      saveStoresToStorage(updated);
+    } catch (err) {
+      setStoreStatusMsg('Fout bij opslaan.');
     }
   };
 
-  const handleSaveEditStore = () => {
-    if (!editingStore.name) return alert('Vul een winkelnaam in.');
-    const updated = stores.map(s => s.id === editingStore.id ? editingStore : s);
-    saveStoresToStorage(updated);
-    setEditingStore(null);
-  };
-
-  const handleAddStore = () => {
-    if (!newStoreData.name) return alert('Vul een winkelnaam in.');
-    const newStore = {
-      id: Date.now(),
-      name: newStoreData.name,
-      location: newStoreData.location || 'Hellevoetsluis',
-      email: newStoreData.email || '',
-      active: true,
-      sumupReaderId: ''
-    };
-    const updated = [...stores, newStore];
-    saveStoresToStorage(updated);
-    setNewStoreData({ name: '', location: '', email: '' });
-    setShowAddStoreModal(false);
-  };
-
-  // --- 2. PERSONEEL BEHEER ---
-  const saveStaffToStorage = (updatedStaff) => {
-    setStaffList(updatedStaff);
-    localStorage.setItem('pos_staff', JSON.stringify(updatedStaff));
-  };
-
-  const handleAddStaff = () => {
-    if (!newStaffData.name) return alert('Vul een naam in.');
-    const newMember = {
-      id: Date.now(),
-      name: newStaffData.name,
-      role: newStaffData.role,
-      pin: newStaffData.pin || '0000',
-      active: true
-    };
-    const updated = [...staffList, newMember];
-    saveStaffToStorage(updated);
-    setNewStaffData({ name: '', role: 'cashier', pin: '' });
-    setShowAddStaffModal(false);
-  };
-
-  const handleDeleteStaff = (id) => {
-    if (confirm('Medewerker verwijderen uit het kassasysteem?')) {
-      const updated = staffList.filter(s => s.id !== id);
-      saveStaffToStorage(updated);
-    }
-  };
-
-  // --- 3. SUMUP PAIRING PER LOCATIE ---
   const handlePairSumup = async () => {
-    if (!pairingCode) return alert('Vul de pairing code in die op het scherm van de SumUp staat.');
-
-    const targetStore = stores.find(s => s.id === parseInt(selectedStoreForSumup));
-    if (!targetStore) return alert('Selecteer een geldige winkel.');
+    if (!pairingCode) return alert('Voer de koppelcode in.');
 
     try {
       setIsPairingSumup(true);
       const res = await axios.post('/api/sumup/pair', {
-        storeId: targetStore.id,
+        storeId: storeId || 1,
         pairingCode: pairingCode.trim(),
-        readerName: `Bendemen POS - ${targetStore.name}`
+        readerName: `BDM POS - ${storeName || 'Hoofdvestiging'}`
       });
 
       if (res.data.success) {
-        const readerId = res.data.reader?.id || pairingCode.trim();
-        const updatedStores = stores.map(s => s.id === targetStore.id ? { ...s, sumupReaderId: readerId } : s);
-        saveStoresToStorage(updatedStores);
-
-        // Bewaar ook als offline fallback in localStorage
-        localStorage.setItem('pos_fallback_terminal_id', readerId);
-
-        alert(`SumUp Terminal succesvol gekoppeld aan vestiging "${targetStore.name}"!`);
+        alert('SumUp terminal succesvol gekoppeld!');
         setPairingCode('');
       } else {
         alert('Koppelen mislukt: ' + res.data.error);
       }
     } catch (err) {
-      alert('Fout bij versturen koppelcode: ' + (err.response?.data?.error || err.message));
+      alert('Fout bij koppelen: ' + (err.response?.data?.error || err.message));
     } finally {
       setIsPairingSumup(false);
     }
   };
 
+  if (!user) return <div className="p-8 text-center font-bold">Laden...</div>;
+
   return (
-    <div style={{ background: '#F8F9FA', minHeight: '100vh', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', padding: '20px' }}>
-      <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
-        
-        {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#FFF', padding: '20px 25px', borderRadius: '12px', border: '1px solid #EAEAEA', marginBottom: '20px' }}>
-          <div>
-            <h1 style={{ margin: 0, fontSize: '22px', fontWeight: '800' }}>BENDEMEN POS - Admin Paneel</h1>
-            <span style={{ fontSize: '13px', color: '#666' }}>Ingelogd als: <strong>{user.name || user.username || 'Administrator'}</strong></span>
-          </div>
-          <button 
-            onClick={() => router.push('/')} 
-            style={{ padding: '10px 18px', background: '#000', color: '#FFF', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '700', fontSize: '13px' }}
-          >
+    <div className="min-h-screen bg-gray-100 flex flex-col">
+      {/* Header */}
+      <header className="bg-black text-white p-4 flex justify-between items-center shadow-md">
+        <div className="flex items-center space-x-3">
+          <span className="font-bold text-xl tracking-wider">BDM POS — ADMIN</span>
+          <span className="text-xs bg-red-600 px-2 py-1 rounded font-semibold uppercase">{user.role}</span>
+        </div>
+        <Link href="/">
+          <button className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded text-xs font-semibold transition">
             ← Terug naar Kassa
           </button>
-        </div>
+        </Link>
+      </header>
 
-        {/* Tab Navigatie Menu */}
-        <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', overflowX: 'auto', paddingBottom: '4px' }}>
-          {[
-            { id: 'stores', label: '🏪 Multi-Store' },
-            { id: 'staff', label: '👥 Personeel' },
-            { id: 'sumup', label: '💳 SumUp per Locatie' },
-            { id: 'orders', label: '📊 Bestellingen & Omzet' },
-            { id: 'products', label: '📦 Voorraad' }
-          ].map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              style={{
-                padding: '12px 20px',
-                background: activeTab === tab.id ? '#000' : '#FFF',
-                color: activeTab === tab.id ? '#FFF' : '#333',
-                border: '1px solid #EAEAEA',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                fontWeight: '700',
-                fontSize: '13px',
-                whiteSpace: 'nowrap'
-              }}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
+      {/* Tabs Menu */}
+      <div className="bg-white border-b px-6 py-2 flex space-x-2 overflow-x-auto">
+        {[
+          { id: 'store', label: '🏪 Winkelbeheer (DB)' },
+          { id: 'users', label: '👥 Gebruikers & Personeel' },
+          { id: 'sumup', label: '💳 SumUp Koppelen' },
+          { id: 'orders', label: '📊 Bestellingen Live' },
+          { id: 'products', label: '📦 Voorraad' }
+        ].map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`px-4 py-2 text-xs font-bold rounded transition ${activeTab === tab.id ? 'bg-black text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
 
-        {/* --- TAB 1: MULTI-STORE BEHEER --- */}
-        {activeTab === 'stores' && (
-          <div style={{ background: '#FFF', padding: '25px', borderRadius: '12px', border: '1px solid #EAEAEA' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+      {/* Main Tab Content */}
+      <div className="p-6 max-w-6xl mx-auto w-full">
+        
+        {/* TAB 1: WINKELBEHEER */}
+        {activeTab === 'store' && (
+          <div className="bg-white p-6 rounded-lg shadow">
+            <h2 className="text-lg font-bold mb-4">🏪 Filiaal & Kassaregister Instellingen</h2>
+            <form onSubmit={handleSaveStore} className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '800' }}>Winkel / Vestigingen Beheer</h3>
-                <p style={{ margin: '4px 0 0 0', color: '#666', fontSize: '13px' }}>Beheer, deactiveer of verwijder winkellocaties gekoppeld aan de kassa.</p>
+                <label className="text-xs font-bold text-gray-600 block mb-1">Winkelnaam / Filiaal</label>
+                <input
+                  type="text"
+                  value={storeName}
+                  onChange={(e) => setStoreName(e.target.value)}
+                  placeholder="Bijv. Ons Winkeltje"
+                  className="w-full p-2 border rounded text-sm"
+                  required
+                />
               </div>
-              <button 
-                onClick={() => setShowAddStoreModal(true)}
-                style={{ padding: '10px 16px', background: '#C3110C', color: '#FFF', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '700', fontSize: '13px' }}
-              >
-                + Nieuwe Winkel Toevoegen
-              </button>
-            </div>
 
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
-              <thead>
-                <tr style={{ borderBottom: '2px solid #EAEAEA', background: '#FAFAFA' }}>
-                  <th style={{ padding: '12px' }}>Winkelnaam</th>
-                  <th style={{ padding: '12px' }}>Locatie</th>
-                  <th style={{ padding: '12px' }}>SumUp Reader ID</th>
-                  <th style={{ padding: '12px' }}>Status</th>
-                  <th style={{ padding: '12px', textAlign: 'right' }}>Acties</th>
-                </tr>
-              </thead>
-              <tbody>
-                {stores.map(s => (
-                  <tr key={s.id} style={{ borderBottom: '1px solid #EAEAEA' }}>
-                    <td style={{ padding: '12px', fontWeight: '700' }}>{s.name}</td>
-                    <td style={{ padding: '12px', color: '#555' }}>{s.location}</td>
-                    <td style={{ padding: '12px', fontFamily: 'monospace', fontWeight: 'bold', color: s.sumupReaderId ? '#137333' : '#888' }}>
-                      {s.sumupReaderId || 'Nog niet gekoppeld'}
-                    </td>
-                    <td style={{ padding: '12px' }}>
-                      <span style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', background: s.active ? '#E6F4EA' : '#FCE8E6', color: s.active ? '#137333' : '#C3110C' }}>
-                        {s.active ? 'Actief' : 'Inactief'}
-                      </span>
-                    </td>
-                    <td style={{ padding: '12px', textAlign: 'right' }}>
-                      <button onClick={() => setEditingStore(s)} style={{ padding: '6px 12px', background: '#F1F3F4', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', fontSize: '12px', marginRight: '6px' }}>✏️ Wijzigen</button>
-                      <button onClick={() => handleToggleStoreActive(s.id)} style={{ padding: '6px 12px', background: s.active ? '#FFF0F0' : '#EAEAEA', color: s.active ? '#C3110C' : '#333', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', fontSize: '12px', marginRight: '6px' }}>
-                        {s.active ? 'Deactiveren' : 'Activeren'}
-                      </button>
-                      <button onClick={() => handleDeleteStore(s.id)} style={{ padding: '6px 12px', background: '#FCE8E6', color: '#C3110C', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '700', fontSize: '12px' }}>🗑️ Verwijderen</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {/* --- TAB 2: PERSONEELSBEHEER --- */}
-        {activeTab === 'staff' && (
-          <div style={{ background: '#FFF', padding: '25px', borderRadius: '12px', border: '1px solid #EAEAEA' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
               <div>
-                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '800' }}>Personeel & Medewerkers</h3>
-                <p style={{ margin: '4px 0 0 0', color: '#666', fontSize: '13px' }}>Beheer wie er op de kassa kan inloggen en hun toegangsrechten.</p>
+                <label className="text-xs font-bold text-gray-600 block mb-1">Adres / Locatie</label>
+                <input
+                  type="text"
+                  value={storeAddress}
+                  onChange={(e) => setStoreAddress(e.target.value)}
+                  placeholder="Bijv. Centrum Hellevoetsluis"
+                  className="w-full p-2 border rounded text-sm"
+                />
               </div>
-              <button onClick={() => setShowAddStaffModal(true)} style={{ padding: '10px 16px', background: '#000', color: '#FFF', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '700', fontSize: '13px' }}>+ Medewerker Toevoegen</button>
-            </div>
 
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
-              <thead>
-                <tr style={{ borderBottom: '2px solid #EAEAEA', background: '#FAFAFA' }}>
-                  <th style={{ padding: '12px' }}>Naam</th>
-                  <th style={{ padding: '12px' }}>Rol</th>
-                  <th style={{ padding: '12px' }}>PIN Code</th>
-                  <th style={{ padding: '12px', textAlign: 'right' }}>Acties</th>
-                </tr>
-              </thead>
-              <tbody>
-                {staffList.map(member => (
-                  <tr key={member.id} style={{ borderBottom: '1px solid #EAEAEA' }}>
-                    <td style={{ padding: '12px', fontWeight: '700' }}>{member.name}</td>
-                    <td style={{ padding: '12px' }}>
-                      <span style={{ padding: '4px 8px', background: '#F1F3F4', borderRadius: '4px', fontSize: '11px', fontWeight: '700' }}>
-                        {member.role === 'administrator' ? 'Administrator' : member.role === 'manager' ? 'Manager' : 'Kassamedewerker'}
-                      </span>
-                    </td>
-                    <td style={{ padding: '12px', letterSpacing: '2px', fontWeight: 'bold' }}>••••</td>
-                    <td style={{ padding: '12px', textAlign: 'right' }}>
-                      <button onClick={() => handleDeleteStaff(member.id)} style={{ padding: '6px 12px', background: '#FCE8E6', color: '#C3110C', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '700', fontSize: '12px' }}>🗑️ Verwijderen</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {/* --- TAB 3: SUMUP PAIRING PER LOCATIE --- */}
-        {activeTab === 'sumup' && (
-          <div style={{ background: '#FFF', padding: '25px', borderRadius: '12px', border: '1px solid #EAEAEA' }}>
-            <h3 style={{ marginTop: 0, fontSize: '18px', fontWeight: '800' }}>SumUp PIN Terminal Koppelen per Locatie</h3>
-            <p style={{ color: '#666', fontSize: '13px', marginBottom: '20px' }}>Selecteer een vestiging en voer de Pairing Code in die verschijnt op de te koppelen SumUp Solo reader.</p>
-
-            <div style={{ background: '#FAFAFA', padding: '20px', borderRadius: '8px', border: '1px solid #EAEAEA', maxWidth: '500px' }}>
-              <div style={{ marginBottom: '15px' }}>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '5px' }}>Kies Winkellocatie</label>
-                <select value={selectedStoreForSumup} onChange={(e) => setSelectedStoreForSumup(e.target.value)} style={{ width: '100%', padding: '10px', fontSize: '14px', border: '1px solid #CCC', borderRadius: '6px', background: '#FFF', fontWeight: '600' }}>
-                  {stores.map(s => (
-                    <option key={s.id} value={s.id}>{s.name} ({s.location}) {s.sumupReaderId ? '— [Gekoppeld: ' + s.sumupReaderId + ']' : '— [Nog geen terminal]'}</option>
-                  ))}
+              <div>
+                <label className="text-xs font-bold text-gray-600 block mb-1">Kassaregister Status</label>
+                <select
+                  value={registerStatus}
+                  onChange={(e) => setRegisterStatus(e.target.value)}
+                  className="w-full p-2 border rounded text-sm"
+                >
+                  <option value="open">🟢 Register Geopend</option>
+                  <option value="closed">🔴 Register Gesloten</option>
                 </select>
               </div>
 
-              <div style={{ marginBottom: '20px' }}>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '6px' }}>SumUp Pairing Code (van terminal scherm)</label>
-                <input type="text" value={pairingCode} onChange={(e) => setPairingCode(e.target.value)} placeholder="bijv. 8-tekens koppelcode" style={{ width: '100%', padding: '12px', fontSize: '16px', fontWeight: 'bold', border: '2px solid #000', borderRadius: '6px', boxSizing: 'border-box' }} />
+              <div>
+                <label className="text-xs font-bold text-gray-600 block mb-1">Kassabon Header</label>
+                <input
+                  type="text"
+                  value={receiptHeader}
+                  onChange={(e) => setReceiptHeader(e.target.value)}
+                  className="w-full p-2 border rounded text-sm"
+                />
               </div>
 
-              <button onClick={handlePairSumup} disabled={isPairingSumup} style={{ width: '100%', padding: '12px', background: '#000', color: '#FFF', border: 'none', borderRadius: '6px', fontWeight: '700', cursor: 'pointer' }}>
-                {isPairingSumup ? 'Koppelen met SumUp API...' : '🔗 Terminal Koppelen aan Deze Locatie'}
+              <div className="md:col-span-2">
+                <label className="text-xs font-bold text-gray-600 block mb-1">Kassabon Footer</label>
+                <input
+                  type="text"
+                  value={receiptFooter}
+                  onChange={(e) => setReceiptFooter(e.target.value)}
+                  className="w-full p-2 border rounded text-sm"
+                />
+              </div>
+
+              <div className="md:col-span-2 flex items-center justify-between mt-2">
+                <button
+                  type="submit"
+                  className="bg-red-600 hover:bg-red-700 text-white font-bold px-6 py-2 rounded text-sm transition"
+                >
+                  Opslaan in Database
+                </button>
+                {storeStatusMsg && <span className="text-xs font-bold text-green-600">{storeStatusMsg}</span>}
+              </div>
+            </form>
+          </div>
+        )}
+
+        {/* TAB 2: GEBRUIKERS & PERSONEEL */}
+        {activeTab === 'users' && (
+          <div className="bg-white p-6 rounded-lg shadow">
+            <h2 className="text-lg font-bold mb-4">👥 Actieve Kassa Gebruikers (MySQL)</h2>
+            <div className="divide-y max-h-96 overflow-y-auto">
+              {usersList.map((u) => (
+                <div key={u.id} className="py-3 flex justify-between items-center text-sm">
+                  <div>
+                    <span className="font-bold block">{u.username}</span>
+                    <span className="text-xs text-gray-500">{u.email || 'Geen e-mail'}</span>
+                  </div>
+                  <span className="bg-gray-100 text-gray-800 text-xs px-2 py-1 rounded font-bold uppercase">
+                    {u.role || 'cashier'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* TAB 3: SUMUP PAIRING */}
+        {activeTab === 'sumup' && (
+          <div className="bg-white p-6 rounded-lg shadow max-w-lg">
+            <h2 className="text-lg font-bold mb-2">💳 SumUp Terminal Koppelen</h2>
+            <p className="text-xs text-gray-600 mb-4">Voer de pairing code in die op het scherm van de SumUp Solo staat.</p>
+            <div className="space-y-3">
+              <input
+                type="text"
+                placeholder="Pairing Code (bijv. 8 tekens)"
+                value={pairingCode}
+                onChange={(e) => setPairingCode(e.target.value)}
+                className="w-full p-2 border-2 border-black rounded font-mono font-bold text-lg"
+              />
+              <button
+                onClick={handlePairSumup}
+                disabled={isPairingSumup}
+                className="w-full bg-black text-white font-bold py-2 rounded text-sm hover:bg-gray-800 transition"
+              >
+                {isPairingSumup ? 'Koppelen...' : '🔗 Koppel Terminal'}
               </button>
             </div>
           </div>
         )}
 
-        {/* --- TAB 4: BESTELLINGEN & OMZET --- */}
+        {/* TAB 4: BESTELLINGEN LIVE */}
         {activeTab === 'orders' && (
-          <div style={{ background: '#FFF', padding: '25px', borderRadius: '12px', border: '1px solid #EAEAEA' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '800' }}>Gesynchroniseerde Bestellingen ({orders.length})</h3>
-                <p style={{ margin: '4px 0 0 0', color: '#666', fontSize: '13px' }}>Live verkoopoverzicht vanuit WooCommerce.</p>
-              </div>
-              <button onClick={() => mutateOrders()} style={{ padding: '8px 14px', background: '#F1F3F4', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', fontSize: '12px' }}>🔄 Verversen</button>
+          <div className="bg-white p-6 rounded-lg shadow">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-lg font-bold">📊 Live WooCommerce Bestellingen ({orders.length})</h2>
+              <button onClick={() => mutateOrders()} className="bg-gray-100 hover:bg-gray-200 text-xs font-bold px-3 py-1 rounded">🔄 Verversen</button>
             </div>
-
-            <div style={{ maxHeight: '550px', overflowY: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
+            <div className="overflow-x-auto max-h-96">
+              <table className="w-full text-left text-xs divide-y">
                 <thead>
-                  <tr style={{ borderBottom: '2px solid #EAEAEA', background: '#FAFAFA' }}>
-                    <th style={{ padding: '12px' }}>Order ID</th>
-                    <th style={{ padding: '12px' }}>Datum</th>
-                    <th style={{ padding: '12px' }}>Betaalmethode</th>
-                    <th style={{ padding: '12px' }}>Status</th>
-                    <th style={{ padding: '12px', textAlign: 'right' }}>Totaalbedrag</th>
+                  <tr className="bg-gray-50">
+                    <th className="p-2">Order ID</th>
+                    <th className="p-2">Datum</th>
+                    <th className="p-2">Betaalmethode</th>
+                    <th className="p-2">Status</th>
+                    <th className="p-2 text-right">Totaal</th>
                   </tr>
                 </thead>
-                <tbody>
-                  {orders.length === 0 ? (
-                    <tr>
-                      <td colSpan="5" style={{ padding: '20px', textAlign: 'center', color: '#888' }}>Geen bestellingen gevonden of bezig met laden...</td>
+                <tbody className="divide-y">
+                  {orders.map((o) => (
+                    <tr key={o.id}>
+                      <td className="p-2 font-bold">#{o.id}</td>
+                      <td className="p-2 text-gray-500">{new Date(o.date_created).toLocaleString('nl-NL')}</td>
+                      <td className="p-2">{o.payment_method_title || o.payment_method}</td>
+                      <td className="p-2"><span className="bg-green-100 text-green-800 px-2 py-0.5 rounded font-bold">{o.status}</span></td>
+                      <td className="p-2 text-right font-bold text-red-600">€{parseFloat(o.total).toFixed(2)}</td>
                     </tr>
-                  ) : (
-                    orders.map(order => (
-                      <tr key={order.id} style={{ borderBottom: '1px solid #EAEAEA' }}>
-                        <td style={{ padding: '12px', fontWeight: '700' }}>#{order.id}</td>
-                        <td style={{ padding: '12px', color: '#555' }}>
-                          {new Date(order.date_created).toLocaleString('nl-NL', { dateStyle: 'short', timeStyle: 'short' })}
-                        </td>
-                        <td style={{ padding: '12px' }}>
-                          <span style={{ padding: '4px 8px', background: '#F1F3F4', borderRadius: '4px', fontSize: '11px', fontWeight: '600' }}>
-                            {order.payment_method_title || order.payment_method || 'Kassa'}
-                          </span>
-                        </td>
-                        <td style={{ padding: '12px' }}>
-                          <span style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', background: order.status === 'completed' ? '#E6F4EA' : '#FFF3C4', color: order.status === 'completed' ? '#137333' : '#B45309' }}>
-                            {order.status}
-                          </span>
-                        </td>
-                        <td style={{ padding: '12px', textAlign: 'right', fontWeight: '800', color: '#C3110C' }}>
-                          €{parseFloat(order.total).toFixed(2)}
-                        </td>
-                      </tr>
-                    ))
-                  )}
+                  ))}
                 </tbody>
               </table>
             </div>
           </div>
         )}
 
-        {/* --- TAB 5: PRODUCTEN & VOORRAAD --- */}
+        {/* TAB 5: VOORRAAD */}
         {activeTab === 'products' && (
-          <div style={{ background: '#FFF', padding: '25px', borderRadius: '12px', border: '1px solid #EAEAEA' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-              <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '800' }}>Producten & Voorraad ({products.length})</h3>
-              <button onClick={() => mutateProducts()} style={{ padding: '8px 14px', background: '#F1F3F4', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', fontSize: '12px' }}>🔄 Verversen</button>
+          <div className="bg-white p-6 rounded-lg shadow">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-lg font-bold">📦 Producten & Voorraad ({products.length})</h2>
+              <button onClick={() => mutateProducts()} className="bg-gray-100 hover:bg-gray-200 text-xs font-bold px-3 py-1 rounded">🔄 Verversen</button>
             </div>
-            <div style={{ maxHeight: '500px', overflowY: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
+            <div className="overflow-x-auto max-h-96">
+              <table className="w-full text-left text-xs divide-y">
                 <thead>
-                  <tr style={{ borderBottom: '2px solid #EAEAEA', background: '#FAFAFA' }}>
-                    <th style={{ padding: '10px' }}>ID</th>
-                    <th style={{ padding: '10px' }}>Naam</th>
-                    <th style={{ padding: '10px' }}>Prijs</th>
-                    <th style={{ padding: '10px' }}>Voorraad</th>
+                  <tr className="bg-gray-50">
+                    <th className="p-2">ID</th>
+                    <th className="p-2">Naam</th>
+                    <th className="p-2">Prijs</th>
+                    <th className="p-2">Voorraad</th>
                   </tr>
                 </thead>
-                <tbody>
-                  {products.map(p => (
-                    <tr key={p.id} style={{ borderBottom: '1px solid #EAEAEA' }}>
-                      <td style={{ padding: '10px', color: '#888' }}>#{p.id}</td>
-                      <td style={{ padding: '10px', fontWeight: '600' }}>{p.name}</td>
-                      <td style={{ padding: '10px', color: '#C3110C', fontWeight: 'bold' }}>{parseFloat(p.price) > 0 ? `€${p.price}` : 'Open Bedrag'}</td>
-                      <td style={{ padding: '10px' }}>{p.stock_quantity !== null ? p.stock_quantity : 'N.v.t.'}</td>
+                <tbody className="divide-y">
+                  {products.map((p) => (
+                    <tr key={p.id}>
+                      <td className="p-2 text-gray-400">#{p.id}</td>
+                      <td className="p-2 font-semibold">{p.name}</td>
+                      <td className="p-2 text-red-600 font-bold">€{p.price}</td>
+                      <td className="p-2">{p.stock_quantity !== null ? p.stock_quantity : 'N.v.t.'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -436,63 +349,6 @@ export default function AdminDashboard() {
         )}
 
       </div>
-
-      {/* POP-UP MODAL: WINKEL BEWERKEN */}
-      {editingStore && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
-          <div style={{ background: '#FFF', padding: '25px', borderRadius: '12px', width: '400px' }}>
-            <h3 style={{ marginTop: 0, fontSize: '18px', fontWeight: '800' }}>Winkel Wijzigen</h3>
-            <div style={{ margin: '15px 0', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              <input type="text" value={editingStore.name} onChange={(e) => setEditingStore({ ...editingStore, name: e.target.value })} style={{ width: '100%', padding: '10px', border: '1px solid #CCC', borderRadius: '6px', boxSizing: 'border-box' }} />
-              <input type="text" value={editingStore.location} onChange={(e) => setEditingStore({ ...editingStore, location: e.target.value })} style={{ width: '100%', padding: '10px', border: '1px solid #CCC', borderRadius: '6px', boxSizing: 'border-box' }} />
-            </div>
-            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-              <button onClick={() => setEditingStore(null)} style={{ padding: '10px 15px', background: '#F1F3F4', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Annuleren</button>
-              <button onClick={handleSaveEditStore} style={{ padding: '10px 15px', background: '#000', color: '#FFF', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Opslaan</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* POP-UP MODAL: PERSONEEL TOEVOEGEN */}
-      {showAddStaffModal && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
-          <div style={{ background: '#FFF', padding: '25px', borderRadius: '12px', width: '400px' }}>
-            <h3 style={{ marginTop: 0, fontSize: '18px', fontWeight: '800' }}>Nieuwe Medewerker</h3>
-            <div style={{ margin: '15px 0', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              <input type="text" placeholder="Naam medewerker" value={newStaffData.name} onChange={(e) => setNewStaffData({ ...newStaffData, name: e.target.value })} style={{ width: '100%', padding: '10px', border: '1px solid #CCC', borderRadius: '6px', boxSizing: 'border-box' }} />
-              <select value={newStaffData.role} onChange={(e) => setNewStaffData({ ...newStaffData, role: e.target.value })} style={{ width: '100%', padding: '10px', border: '1px solid #CCC', borderRadius: '6px' }}>
-                <option value="cashier">Kassamedewerker</option>
-                <option value="manager">Manager</option>
-                <option value="administrator">Administrator</option>
-              </select>
-              <input type="password" placeholder="PIN Code (4 cijfers)" maxLength={4} value={newStaffData.pin} onChange={(e) => setNewStaffData({ ...newStaffData, pin: e.target.value })} style={{ width: '100%', padding: '10px', border: '1px solid #CCC', borderRadius: '6px', boxSizing: 'border-box' }} />
-            </div>
-            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-              <button onClick={() => setShowAddStaffModal(false)} style={{ padding: '10px 15px', background: '#F1F3F4', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Annuleren</button>
-              <button onClick={handleAddStaff} style={{ padding: '10px 15px', background: '#000', color: '#FFF', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Toevoegen</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* POP-UP MODAL: WINKEL TOEVOEGEN */}
-      {showAddStoreModal && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
-          <div style={{ background: '#FFF', padding: '25px', borderRadius: '12px', width: '400px' }}>
-            <h3 style={{ marginTop: 0, fontSize: '18px', fontWeight: '800' }}>Nieuwe Winkel Toevoegen</h3>
-            <div style={{ margin: '15px 0', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              <input type="text" placeholder="Winkelnaam" value={newStoreData.name} onChange={(e) => setNewStoreData({ ...newStoreData, name: e.target.value })} style={{ width: '100%', padding: '10px', border: '1px solid #CCC', borderRadius: '6px', boxSizing: 'border-box' }} />
-              <input type="text" placeholder="Locatie (bijv. Hellevoetsluis)" value={newStoreData.location} onChange={(e) => setNewStoreData({ ...newStoreData, location: e.target.value })} style={{ width: '100%', padding: '10px', border: '1px solid #CCC', borderRadius: '6px', boxSizing: 'border-box' }} />
-            </div>
-            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-              <button onClick={() => setShowAddStoreModal(false)} style={{ padding: '10px 15px', background: '#F1F3F4', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Annuleren</button>
-              <button onClick={handleAddStore} style={{ padding: '10px 15px', background: '#C3110C', color: '#FFF', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>Toevoegen</button>
-            </div>
-          </div>
-        </div>
-      )}
-
     </div>
   );
 }

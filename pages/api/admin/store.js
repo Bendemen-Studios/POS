@@ -1,24 +1,60 @@
-// pages/api/admin/store.js
-import axios from 'axios';
+import pool from '../../../lib/db';
 
 export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ message: 'Method not allowed' });
+  if (req.method === 'GET') {
+    try {
+      const [rows] = await pool.execute('SELECT * FROM pos_stores LIMIT 1');
+      
+      if (rows.length === 0) {
+        return res.status(200).json({ 
+          success: true, 
+          store: null, 
+          message: 'Geen winkelinstellingen gevonden in de database.' 
+        });
+      }
+
+      return res.status(200).json({ success: true, store: rows[0] });
+    } catch (error) {
+      console.error("Database Store GET Error:", error);
+      return res.status(500).json({ success: false, error: 'Databasefout bij ophalen winkelinstellingen.' });
+    }
   }
 
-  const { name } = req.body;
+  if (req.method === 'POST') {
+    try {
+      const { id, store_name, address, register_status, receipt_header, receipt_footer } = req.body;
 
-  try {
-    const wpResponse = await axios.post(`${process.env.WOO_SITE_URL}/wp-json/bendemen/v1/stores`, {
-      name: name
-    });
+      if (!store_name) {
+        return res.status(400).json({ success: false, message: 'Winkelnaam is verplicht.' });
+      }
 
-    res.status(200).json(wpResponse.data);
-  } catch (error) {
-    console.error("Admin Store API Error:", error.response?.data || error.message);
-    res.status(500).json({ 
-      success: false, 
-      error: error.response?.data?.message || 'Fout bij aanmaken winkel in WordPress' 
-    });
+      if (id) {
+        // Update bestaand record
+        await pool.execute(
+          `UPDATE pos_stores 
+           SET store_name = ?, address = ?, register_status = ?, receipt_header = ?, receipt_footer = ? 
+           WHERE id = ?`,
+          [store_name, address || '', register_status || 'open', receipt_header || '', receipt_footer || '', id]
+        );
+      } else {
+        // Voeg nieuw record toe
+        await pool.execute(
+          `INSERT INTO pos_stores (store_name, address, register_status, receipt_header, receipt_footer) 
+           VALUES (?, ?, ?, ?, ?)`,
+          [store_name, address || '', register_status || 'open', receipt_header || '', receipt_footer || '']
+        );
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'Winkelinstellingen succesvol opgeslagen in de database!'
+      });
+    } catch (error) {
+      console.error("Database Store POST Error:", error);
+      return res.status(500).json({ success: false, error: 'Databasefout bij opslaan winkelinstellingen.' });
+    }
   }
+
+  res.setHeader('Allow', ['GET', 'POST']);
+  return res.status(405).json({ success: false, message: `Method ${req.method} not allowed` });
 }
