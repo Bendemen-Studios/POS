@@ -11,11 +11,11 @@ export default function AdminDashboard() {
   const [user, setUser] = useState(null);
   const [activeTab, setActiveTab] = useState('stores');
 
-  // Locaties / Winkels State
+  // Locaties / Winkels State (inclusief pickup_id voor Local Pickup Plus)
   const [stores, setStores] = useState([]);
   const [editingStore, setEditingStore] = useState(null);
   const [showAddStoreModal, setShowAddStoreModal] = useState(false);
-  const [newStoreData, setNewStoreData] = useState({ store_name: '', address: '', receipt_header: '', receipt_footer: '' });
+  const [newStoreData, setNewStoreData] = useState({ store_name: '', address: '', receipt_header: '', receipt_footer: '', pickup_id: '' });
 
   // Personeel State
   const [showAddUserModal, setShowAddUserModal] = useState(false);
@@ -128,7 +128,7 @@ export default function AdminDashboard() {
       if (data.success) {
         setEditingStore(null);
         setShowAddStoreModal(false);
-        setNewStoreData({ store_name: '', address: '', receipt_header: '', receipt_footer: '' });
+        setNewStoreData({ store_name: '', address: '', receipt_header: '', receipt_footer: '', pickup_id: '' });
         fetchStores();
       } else {
         alert(data.message || 'Fout bij opslaan van de locatie.');
@@ -263,18 +263,20 @@ export default function AdminDashboard() {
                   <tr className="bg-gray-50">
                     <th className="p-3">Locatienaam</th>
                     <th className="p-3">Adres</th>
+                    <th className="p-3">Pickup Plus ID</th>
                     <th className="p-3">Kassabon Header</th>
                     <th className="p-3 text-right">Acties</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
                   {stores.length === 0 ? (
-                    <tr><td colSpan="4" className="p-4 text-center text-gray-500">Geen locaties gevonden in database.</td></tr>
+                    <tr><td colSpan="5" className="p-4 text-center text-gray-500">Geen locaties gevonden in database.</td></tr>
                   ) : (
                     stores.map((s) => (
                       <tr key={s.id}>
                         <td className="p-3 font-bold">{s.store_name}</td>
                         <td className="p-3 text-gray-600">{s.address || '—'}</td>
+                        <td className="p-3 font-mono text-blue-600">{s.pickup_id || '—'}</td>
                         <td className="p-3 text-gray-600">{s.receipt_header || '—'}</td>
                         <td className="p-3 text-right space-x-2">
                           <button
@@ -517,6 +519,16 @@ export default function AdminDashboard() {
                   onChange={(e) => editingStore ? setEditingStore({ ...editingStore, address: e.target.value }) : setNewStoreData({ ...newStoreData, address: e.target.value })}
                   placeholder="Bijv. Centrum Hellevoetsluis"
                   className="w-full p-2 border rounded text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-gray-600 block mb-1">Local Pickup Plus Location ID</label>
+                <input
+                  type="text"
+                  value={editingStore ? (editingStore.pickup_id || '') : newStoreData.pickup_id}
+                  onChange={(e) => editingStore ? setEditingStore({ ...editingStore, pickup_id: e.target.value }) : setNewStoreData({ ...newStoreData, pickup_id: e.target.value })}
+                  placeholder="ID uit WooCommerce Local Pickup Plus"
+                  className="w-full p-2 border rounded text-sm font-mono"
                 />
               </div>
               <div>
