@@ -101,19 +101,26 @@ export default function POSHome() {
     return 'Overige';
   };
 
+  // UITGESLOTEN CATEGORIEËN FILTER
+  const EXCLUDED_CATEGORIES = ['Ophaal Geschikt', 'Externe Productie', 'Kids'];
+
+  // Filter producten:exclusief de uitgesloten categorieën
+  const activeProducts = products.filter((p) => {
+    const cat = getProductCategory(p);
+    return !EXCLUDED_CATEGORIES.includes(cat);
+  });
+
+  // Unieke categorieën ophalen voor de tegels (zonder de uitgesloten categorieën)
   const categoriesList = Array.from(
-    new Set(products.map((p) => getProductCategory(p)))
+    new Set(activeProducts.map((p) => getProductCategory(p)))
   );
 
-  // Klikken op een product op de kassa
   const handleProductClick = (product) => {
-    // 1. Heeft het product variaties? Open de variatie-modal
     if (product.variations && product.variations.length > 0) {
       setSelectedProductForVariations(product);
       return;
     }
 
-    // 2. Is het een 'Open Bedrag' product (prijs is 0 of leeg)? Open de prijsinvoer-modal
     const pPrice = parseFloat(product.price || 0);
     if (pPrice === 0) {
       setOpenAmountProduct(product);
@@ -121,11 +128,9 @@ export default function POSHome() {
       return;
     }
 
-    // 3. Standaard product toevoegen aan cart
     addToCart(product, pPrice);
   };
 
-  // Bevestigen van Open Bedrag
   const handleConfirmOpenAmount = () => {
     const enteredPrice = parseFloat(customPriceInput);
     if (isNaN(enteredPrice) || enteredPrice <= 0) {
@@ -138,7 +143,6 @@ export default function POSHome() {
     setCustomPriceInput('');
   };
 
-  // Bevestigen van een specifieke Variatie
   const handleSelectVariation = (variation) => {
     const varPrice = parseFloat(variation.price || selectedProductForVariations.price || 0);
     const varName = `${selectedProductForVariations.name} - ${variation.attributes ? variation.attributes.map(a => a.option).join('/') : 'Variatie'}`;
@@ -338,7 +342,8 @@ export default function POSHome() {
     }
   };
 
-  const filteredProducts = products.filter((p) => {
+  // Filteren op zoekterm binnen de actieve (niet-uitgesloten) producten
+  const filteredProducts = activeProducts.filter((p) => {
     const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase());
     const pCat = getProductCategory(p);
     const matchesCategory = selectedCategory === 'ALL' || pCat === selectedCategory;
@@ -408,7 +413,7 @@ export default function POSHome() {
             />
           </div>
 
-          {/* Categorie Tegels */}
+          {/* Categorie Tegels (Zonder uitgesloten categorieën) */}
           <div className="flex space-x-2 overflow-x-auto pb-3 mb-3 border-b">
             <button
               onClick={() => setSelectedCategory('ALL')}
@@ -418,10 +423,10 @@ export default function POSHome() {
                   : 'bg-gray-100 text-gray-800 hover:bg-gray-200'
               }`}
             >
-              📦 Alle Producten ({products.length})
+              📦 Alle Producten ({activeProducts.length})
             </button>
             {categoriesList.map((cat) => {
-              const count = products.filter((p) => getProductCategory(p) === cat).length;
+              const count = activeProducts.filter((p) => getProductCategory(p) === cat).length;
               return (
                 <button
                   key={cat}
@@ -438,7 +443,7 @@ export default function POSHome() {
             })}
           </div>
 
-          {/* Producten Tegels (Met Afbeeldingen, Variaties & Open Bedrag) */}
+          {/* Producten Tegels */}
           <div className="flex-1 overflow-y-auto grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[calc(100vh-280px)]">
             {filteredProducts.map((product) => {
               const imageUrl = product.images && product.images.length > 0 ? product.images[0].src : null;
