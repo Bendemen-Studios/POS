@@ -32,7 +32,7 @@ export default function CashRegister() {
 
   // Checkout Modal State
   const [showCheckoutModal, setShowCheckoutModal] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState('sumup'); // 'sumup', 'pin_manual', 'cash'
+  const [paymentMethod, setPaymentMethod] = useState('sumup'); 
   const [cashGiven, setCashGiven] = useState('');
   const [isProcessingCheckout, setIsProcessingCheckout] = useState(false);
 
@@ -55,7 +55,6 @@ export default function CashRegister() {
 
   if (!mounted) return null;
 
-  // Check voor Admin of Manager rechten
   const isAdminOrManager = user?.role === 'administrator' || user?.role === 'manager' || user?.role === 'shop_manager';
 
   const categories = [...new Set(products.map(p => (p.categories && p.categories.length > 0) ? p.categories[0].name : 'Algemeen'))].sort();
@@ -73,6 +72,7 @@ export default function CashRegister() {
   };
 
   const handleProductClick = (product) => {
+    // 1. Variabel product check
     if (product.type === 'variable' && product.attributes?.length > 0) {
       setSelectedVariableProduct(product);
       const initAttrs = {};
@@ -84,10 +84,20 @@ export default function CashRegister() {
       return;
     }
 
-    const priceNum = parseFloat(product.price);
-    if (isNaN(priceNum) || priceNum === 0) {
+    // 2. Open Bedrag check (prijs is leeg/null)
+    if (product.price === "" || product.price === null || product.price === undefined) {
       setOpenPriceProduct(product);
       setCustomPriceInput('');
+      setShowOpenPriceModal(true);
+      return;
+    }
+
+    const priceNum = parseFloat(product.price);
+    
+    // 3. Als prijs expliciet 0 is, mag deze ook als open bedrag of rechtstreeks aangeslagen worden
+    if (isNaN(priceNum)) {
+      setOpenPriceProduct(product);
+      setCustomPriceInput('0.00');
       setShowOpenPriceModal(true);
       return;
     }
@@ -102,13 +112,18 @@ export default function CashRegister() {
     });
   };
 
+  // Bevestigen van Open Bedrag (NU OOK €0.00 TOEGESTAAN)
   const handleConfirmOpenPrice = () => {
-    const parsedPrice = parseFloat(customPriceInput.replace(',', '.'));
-    if (isNaN(parsedPrice) || parsedPrice <= 0) return alert('Voer een geldig bedrag in.');
-    
+    const rawVal = customPriceInput.replace(',', '.');
+    const parsedPrice = parseFloat(rawVal);
+
+    if (isNaN(parsedPrice)) {
+      return alert('Voer een geldig bedrag in.');
+    }
+
     addToCart({
       ...openPriceProduct,
-      name: `${openPriceProduct.name} (Vrij bedrag)`,
+      name: `${openPriceProduct.name} (${parsedPrice === 0 ? '€0.00' : 'Vrij bedrag'})`,
       price: parsedPrice,
       cartItemId: `${openPriceProduct.id}-custom-${Date.now()}`,
       isOpenPrice: true
@@ -174,6 +189,7 @@ export default function CashRegister() {
         setSelectedCustomer(null);
         setRedeemPoints(false);
         setShowCheckoutModal(false);
+        mutateProducts(); // Ververs voorraadlijst na bestelling
       } else {
         alert('Fout bij plaatsen bestelling.');
       }
@@ -193,7 +209,7 @@ export default function CashRegister() {
     <div style={{ background: '#FFFFFF', color: '#111111', minHeight: '100vh', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', padding: '20px' }}>
       <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
         
-        {/* Top Header met Actieve Winkel Status & Admin/Manager Rechten */}
+        {/* Top Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#FAFAFA', padding: '15px 25px', borderRadius: '12px', border: '1px solid #EAEAEA', marginBottom: '20px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
             <div style={{ background: '#000', color: '#FFF', padding: '8px 12px', fontWeight: '900', borderRadius: '6px', fontSize: '16px' }}>BDM</div>
@@ -213,7 +229,6 @@ export default function CashRegister() {
               {isSyncing ? 'Bezig...' : '🔄 Sync'}
             </button>
 
-            {/* Knop alleen zichtbaar voor Admins & Managers */}
             {isAdminOrManager && (
               <button 
                 onClick={() => router.push('/admin')} 
@@ -243,15 +258,41 @@ export default function CashRegister() {
               ))}
             </div>
 
-            <div style={{ overflowY: 'auto', flex: 1, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '10px', alignContent: 'flex-start' }}>
-              {filteredProducts.map((p) => (
-                <div key={p.id} onClick={() => handleProductClick(p)} style={{ background: '#fff', border: '1px solid #EAEAEA', borderRadius: '8px', padding: '12px', cursor: 'pointer', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-                  <div style={{ fontWeight: '600', fontSize: '13px', marginBottom: '8px' }}>{p.name}</div>
-                  <div style={{ fontWeight: '700', fontSize: '14px', color: '#C3110C' }}>
-                    {p.type === 'variable' ? 'Kies opties' : (parseFloat(p.price) > 0 ? `€${p.price}` : 'Open Bedrag')}
+            <div style={{ overflowY: 'auto', flex: 1, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '10px', alignContent: 'flex-start' }}>
+              {filteredProducts.map((p) => {
+                const hasStockManagement = p.manage_stock === true || p.stock_quantity !== null;
+                const stockQty = p.stock_quantity !== null ? p.stock_quantity : 0;
+                
+                return (
+                  <div key={p.id} onClick={() => handleProductClick(p)} style={{ background: '#fff', border: '1px solid #EAEAEA', borderRadius: '8px', padding: '12px', cursor: 'pointer', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', position: 'relative' }}>
+                    
+                    {/* Voorraad Indicator Badge */}
+                    {hasStockManagement && (
+                      <span style={{
+                        position: 'absolute',
+                        top: '8px',
+                        right: '8px',
+                        fontSize: '10px',
+                        fontWeight: '800',
+                        padding: '2px 6px',
+                        borderRadius: '4px',
+                        background: stockQty > 0 ? '#E6F4EA' : '#FCE8E6',
+                        color: stockQty > 0 ? '#137333' : '#C3110C'
+                      }}>
+                        {stockQty} op voorraad
+                      </span>
+                    )}
+
+                    <div style={{ fontWeight: '600', fontSize: '13px', marginBottom: '12px', paddingRight: hasStockManagement ? '60px' : '0' }}>
+                      {p.name}
+                    </div>
+                    
+                    <div style={{ fontWeight: '700', fontSize: '14px', color: '#C3110C' }}>
+                      {p.type === 'variable' ? 'Kies opties' : (p.price !== "" && p.price !== null && !isNaN(parseFloat(p.price)) ? `€${parseFloat(p.price).toFixed(2)}` : 'Open Bedrag')}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 
@@ -335,7 +376,7 @@ export default function CashRegister() {
         </div>
       )}
 
-      {/* --- POP-UP MODAL: OPEN BEDRAG --- */}
+      {/* --- POP-UP MODAL: OPEN BEDRAG (OOK €0.00 IS TOEGESTAAN) --- */}
       {showOpenPriceModal && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
           <div style={{ background: '#FFF', padding: '25px', borderRadius: '12px', width: '350px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
