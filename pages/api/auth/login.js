@@ -1,3 +1,4 @@
+cat << 'EOF' > /var/www/bendemen-pos/pages/api/auth/login.js
 import pool from '../../../lib/db';
 import bcrypt from 'bcryptjs';
 
@@ -39,3 +40,4 @@ export default async function handler(req, res) {
     return res.status(500).json({ success: false, message: 'Interne serverfout bij inloggen.' });
   }
 }
+EOF
