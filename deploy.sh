@@ -6,6 +6,9 @@ echo "🚀 Start deployment..."
 # 1. Ga naar de map
 cd /var/www/bendemen-pos
 
+# Zorg dat dit script altijd uitvoerbaar blijft
+chmod +x "$0"
+
 # 2. Forceer het ophalen van de laatste code en negeer lokale conflicten
 git fetch origin main
 git reset --hard origin/main
