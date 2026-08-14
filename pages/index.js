@@ -19,7 +19,6 @@ export default function CashRegister() {
   const [discount, setDiscount] = useState(0);
   const [discountType, setDiscountType] = useState('fixed');
   
-  const [customerSearch, setCustomerSearch] = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [redeemPoints, setRedeemPoints] = useState(false);
 
@@ -31,12 +30,14 @@ export default function CashRegister() {
   const [selectedVariableProduct, setSelectedVariableProduct] = useState(null);
   const [selectedAttributes, setSelectedAttributes] = useState({});
 
+  // Producten ophalen via SWR
   const { data: productsData, mutate: mutateProducts } = useSWR('/api/woocommerce/products', fetcher, { revalidateOnFocus: false });
   const products = Array.isArray(productsData) ? productsData : (productsData?.products || []);
 
   useEffect(() => {
     setMounted(true);
     
+    // Veilige localStorage afhandeling
     try {
       const rawUser = localStorage.getItem('pos_user');
       if (rawUser && rawUser !== 'undefined') {
@@ -58,20 +59,17 @@ export default function CashRegister() {
 
   if (!mounted) return null;
 
+  // Categorieën extraheren en alfabetisch sorteren (gebruikt primary category)
   const categories = [...new Set(products.map(p => (p.categories && p.categories.length > 0) ? p.categories[0].name : 'Algemeen'))].sort();
 
+  // Herladen van de producten
   const handleSyncProducts = async () => {
     try {
       setIsSyncing(true);
-      const res = await axios.post('/api/woocommerce/sync-products');
-      if (res.data.success) {
-        alert('Producten succesvol gesynchroniseerd!');
-        mutateProducts();
-      } else {
-        alert('Fout bij synchroniseren.');
-      }
+      await mutateProducts();
+      alert('Producten succesvol ververst!');
     } catch (err) {
-      alert('Fout bij communicatie met server.');
+      alert('Fout bij synchroniseren van producten.');
     } finally {
       setIsSyncing(false);
     }
@@ -143,7 +141,8 @@ export default function CashRegister() {
   return (
     <div style={{ background: '#FFFFFF', color: '#111111', minHeight: '100vh', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', padding: '20px' }}>
       <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
-        {/* Top Header */}
+        
+        {/* Top Header Navigatie */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#FAFAFA', padding: '15px 25px', borderRadius: '12px', border: '1px solid #EAEAEA', marginBottom: '20px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
             <div style={{ background: '#000', color: '#FFF', padding: '8px 12px', fontWeight: '900', borderRadius: '6px', fontSize: '16px' }}>BDM</div>
@@ -152,6 +151,7 @@ export default function CashRegister() {
               <span style={{ fontSize: '13px', color: '#666' }}>Winkel: <strong>{store?.name || 'Ons Winkeltje'}</strong></span>
             </div>
           </div>
+          
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
             <button 
               onClick={handleSyncProducts} 
@@ -160,20 +160,23 @@ export default function CashRegister() {
             >
               {isSyncing ? 'Bezig...' : '🔄 Sync'}
             </button>
+            
             {user?.role === 'administrator' && (
               <button onClick={() => router.push('/admin')} style={{ padding: '8px 14px', background: '#000', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}>
                 Admin Paneel
               </button>
             )}
+            
             <button onClick={() => { localStorage.removeItem('selectedStore'); router.push('/select-store'); }} style={{ padding: '8px 14px', background: '#F1F3F4', color: '#333', border: 'none', borderRadius: '6px', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}>
               Winkel Wisselen
             </button>
           </div>
         </div>
 
-        {/* Register Grid */}
+        {/* Kassa Layout Grid */}
         <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: '20px' }}>
-          {/* Products Section */}
+          
+          {/* Producten & Categorieën Sectie */}
           <div style={{ background: '#FAFAFA', padding: '20px', borderRadius: '12px', border: '1px solid #EAEAEA', height: 'calc(100vh - 140px)', display: 'flex', flexDirection: 'column' }}>
             <input 
               type="text" 
@@ -183,7 +186,7 @@ export default function CashRegister() {
               style={{ width: '100%', padding: '10px', border: '1px solid #DDD', borderRadius: '8px', marginBottom: '12px', fontSize: '14px', boxSizing: 'border-box', outline: 'none' }} 
             />
 
-            {/* Categorie Menu */}
+            {/* Categorie Filter Menu */}
             <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', marginBottom: '15px', paddingBottom: '4px' }}>
               <button 
                 onClick={() => setSelectedCategory('Alle')}
@@ -202,6 +205,7 @@ export default function CashRegister() {
               ))}
             </div>
 
+            {/* Producten Grid */}
             <div style={{ overflowY: 'auto', flex: 1, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '10px', alignContent: 'flex-start' }}>
               {filteredProducts.length === 0 ? (
                 <p style={{ color: '#666', fontSize: '13px', gridColumn: '1 / -1' }}>Geen producten gevonden. Klik op 'Sync' als de lijst leeg is.</p>
@@ -222,11 +226,11 @@ export default function CashRegister() {
             </div>
           </div>
 
-          {/* Cart & Checkout Section */}
+          {/* Winkelmand & Checkout Sectie */}
           <div style={{ background: '#FAFAFA', padding: '20px', borderRadius: '12px', border: '1px solid #EAEAEA', height: 'calc(100vh - 140px)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', overflowY: 'auto' }}>
             <div>
               <h3 style={{ marginTop: 0, fontSize: '16px', fontWeight: '800', marginBottom: '15px' }}>Winkelmand</h3>
-              <div style={{ maxHeight: '180px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '15px' }}>
+              <div style={{ maxHeight: 'calc(100vh - 320px)', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '15px' }}>
                 {cart.length === 0 ? (
                   <p style={{ color: '#666', fontSize: '13px' }}>Winkelmand is leeg.</p>
                 ) : (
@@ -251,6 +255,7 @@ export default function CashRegister() {
               <button onClick={handleCheckout} style={{ width: '100%', padding: '12px', background: '#C3110C', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: '700', fontSize: '14px', cursor: 'pointer' }}>Afrekenen</button>
             </div>
           </div>
+
         </div>
       </div>
     </div>
