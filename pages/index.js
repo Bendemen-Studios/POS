@@ -36,7 +36,7 @@ export default function POSHome() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [checkoutStatus, setCheckoutStatus] = useState(null);
 
-  // Modal & Wisselgeld State
+  // Betaling & Wisselgeld Modal State
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState('sumup');
   const [cashGiven, setCashGiven] = useState('');
@@ -94,23 +94,26 @@ export default function POSHome() {
     router.push('/login');
   };
 
+  // Uitgesloten categorieën
+  const EXCLUDED_CATEGORIES = ['Ophaal Geschikt', 'Externe Productie', 'Kids'];
+
   const getProductCategory = (product) => {
     if (product.categories && product.categories.length > 0) {
-      return product.categories[0].name || 'Overige';
+      const validCategory = product.categories.find(
+        (cat) => !EXCLUDED_CATEGORIES.includes(cat.name)
+      );
+      if (validCategory) {
+        return validCategory.name;
+      }
     }
     return 'Overige';
   };
 
-  // UITGESLOTEN CATEGORIEËN FILTER
-  const EXCLUDED_CATEGORIES = ['Ophaal Geschikt', 'Externe Productie', 'Kids'];
-
-  // Filter producten:exclusief de uitgesloten categorieën
   const activeProducts = products.filter((p) => {
-    const cat = getProductCategory(p);
-    return !EXCLUDED_CATEGORIES.includes(cat);
+    if (!p.categories || p.categories.length === 0) return true;
+    return p.categories.some((cat) => !EXCLUDED_CATEGORIES.includes(cat.name));
   });
 
-  // Unieke categorieën ophalen voor de tegels (zonder de uitgesloten categorieën)
   const categoriesList = Array.from(
     new Set(activeProducts.map((p) => getProductCategory(p)))
   );
@@ -194,7 +197,6 @@ export default function POSHome() {
     );
   };
 
-  // Totalen
   const subtotal = cart.reduce((acc, item) => acc + parseFloat(item.price || 0) * item.quantity, 0);
 
   let manualDiscountAmount = 0;
@@ -342,7 +344,6 @@ export default function POSHome() {
     }
   };
 
-  // Filteren op zoekterm binnen de actieve (niet-uitgesloten) producten
   const filteredProducts = activeProducts.filter((p) => {
     const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase());
     const pCat = getProductCategory(p);
@@ -402,7 +403,6 @@ export default function POSHome() {
         {/* Producten & Categorieën Catalogus */}
         <div className="w-full md:w-3/5 flex flex-col bg-white rounded-lg shadow p-4">
           
-          {/* Zoekbalk */}
           <div className="mb-3">
             <input
               type="text"
@@ -413,7 +413,7 @@ export default function POSHome() {
             />
           </div>
 
-          {/* Categorie Tegels (Zonder uitgesloten categorieën) */}
+          {/* Categorie Tegels */}
           <div className="flex space-x-2 overflow-x-auto pb-3 mb-3 border-b">
             <button
               onClick={() => setSelectedCategory('ALL')}
@@ -443,7 +443,7 @@ export default function POSHome() {
             })}
           </div>
 
-          {/* Producten Tegels */}
+          {/* Producten Grid (1:1 foto ratio met aspect-square) */}
           <div className="flex-1 overflow-y-auto grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[calc(100vh-280px)]">
             {filteredProducts.map((product) => {
               const imageUrl = product.images && product.images.length > 0 ? product.images[0].src : null;
@@ -457,13 +457,14 @@ export default function POSHome() {
                   className="bg-gray-50 border border-gray-200 rounded-lg p-2 flex flex-col justify-between cursor-pointer hover:border-black transition shadow-sm hover:shadow relative"
                 >
                   {hasVariations && (
-                    <span className="absolute top-2 right-2 bg-black text-white text-[9px] font-bold px-1.5 py-0.5 rounded uppercase">
+                    <span className="absolute top-2 right-2 bg-black text-white text-[9px] font-bold px-1.5 py-0.5 rounded uppercase z-10">
                       Variaties
                     </span>
                   )}
 
                   <div>
-                    <div className="w-full h-28 bg-gray-200 rounded mb-2 overflow-hidden flex items-center justify-center">
+                    {/* 1:1 Foto Container */}
+                    <div className="w-full aspect-square bg-gray-200 rounded mb-2 overflow-hidden flex items-center justify-center">
                       {imageUrl ? (
                         <img
                           src={imageUrl}
@@ -496,7 +497,6 @@ export default function POSHome() {
           <div>
             <h2 className="text-lg font-bold mb-3 border-b pb-2">Huidige Bestelling</h2>
 
-            {/* Klant Koppeling */}
             <div className="mb-3 bg-gray-50 p-2 rounded border">
               <label className="text-xs font-bold text-gray-600 block mb-1">Gekoppelde Klant (voor punten):</label>
               {selectedCustomer ? (
@@ -530,7 +530,6 @@ export default function POSHome() {
               )}
             </div>
 
-            {/* Cart Items */}
             <div className="overflow-y-auto max-h-40 mb-3 divide-y">
               {cart.length === 0 ? (
                 <p className="text-gray-400 text-sm text-center py-4">Geen artikelen in winkelmand</p>
@@ -551,7 +550,6 @@ export default function POSHome() {
               )}
             </div>
 
-            {/* Kortingen */}
             <div className="border-t pt-2 space-y-2 text-xs">
               <div className="flex justify-between items-center">
                 <span className="font-semibold">Korting / Voucher:</span>
@@ -598,7 +596,6 @@ export default function POSHome() {
             </div>
           </div>
 
-          {/* Totalen & Knop */}
           <div className="border-t pt-3 mt-2">
             <div className="flex justify-between text-sm mb-1">
               <span>Subtotaal:</span>
@@ -638,7 +635,7 @@ export default function POSHome() {
         </div>
       </div>
 
-      {/* POP-UP MODAL 1: OPEN BEDRAG INVOEREN */}
+      {/* MODAL 1: OPEN BEDRAG */}
       {openAmountProduct && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg shadow-xl max-w-sm w-full p-6">
@@ -676,7 +673,7 @@ export default function POSHome() {
         </div>
       )}
 
-      {/* POP-UP MODAL 2: VARIATIES SELECTEREN */}
+      {/* MODAL 2: VARIATIES */}
       {selectedProductForVariations && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
@@ -696,7 +693,7 @@ export default function POSHome() {
                   </button>
                 ))
               ) : (
-                <p className="text-xs text-gray-500 py-2">Geen gedetailleerde variaties geladen. Probeer opnieuw te synchroniseren.</p>
+                <p className="text-xs text-gray-500 py-2">Geen gedetailleerde variaties geladen.</p>
               )}
             </div>
 
@@ -710,7 +707,7 @@ export default function POSHome() {
         </div>
       )}
 
-      {/* POP-UP MODAL 3: BETAALMETHODE & SLIMME WISSELGELD BEREKENAAR */}
+      {/* MODAL 3: BETAALMETHODE & WISSELGELD */}
       {showPaymentModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
