@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import useSWR from 'swr';
 import axios from 'axios';
+import { saveOfflineOrder, getOfflineOrders, clearOfflineOrders } from '../lib/offlineStore';
+import { processDirectSumupCheckout } from '../lib/sumupDirect';
 
 const fetcher = (url) => axios.get(url).then((res) => res.data);
 
@@ -14,10 +16,11 @@ export default function CashRegister() {
   const [search, setSearch] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('Alle');
-  
+  const [isOfflineMode, setIsOfflineMode] = useState(false);
+
   const [discount, setDiscount] = useState(0);
   const [discountType, setDiscountType] = useState('fixed');
-  
+
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [redeemPoints, setRedeemPoints] = useState(false);
 
@@ -37,12 +40,13 @@ export default function CashRegister() {
   const [isProcessingCheckout, setIsProcessingCheckout] = useState(false);
   const [sumupCancelToken, setSumupCancelToken] = useState(null);
 
-  // Producten ophalen via SWR
+  // WooCommerce Producten SWR
   const { data: productsData, mutate: mutateProducts } = useSWR('/api/woocommerce/products', fetcher, { revalidateOnFocus: false });
   const products = Array.isArray(productsData) ? productsData : (productsData?.products || []);
 
   useEffect(() => {
     setMounted(true);
+
     try {
       const rawUser = localStorage.getItem('pos_user');
       if (rawUser && rawUser !== 'undefined') setUser(JSON.parse(rawUser));
@@ -52,12 +56,46 @@ export default function CashRegister() {
       const rawStore = localStorage.getItem('selectedStore');
       if (rawStore && rawStore !== 'undefined') setStore(JSON.parse(rawStore));
     } catch (e) { console.error('Fout bij parsen selectedStore:', e); }
+
+    // Luister naar netwerk status voor offline sync
+    const handleOnline = () => {
+      setIsOfflineMode(false);
+      syncOfflineOrders();
+    };
+    const handleOffline = () => setIsOfflineMode(true);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
   }, []);
 
   if (!mounted) return null;
 
   const isAdminOrManager = user?.role === 'administrator' || user?.role === 'manager' || user?.role === 'shop_manager';
   const categories = [...new Set(products.map(p => (p.categories && p.categories.length > 0) ? p.categories[0].name : 'Algemeen'))].sort();
+
+  // Offline Sync Functie
+  const syncOfflineOrders = async () => {
+    const pendingOrders = await getOfflineOrders();
+    if (!pendingOrders || pendingOrders.length === 0) return;
+
+    for (const pendingOrder of pendingOrders) {
+      try {
+        await axios.post('/api/woocommerce/orders', pendingOrder);
+      } catch (err) {
+        console.error('VPS nog steeds onbereikbaar voor sync.');
+        return;
+      }
+    }
+
+    await clearOfflineOrders();
+    alert('Alle offline opgeslagen bestellingen zijn succesvol gesynchroniseerd met de server!');
+    mutateProducts();
+  };
 
   const handleSyncProducts = async () => {
     try {
@@ -207,52 +245,84 @@ export default function CashRegister() {
       return alert('Het ontvangen contante bedrag is lager dan het totaalbedrag!');
     }
 
+    const orderPayload = {
+      orderItems: cart,
+      paymentMethod,
+      storeId: store?.id || 1,
+      cashierId: user?.id || 1,
+      customerId: selectedCustomer?.id || 0,
+      totals: { discountAmount, pointsDiscount, totalPaid: totalPrice, cashGiven: parsedCashGiven, changeAmount }
+    };
+
     try {
       setIsProcessingCheckout(true);
 
-      // Met SumUp communiceren als dat gekozen is
+      // --- 1. SUMUP PIN BETALING AFHANDELING ---
       if (paymentMethod === 'sumup') {
         const controller = new AbortController();
         setSumupCancelToken(controller);
 
-        const sumupRes = await axios.post('/api/sumup/checkout', {
-          totalAmount: totalPrice,
-          terminalId: store?.sumupReaderId || ''
-        }, { signal: controller.signal });
+        try {
+          // Poging 1: Via de VPS API
+          const sumupRes = await axios.post('/api/sumup/checkout', {
+            totalAmount: totalPrice,
+            terminalId: store?.sumupReaderId || ''
+          }, { signal: controller.signal, timeout: 4000 });
 
-        if (!sumupRes.data.success) {
-          setIsProcessingCheckout(false);
-          return alert('PIN betaling geweigerd of mislukt op terminal.');
+          if (!sumupRes.data.success) {
+            setIsProcessingCheckout(false);
+            return alert('PIN betaling geweigerd of mislukt op terminal.');
+          }
+        } catch (vpsErr) {
+          // Poging 2: Als VPS wegvalt, direct via SumUp Cloud API vanuit browser
+          console.warn('VPS onbereikbaar voor SumUp. Probeert directe verbinding...');
+          const fallbackToken = localStorage.getItem('pos_sumup_access_token');
+          const activeTerminalId = store?.sumupReaderId || localStorage.getItem('pos_fallback_terminal_id');
+
+          if (!fallbackToken || !activeTerminalId) {
+            setIsProcessingCheckout(false);
+            return alert('VPS is offline en er is geen SumUp Access Token lokaal aanwezig.');
+          }
+
+          const directRes = await processDirectSumupCheckout(totalPrice, activeTerminalId, fallbackToken);
+          if (!directRes.success) {
+            setIsProcessingCheckout(false);
+            return alert(`Directe SumUp betaling mislukt: ${directRes.error}`);
+          }
         }
       }
 
-      // Order aanmaken via WooCommerce
-      const res = await axios.post('/api/woocommerce/order', {
-        orderItems: cart,
-        paymentMethod,
-        storeId: store?.id,
-        cashierId: user?.id,
-        customerId: selectedCustomer?.id || 0,
-        totals: { discountAmount, pointsDiscount, totalPaid: totalPrice, cashGiven: parsedCashGiven, changeAmount }
-      });
+      // --- 2. ORDER OPSLAAN IN WOOCOMMERCE OF OFFLINE ---
+      try {
+        const res = await axios.post('/api/woocommerce/orders', orderPayload, { timeout: 4000 });
 
-      if (res.data.success) {
-        if (confirm(`Bestelling #${res.data.orderId} succesvol afgerond!\n\nWilt u een kassabon afdrukken?`)) {
-          handlePrintReceipt(res.data.orderId, cart, totalPrice, parsedCashGiven, changeAmount, store?.name);
+        if (res.data.success) {
+          if (confirm(`Bestelling #${res.data.orderId} succesvol afgerond!\n\nWilt u een kassabon afdrukken?`)) {
+            handlePrintReceipt(res.data.orderId, cart, totalPrice, parsedCashGiven, changeAmount, store?.name);
+          }
+          setCart([]);
+          setSelectedCustomer(null);
+          setRedeemPoints(false);
+          setShowCheckoutModal(false);
+          mutateProducts();
+        }
+      } catch (orderErr) {
+        // VPS is offline -> Lokaal opslaan
+        const savedLocal = await saveOfflineOrder(orderPayload);
+        if (confirm(`⚠️ OFFLINE MODUS\nBetaling gelukt! Order lokaal opgeslagen (${savedLocal.localId}).\n\nKassabon afdrukken?`)) {
+          handlePrintReceipt(savedLocal.localId, cart, totalPrice, parsedCashGiven, changeAmount, store?.name);
         }
         setCart([]);
         setSelectedCustomer(null);
         setRedeemPoints(false);
         setShowCheckoutModal(false);
-        mutateProducts();
-      } else {
-        alert('Fout bij plaatsen bestelling.');
       }
-    } catch (err) {
-      if (axios.isCancel(err)) {
-        alert('PIN betaling geannuleerd door gebruiker.');
+
+    } catch (globalErr) {
+      if (axios.isCancel(globalErr)) {
+        alert('PIN betaling geannuleerd.');
       } else {
-        alert('Fout bij communicatie met server.');
+        alert('Fout bij verwerken van betaling.');
       }
     } finally {
       setIsProcessingCheckout(false);
@@ -281,9 +351,9 @@ export default function CashRegister() {
             <div>
               <h1 style={{ margin: 0, fontSize: '18px', fontWeight: '800' }}>BENDEMEN POS</h1>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px' }}>
-                <span style={{ height: '8px', width: '8px', borderRadius: '50%', background: '#137333', display: 'inline-block' }}></span>
+                <span style={{ height: '8px', width: '8px', borderRadius: '50%', background: isOfflineMode ? '#C3110C' : '#137333', display: 'inline-block' }}></span>
                 <span style={{ fontSize: '13px', color: '#555' }}>
-                  Actieve winkel: <strong style={{ color: '#000' }}>{store?.name || 'Ons Winkeltje'}</strong>
+                  Actieve winkel: <strong style={{ color: '#000' }}>{store?.name || 'Ons Winkeltje'}</strong> {isOfflineMode && '(OFFLINE MODUS)'}
                 </span>
               </div>
             </div>

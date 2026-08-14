@@ -33,7 +33,7 @@ export default function AdminDashboard() {
   const [pairingCode, setPairingCode] = useState('');
   const [isPairingSumup, setIsPairingSumup] = useState(false);
 
-  // WooCommerce Data ophalen via SWR
+  // WooCommerce Data via SWR
   const { data: productsData, mutate: mutateProducts } = useSWR('/api/woocommerce/products', fetcher);
   const products = Array.isArray(productsData) ? productsData : (productsData?.products || []);
 
@@ -43,7 +43,6 @@ export default function AdminDashboard() {
   useEffect(() => {
     setMounted(true);
 
-    // Beveiligingscontrole voor Admins & Managers
     try {
       const rawUser = localStorage.getItem('pos_user');
       if (rawUser && rawUser !== 'undefined') {
@@ -59,7 +58,6 @@ export default function AdminDashboard() {
       router.push('/login');
     }
 
-    // Laad lokale gegevens
     try {
       const savedStores = localStorage.getItem('pos_stores');
       if (savedStores) {
@@ -77,7 +75,7 @@ export default function AdminDashboard() {
 
   if (!mounted || !user) return null;
 
-  // --- 1. MULTI-STORE BEHEER ACTIES ---
+  // --- 1. MULTI-STORE BEHEER ---
   const saveStoresToStorage = (updatedStores) => {
     setStores(updatedStores);
     localStorage.setItem('pos_stores', JSON.stringify(updatedStores));
@@ -118,7 +116,7 @@ export default function AdminDashboard() {
     setShowAddStoreModal(false);
   };
 
-  // --- 2. PERSONEEL ACTIES ---
+  // --- 2. PERSONEEL BEHEER ---
   const saveStaffToStorage = (updatedStaff) => {
     setStaffList(updatedStaff);
     localStorage.setItem('pos_staff', JSON.stringify(updatedStaff));
@@ -148,9 +146,7 @@ export default function AdminDashboard() {
 
   // --- 3. SUMUP PAIRING PER LOCATIE ---
   const handlePairSumup = async () => {
-    if (!pairingCode) {
-      return alert('Vul de pairing code in die op het scherm van de SumUp staat.');
-    }
+    if (!pairingCode) return alert('Vul de pairing code in die op het scherm van de SumUp staat.');
 
     const targetStore = stores.find(s => s.id === parseInt(selectedStoreForSumup));
     if (!targetStore) return alert('Selecteer een geldige winkel.');
@@ -167,6 +163,9 @@ export default function AdminDashboard() {
         const readerId = res.data.reader?.id || pairingCode.trim();
         const updatedStores = stores.map(s => s.id === targetStore.id ? { ...s, sumupReaderId: readerId } : s);
         saveStoresToStorage(updatedStores);
+
+        // Bewaar ook als offline fallback in localStorage
+        localStorage.setItem('pos_fallback_terminal_id', readerId);
 
         alert(`SumUp Terminal succesvol gekoppeld aan vestiging "${targetStore.name}"!`);
         setPairingCode('');
@@ -267,25 +266,11 @@ export default function AdminDashboard() {
                       </span>
                     </td>
                     <td style={{ padding: '12px', textAlign: 'right' }}>
-                      <button 
-                        onClick={() => setEditingStore(s)}
-                        style={{ padding: '6px 12px', background: '#F1F3F4', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', fontSize: '12px', marginRight: '6px' }}
-                      >
-                        ✏️ Wijzigen
-                      </button>
-                      <button 
-                        onClick={() => handleToggleStoreActive(s.id)}
-                        style={{ padding: '6px 12px', background: s.active ? '#FFF0F0' : '#EAEAEA', color: s.active ? '#C3110C' : '#333', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', fontSize: '12px', marginRight: '6px' }}
-                      >
+                      <button onClick={() => setEditingStore(s)} style={{ padding: '6px 12px', background: '#F1F3F4', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', fontSize: '12px', marginRight: '6px' }}>✏️ Wijzigen</button>
+                      <button onClick={() => handleToggleStoreActive(s.id)} style={{ padding: '6px 12px', background: s.active ? '#FFF0F0' : '#EAEAEA', color: s.active ? '#C3110C' : '#333', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', fontSize: '12px', marginRight: '6px' }}>
                         {s.active ? 'Deactiveren' : 'Activeren'}
                       </button>
-                      
-                      <button 
-                        onClick={() => handleDeleteStore(s.id)}
-                        style={{ padding: '6px 12px', background: '#FCE8E6', color: '#C3110C', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '700', fontSize: '12px' }}
-                      >
-                        🗑️ Verwijderen
-                      </button>
+                      <button onClick={() => handleDeleteStore(s.id)} style={{ padding: '6px 12px', background: '#FCE8E6', color: '#C3110C', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '700', fontSize: '12px' }}>🗑️ Verwijderen</button>
                     </td>
                   </tr>
                 ))}
@@ -302,12 +287,7 @@ export default function AdminDashboard() {
                 <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '800' }}>Personeel & Medewerkers</h3>
                 <p style={{ margin: '4px 0 0 0', color: '#666', fontSize: '13px' }}>Beheer wie er op de kassa kan inloggen en hun toegangsrechten.</p>
               </div>
-              <button 
-                onClick={() => setShowAddStaffModal(true)}
-                style={{ padding: '10px 16px', background: '#000', color: '#FFF', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '700', fontSize: '13px' }}
-              >
-                + Medewerker Toevoegen
-              </button>
+              <button onClick={() => setShowAddStaffModal(true)} style={{ padding: '10px 16px', background: '#000', color: '#FFF', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '700', fontSize: '13px' }}>+ Medewerker Toevoegen</button>
             </div>
 
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
@@ -330,12 +310,7 @@ export default function AdminDashboard() {
                     </td>
                     <td style={{ padding: '12px', letterSpacing: '2px', fontWeight: 'bold' }}>••••</td>
                     <td style={{ padding: '12px', textAlign: 'right' }}>
-                      <button 
-                        onClick={() => handleDeleteStaff(member.id)}
-                        style={{ padding: '6px 12px', background: '#FCE8E6', color: '#C3110C', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '700', fontSize: '12px' }}
-                      >
-                        🗑️ Verwijderen
-                      </button>
+                      <button onClick={() => handleDeleteStaff(member.id)} style={{ padding: '6px 12px', background: '#FCE8E6', color: '#C3110C', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '700', fontSize: '12px' }}>🗑️ Verwijderen</button>
                     </td>
                   </tr>
                 ))}
@@ -351,45 +326,28 @@ export default function AdminDashboard() {
             <p style={{ color: '#666', fontSize: '13px', marginBottom: '20px' }}>Selecteer een vestiging en voer de Pairing Code in die verschijnt op de te koppelen SumUp Solo reader.</p>
 
             <div style={{ background: '#FAFAFA', padding: '20px', borderRadius: '8px', border: '1px solid #EAEAEA', maxWidth: '500px' }}>
-              
               <div style={{ marginBottom: '15px' }}>
                 <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '5px' }}>Kies Winkellocatie</label>
-                <select 
-                  value={selectedStoreForSumup} 
-                  onChange={(e) => setSelectedStoreForSumup(e.target.value)}
-                  style={{ width: '100%', padding: '10px', fontSize: '14px', border: '1px solid #CCC', borderRadius: '6px', background: '#FFF', fontWeight: '600' }}
-                >
+                <select value={selectedStoreForSumup} onChange={(e) => setSelectedStoreForSumup(e.target.value)} style={{ width: '100%', padding: '10px', fontSize: '14px', border: '1px solid #CCC', borderRadius: '6px', background: '#FFF', fontWeight: '600' }}>
                   {stores.map(s => (
-                    <option key={s.id} value={s.id}>
-                      {s.name} ({s.location}) {s.sumupReaderId ? '— [Gekoppeld: ' + s.sumupReaderId + ']' : '— [Nog geen terminal]'}
-                    </option>
+                    <option key={s.id} value={s.id}>{s.name} ({s.location}) {s.sumupReaderId ? '— [Gekoppeld: ' + s.sumupReaderId + ']' : '— [Nog geen terminal]'}</option>
                   ))}
                 </select>
               </div>
 
               <div style={{ marginBottom: '20px' }}>
                 <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '6px' }}>SumUp Pairing Code (van terminal scherm)</label>
-                <input 
-                  type="text" 
-                  value={pairingCode} 
-                  onChange={(e) => setPairingCode(e.target.value)} 
-                  placeholder="bijv. 8-tekens koppelcode"
-                  style={{ width: '100%', padding: '12px', fontSize: '16px', fontWeight: 'bold', border: '2px solid #000', borderRadius: '6px', boxSizing: 'border-box' }}
-                />
+                <input type="text" value={pairingCode} onChange={(e) => setPairingCode(e.target.value)} placeholder="bijv. 8-tekens koppelcode" style={{ width: '100%', padding: '12px', fontSize: '16px', fontWeight: 'bold', border: '2px solid #000', borderRadius: '6px', boxSizing: 'border-box' }} />
               </div>
 
-              <button 
-                onClick={handlePairSumup} 
-                disabled={isPairingSumup}
-                style={{ width: '100%', padding: '12px', background: '#000', color: '#FFF', border: 'none', borderRadius: '6px', fontWeight: '700', cursor: 'pointer' }}
-              >
+              <button onClick={handlePairSumup} disabled={isPairingSumup} style={{ width: '100%', padding: '12px', background: '#000', color: '#FFF', border: 'none', borderRadius: '6px', fontWeight: '700', cursor: 'pointer' }}>
                 {isPairingSumup ? 'Koppelen met SumUp API...' : '🔗 Terminal Koppelen aan Deze Locatie'}
               </button>
             </div>
           </div>
         )}
 
-        {/* --- TAB 4: BESTELLINGEN & OMZET SYNCHRONISATIE --- */}
+        {/* --- TAB 4: BESTELLINGEN & OMZET --- */}
         {activeTab === 'orders' && (
           <div style={{ background: '#FFF', padding: '25px', borderRadius: '12px', border: '1px solid #EAEAEA' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
@@ -397,12 +355,7 @@ export default function AdminDashboard() {
                 <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '800' }}>Gesynchroniseerde Bestellingen ({orders.length})</h3>
                 <p style={{ margin: '4px 0 0 0', color: '#666', fontSize: '13px' }}>Live verkoopoverzicht vanuit WooCommerce.</p>
               </div>
-              <button 
-                onClick={() => mutateOrders()} 
-                style={{ padding: '8px 14px', background: '#F1F3F4', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', fontSize: '12px' }}
-              >
-                🔄 Verversen
-              </button>
+              <button onClick={() => mutateOrders()} style={{ padding: '8px 14px', background: '#F1F3F4', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600', fontSize: '12px' }}>🔄 Verversen</button>
             </div>
 
             <div style={{ maxHeight: '550px', overflowY: 'auto' }}>
@@ -484,7 +437,7 @@ export default function AdminDashboard() {
 
       </div>
 
-      {/* --- POP-UP MODAL: WINKEL BEWERKEN --- */}
+      {/* POP-UP MODAL: WINKEL BEWERKEN */}
       {editingStore && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
           <div style={{ background: '#FFF', padding: '25px', borderRadius: '12px', width: '400px' }}>
@@ -501,7 +454,7 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {/* --- POP-UP MODAL: PERSONEEL TOEVOEGEN --- */}
+      {/* POP-UP MODAL: PERSONEEL TOEVOEGEN */}
       {showAddStaffModal && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
           <div style={{ background: '#FFF', padding: '25px', borderRadius: '12px', width: '400px' }}>
@@ -523,7 +476,7 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {/* --- POP-UP MODAL: WINKEL TOEVOEGEN --- */}
+      {/* POP-UP MODAL: WINKEL TOEVOEGEN */}
       {showAddStoreModal && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
           <div style={{ background: '#FFF', padding: '25px', borderRadius: '12px', width: '400px' }}>
