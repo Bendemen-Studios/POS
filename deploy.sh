@@ -3,25 +3,26 @@ set -e
 
 echo "🚀 Start deployment..."
 
-# Ga naar de juiste projectmap op de VPS
+# 1. Ga naar de map
 cd /var/www/bendemen-pos
 
-# 1. Haal laatste code op van GitHub
-git pull origin main
+# 2. Forceer het ophalen van de laatste code en negeer lokale conflicten
+git fetch origin main
+git reset --hard origin/main
 
-# 2. Controleer of .env bestaat, zo niet, maak hem aan vanuit .env.example
+# 3. Controleer of .env bestaat, zo niet, maak hem aan vanuit .env.example
 if [ ! -f .env ]; then
   if [ -f .env.example ]; then
     cp .env.example .env
-    echo "⚠️ .env bestand ontbrak en is aangemaakt vanuit .env.example!"
+    echo "⚠️ .env bestand aangemaakt vanuit .env.example!"
   else
     touch .env
-    echo "⚠️ .env bestand ontbrak en is leeg aangemaakt!"
+    echo "⚠️ .env bestand leeg aangemaakt!"
   fi
   echo "👉 Vergeet niet je gegevens in te vullen via: nano .env"
 fi
 
-# 3. Installeer dependencies, bouw en herstart PM2
+# 4. Installeer dependencies, bouw en herstart PM2
 npm install
 npm run build
 
