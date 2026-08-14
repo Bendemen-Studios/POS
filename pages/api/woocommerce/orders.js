@@ -1,20 +1,37 @@
-import axios from 'axios';
-import pool from '../../../lib/db';
+import WooCommerceRestApi from "@woocommerce/woocommerce-rest-api";
+
+const WooCommerce = WooCommerceRestApi.default || WooCommerceRestApi;
+
+const api = new WooCommerce({
+  url: process.env.WOO_SITE_URL || process.env.WOOCOMMERCE_URL || "https://www.bendemen.com",
+  consumerKey: process.env.WOO_CONSUMER_KEY,
+  consumerSecret: process.env.WOO_CONSUMER_SECRET,
+  version: "wc/v3"
+});
 
 export default async function handler(req, res) {
-  const orderPayload = req.body;
-  const authHeader = 'Basic ' + Buffer.from(`${process.env.WOO_CONSUMER_KEY}:${process.env.WOO_CONSUMER_SECRET}`).toString('base64');
+  if (req.method !== 'GET') {
+    res.setHeader('Allow', ['GET']);
+    return res.status(405).json({ success: false, message: `Method ${req.method} not allowed` });
+  }
 
   try {
-    // Probeer WooCommerce
-    const response = await axios.post(`${process.env.WOO_URL}/wp-json/wc/v3/orders`, orderPayload, {
-      headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' },
-      timeout: 8000
+    // Haal de laatste orders op uit WooCommerce
+    const response = await api.get("orders", {
+      per_page: 50,
+      orderby: "date",
+      order: "desc"
     });
-    return res.status(200).json({ success: true, orderId: response.data.id });
+
+    return res.status(200).json({ 
+      success: true, 
+      orders: response.data 
+    });
   } catch (error) {
-    // Fallback naar MariaDB
-    const [result] = await pool.query('INSERT INTO pos_orders (order_data) VALUES (?)', [JSON.stringify(orderPayload)]);
-    return res.status(200).json({ success: true, offline: true, orderId: `LOCAL-${result.insertId}` });
+    console.error("WooCommerce Orders Fetch Error:", error.response?.data || error.message);
+    return res.status(500).json({ 
+      success: false, 
+      error: error.response?.data?.message || error.message || 'Fout bij ophalen bestellingen' 
+    });
   }
 }
