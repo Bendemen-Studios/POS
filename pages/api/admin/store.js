@@ -1,69 +1,75 @@
 import pool from '../../../lib/db';
 
 export default async function handler(req, res) {
-  // GET: Haal alle winkellocaties op
   if (req.method === 'GET') {
     try {
       const [rows] = await pool.execute('SELECT * FROM pos_stores ORDER BY id ASC');
-      return res.status(200).json({ success: true, stores: rows });
+      
+      // Mocht een kolom 'name' heten i.p.v. 'store_name', mappen we die hier automatisch om
+      const formattedStores = rows.map(s => ({
+        ...s,
+        store_name: s.store_name || s.name || 'Ons Winkeltje'
+      }));
+
+      return res.status(200).json({ success: true, stores: formattedStores });
     } catch (error) {
       console.error("Database Store GET Error:", error);
       return res.status(500).json({ success: false, error: 'Databasefout bij ophalen locaties.' });
     }
   }
 
-  // POST: Nieuwe locatie toevoegen OF bestaande locatie bewerken
   if (req.method === 'POST') {
     try {
-      // Vang zowel store_name als name op om veld-mismatches te voorkomen
       const { id, store_name, name, address, receipt_header, receipt_footer } = req.body;
-      const finalStoreName = store_name || name;
-
-      if (!finalStoreName) {
-        return res.status(400).json({ success: false, message: 'Locatienaam is verplicht.' });
-      }
+      const finalName = store_name || name || 'Ons Winkeltje';
 
       if (id) {
-        // Update een specifieke locatie
-        await pool.execute(
-          `UPDATE pos_stores 
-           SET store_name = ?, address = ?, receipt_header = ?, receipt_footer = ? 
-           WHERE id = ?`,
-          [finalStoreName, address || '', receipt_header || '', receipt_footer || '', id]
-        );
+        // Probeer eerst met store_name, anders fallback naar name
+        try {
+          await pool.execute(
+            `UPDATE pos_stores 
+             SET store_name = ?, address = ?, receipt_header = ?, receipt_footer = ? 
+             WHERE id = ?`,
+            [finalName, address || '', receipt_header || '', receipt_footer || '', id]
+          );
+        } catch (e) {
+          await pool.execute(
+            `UPDATE pos_stores 
+             SET name = ?, address = ?, receipt_header = ?, receipt_footer = ? 
+             WHERE id = ?`,
+            [finalName, address || '', receipt_header || '', receipt_footer || '', id]
+          );
+        }
       } else {
-        // Voeg een nieuwe locatie toe
-        await pool.execute(
-          `INSERT INTO pos_stores (store_name, address, receipt_header, receipt_footer) 
-           VALUES (?, ?, ?, ?)`,
-          [finalStoreName, address || '', receipt_header || '', receipt_footer || '']
-        );
+        try {
+          await pool.execute(
+            `INSERT INTO pos_stores (store_name, address, receipt_header, receipt_footer) 
+             VALUES (?, ?, ?, ?)`,
+            [finalName, address || '', receipt_header || '', receipt_footer || '']
+          );
+        } catch (e) {
+          await pool.execute(
+            `INSERT INTO pos_stores (name, address, receipt_header, receipt_footer) 
+             VALUES (?, ?, ?, ?)`,
+            [finalName, address || '', receipt_header || '', receipt_footer || '']
+          );
+        }
       }
 
-      return res.status(200).json({
-        success: true,
-        message: 'Locatie succesvol opgeslagen in de database!'
-      });
+      return res.status(200).json({ success: true, message: 'Locatie opgeslagen in database!' });
     } catch (error) {
       console.error("Database Store POST Error:", error);
       return res.status(500).json({ success: false, error: 'Databasefout bij opslaan locatie.' });
     }
   }
 
-  // DELETE: Locatie verwijderen
   if (req.method === 'DELETE') {
     try {
       const { id } = req.query;
-      if (!id) {
-        return res.status(400).json({ success: false, message: 'Geen locatie ID opgegeven.' });
-      }
+      if (!id) return res.status(400).json({ success: false, message: 'Geen locatie ID opgegeven.' });
 
       await pool.execute('DELETE FROM pos_stores WHERE id = ?', [id]);
-
-      return res.status(200).json({
-        success: true,
-        message: 'Locatie succesvol verwijderd uit de database!'
-      });
+      return res.status(200).json({ success: true, message: 'Locatie verwijderd.' });
     } catch (error) {
       console.error("Database Store DELETE Error:", error);
       return res.status(500).json({ success: false, error: 'Databasefout bij verwijderen locatie.' });
