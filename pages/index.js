@@ -9,11 +9,16 @@ export default function POSHome() {
   const [currentUser, setCurrentUser] = useState(null);
   const [selectedStore, setSelectedStore] = useState(null);
 
-  // Producten & Cart & Categorieën
+  // Producten, Cart & Categorieën
   const [products, setProducts] = useState([]);
   const [cart, setCart] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('ALL');
+
+  // Modal States: Open Bedrag & Variaties
+  const [selectedProductForVariations, setSelectedProductForVariations] = useState(null);
+  const [openAmountProduct, setOpenAmountProduct] = useState(null);
+  const [customPriceInput, setCustomPriceInput] = useState('');
 
   // Klanten & Punten
   const [customers, setCustomers] = useState([]);
@@ -31,7 +36,7 @@ export default function POSHome() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [checkoutStatus, setCheckoutStatus] = useState(null);
 
-  // Modal & Wisselgeld
+  // Modal & Wisselgeld State
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState('sumup');
   const [cashGiven, setCashGiven] = useState('');
@@ -89,7 +94,6 @@ export default function POSHome() {
     router.push('/login');
   };
 
-  // Bepaal Primary Category per product
   const getProductCategory = (product) => {
     if (product.categories && product.categories.length > 0) {
       return product.categories[0].name || 'Overige';
@@ -97,12 +101,64 @@ export default function POSHome() {
     return 'Overige';
   };
 
-  // Unieke categorieën ophalen uit de productenlijst
   const categoriesList = Array.from(
     new Set(products.map((p) => getProductCategory(p)))
   );
 
-  const addToCart = (product) => {
+  // Klikken op een product op de kassa
+  const handleProductClick = (product) => {
+    // 1. Heeft het product variaties? Open de variatie-modal
+    if (product.variations && product.variations.length > 0) {
+      setSelectedProductForVariations(product);
+      return;
+    }
+
+    // 2. Is het een 'Open Bedrag' product (prijs is 0 of leeg)? Open de prijsinvoer-modal
+    const pPrice = parseFloat(product.price || 0);
+    if (pPrice === 0) {
+      setOpenAmountProduct(product);
+      setCustomPriceInput('');
+      return;
+    }
+
+    // 3. Standaard product toevoegen aan cart
+    addToCart(product, pPrice);
+  };
+
+  // Bevestigen van Open Bedrag
+  const handleConfirmOpenAmount = () => {
+    const enteredPrice = parseFloat(customPriceInput);
+    if (isNaN(enteredPrice) || enteredPrice <= 0) {
+      alert('Voer een geldig bedrag in.');
+      return;
+    }
+
+    addToCart(openAmountProduct, enteredPrice);
+    setOpenAmountProduct(null);
+    setCustomPriceInput('');
+  };
+
+  // Bevestigen van een specifieke Variatie
+  const handleSelectVariation = (variation) => {
+    const varPrice = parseFloat(variation.price || selectedProductForVariations.price || 0);
+    const varName = `${selectedProductForVariations.name} - ${variation.attributes ? variation.attributes.map(a => a.option).join('/') : 'Variatie'}`;
+
+    const cartItem = {
+      ...selectedProductForVariations,
+      id: `${selectedProductForVariations.id}_var_${variation.id}`,
+      product_id: selectedProductForVariations.id,
+      variation_id: variation.id,
+      name: varName,
+      price: varPrice
+    };
+
+    addToCartCustom(cartItem);
+    setSelectedProductForVariations(null);
+  };
+
+  const addToCart = (product, overridePrice = null) => {
+    const finalPrice = overridePrice !== null ? overridePrice : parseFloat(product.price || 0);
+    
     setCart((prev) => {
       const existing = prev.find((item) => item.id === product.id);
       if (existing) {
@@ -110,7 +166,19 @@ export default function POSHome() {
           item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
         );
       }
-      return [...prev, { ...product, quantity: 1, product_id: product.id }];
+      return [...prev, { ...product, price: finalPrice, quantity: 1, product_id: product.id, variation_id: 0 }];
+    });
+  };
+
+  const addToCartCustom = (cartItem) => {
+    setCart((prev) => {
+      const existing = prev.find((item) => item.id === cartItem.id);
+      if (existing) {
+        return prev.map((item) =>
+          item.id === cartItem.id ? { ...item, quantity: item.quantity + 1 } : item
+        );
+      }
+      return [...prev, { ...cartItem, quantity: 1 }];
     });
   };
 
@@ -135,7 +203,6 @@ export default function POSHome() {
   const totalDiscount = Math.min(subtotal, manualDiscountAmount + parseFloat(redeemedDiscount || 0));
   const finalTotal = Math.max(0, subtotal - totalDiscount);
 
-  // Wisselgeld berekening
   const cashGivenFloat = parseFloat(cashGiven) || 0;
   const changeDue = Math.max(0, cashGivenFloat - finalTotal);
 
@@ -271,7 +338,6 @@ export default function POSHome() {
     }
   };
 
-  // Filteren op Zoekterm & Categorie
   const filteredProducts = products.filter((p) => {
     const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase());
     const pCat = getProductCategory(p);
@@ -372,19 +438,26 @@ export default function POSHome() {
             })}
           </div>
 
-          {/* Producten Tegels (Met Afbeeldingen) */}
+          {/* Producten Tegels (Met Afbeeldingen, Variaties & Open Bedrag) */}
           <div className="flex-1 overflow-y-auto grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[calc(100vh-280px)]">
             {filteredProducts.map((product) => {
               const imageUrl = product.images && product.images.length > 0 ? product.images[0].src : null;
+              const hasVariations = product.variations && product.variations.length > 0;
+              const isPriceZero = parseFloat(product.price || 0) === 0;
 
               return (
                 <div
                   key={product.id}
-                  onClick={() => addToCart(product)}
-                  className="bg-gray-50 border border-gray-200 rounded-lg p-2 flex flex-col justify-between cursor-pointer hover:border-black transition shadow-sm hover:shadow"
+                  onClick={() => handleProductClick(product)}
+                  className="bg-gray-50 border border-gray-200 rounded-lg p-2 flex flex-col justify-between cursor-pointer hover:border-black transition shadow-sm hover:shadow relative"
                 >
+                  {hasVariations && (
+                    <span className="absolute top-2 right-2 bg-black text-white text-[9px] font-bold px-1.5 py-0.5 rounded uppercase">
+                      Variaties
+                    </span>
+                  )}
+
                   <div>
-                    {/* Afbeelding van product */}
                     <div className="w-full h-28 bg-gray-200 rounded mb-2 overflow-hidden flex items-center justify-center">
                       {imageUrl ? (
                         <img
@@ -398,12 +471,13 @@ export default function POSHome() {
                     </div>
                     <h3 className="font-semibold text-xs line-clamp-2">{product.name}</h3>
                   </div>
+
                   <div className="mt-2 flex justify-between items-center">
                     <span className="text-[10px] text-gray-500 font-bold uppercase truncate max-w-[80px]">
                       {getProductCategory(product)}
                     </span>
                     <span className="font-bold text-sm text-red-600">
-                      €{parseFloat(product.price || 0).toFixed(2)}
+                      {isPriceZero ? 'Open Bedrag' : `€${parseFloat(product.price || 0).toFixed(2)}`}
                     </span>
                   </div>
                 </div>
@@ -460,7 +534,7 @@ export default function POSHome() {
                   <div key={item.id} className="py-2 flex justify-between items-center text-sm">
                     <div>
                       <div className="font-medium">{item.name}</div>
-                      <div className="text-xs text-gray-500">€{item.price} x {item.quantity}</div>
+                      <div className="text-xs text-gray-500">€{parseFloat(item.price).toFixed(2)} x {item.quantity}</div>
                     </div>
                     <div className="flex items-center space-x-2">
                       <button onClick={() => updateQuantity(item.id, -1)} className="px-2 bg-gray-200 rounded font-bold">-</button>
@@ -559,7 +633,79 @@ export default function POSHome() {
         </div>
       </div>
 
-      {/* POP-UP MODAL: BETAALMETHODE & SLIMME WISSELGELD BEREKENAAR */}
+      {/* POP-UP MODAL 1: OPEN BEDRAG INVOEREN */}
+      {openAmountProduct && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-sm w-full p-6">
+            <h3 className="text-lg font-bold mb-2">Invoeren Open Bedrag</h3>
+            <p className="text-xs text-gray-600 mb-4">{openAmountProduct.name}</p>
+            
+            <div className="mb-4">
+              <label className="text-xs font-bold text-gray-600 block mb-1">Prijs (€):</label>
+              <input
+                type="number"
+                step="0.01"
+                placeholder="0.00"
+                value={customPriceInput}
+                onChange={(e) => setCustomPriceInput(e.target.value)}
+                className="w-full p-3 border-2 border-black rounded text-xl font-bold"
+                autoFocus
+              />
+            </div>
+
+            <div className="flex space-x-2">
+              <button
+                onClick={() => setOpenAmountProduct(null)}
+                className="w-1/2 bg-gray-200 text-black font-bold py-2 rounded text-xs"
+              >
+                Annuleren
+              </button>
+              <button
+                onClick={handleConfirmOpenAmount}
+                className="w-1/2 bg-red-600 text-white font-bold py-2 rounded text-xs"
+              >
+                Toevoegen
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* POP-UP MODAL 2: VARIATIES SELECTEREN */}
+      {selectedProductForVariations && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-bold mb-1">Kies Variatie</h3>
+            <p className="text-xs text-gray-600 mb-4">{selectedProductForVariations.name}</p>
+
+            <div className="space-y-2 max-h-60 overflow-y-auto mb-4">
+              {selectedProductForVariations.variations_data && selectedProductForVariations.variations_data.length > 0 ? (
+                selectedProductForVariations.variations_data.map((v) => (
+                  <button
+                    key={v.id}
+                    onClick={() => handleSelectVariation(v)}
+                    className="w-full text-left p-3 border rounded hover:border-black flex justify-between items-center bg-gray-50 font-semibold text-xs"
+                  >
+                    <span>{v.attributes ? v.attributes.map(a => a.option).join(' / ') : `Variatie #${v.id}`}</span>
+                    <span className="text-red-600 font-bold">€{parseFloat(v.price || selectedProductForVariations.price).toFixed(2)}</span>
+                  </button>
+                ))
+              ) : (
+                <p className="text-xs text-gray-500 py-2">Geen gedetailleerde variaties geladen. Probeer opnieuw te synchroniseren.</p>
+              )}
+            </div>
+
+            <button
+              onClick={() => setSelectedProductForVariations(null)}
+              className="w-full bg-gray-200 text-black font-bold py-2 rounded text-xs"
+            >
+              Sluiten
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* POP-UP MODAL 3: BETAALMETHODE & SLIMME WISSELGELD BEREKENAAR */}
       {showPaymentModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
