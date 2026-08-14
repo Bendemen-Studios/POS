@@ -15,10 +15,12 @@ export default function POSHome() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('ALL');
 
-  // Modal States: Open Bedrag & Variaties
+  // Modal States: Open Bedrag, Variaties & Custom Artikel
   const [selectedProductForVariations, setSelectedProductForVariations] = useState(null);
   const [openAmountProduct, setOpenAmountProduct] = useState(null);
   const [customPriceInput, setCustomPriceInput] = useState('');
+  const [showCustomModal, setShowCustomModal] = useState(false);
+  const [customItem, setCustomItem] = useState({ name: '', price: '' });
 
   // Klanten & Punten
   const [customers, setCustomers] = useState([]);
@@ -125,7 +127,9 @@ export default function POSHome() {
     }
 
     const pPrice = parseFloat(product.price || 0);
-    if (pPrice === 0) {
+    // Als prijs exact 0 is (en niet gedefinieerd als vast bedrag), open open bedrag pop-up. 
+    // Je kunt 0 euro artikelen ook direct toevoegen of via open bedrag op 0 zetten.
+    if (product.price === '' || product.price === null || (pPrice === 0 && !product.is_fixed_zero)) {
       setOpenAmountProduct(product);
       setCustomPriceInput('');
       return;
@@ -136,14 +140,38 @@ export default function POSHome() {
 
   const handleConfirmOpenAmount = () => {
     const enteredPrice = parseFloat(customPriceInput);
-    if (isNaN(enteredPrice) || enteredPrice <= 0) {
-      alert('Voer een geldig bedrag in.');
+    if (isNaN(enteredPrice) || enteredPrice < 0) {
+      alert('Voer een geldig bedrag in (0 of hoger).');
       return;
     }
 
     addToCart(openAmountProduct, enteredPrice);
     setOpenAmountProduct(null);
     setCustomPriceInput('');
+  };
+
+  const handleAddCustomItem = () => {
+    if (!customItem.name || customItem.price === '') {
+      alert('Vul aub een naam en bedrag in.');
+      return;
+    }
+    const price = parseFloat(customItem.price);
+    if (isNaN(price) || price < 0) {
+      alert('Voer een geldig bedrag in.');
+      return;
+    }
+
+    addToCartCustom({
+      id: `custom_${Date.now()}`,
+      product_id: 0,
+      variation_id: 0,
+      name: customItem.name,
+      price: price,
+      quantity: 1
+    });
+
+    setCustomItem({ name: '', price: '' });
+    setShowCustomModal(false);
   };
 
   const handleSelectVariation = (variation) => {
@@ -403,14 +431,20 @@ export default function POSHome() {
         {/* Producten & Categorieën Catalogus */}
         <div className="w-full md:w-3/5 flex flex-col bg-white rounded-lg shadow p-4">
           
-          <div className="mb-3">
+          <div className="flex space-x-2 mb-3">
             <input
               type="text"
               placeholder="Zoek producten op naam..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full p-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-black text-sm"
+              className="flex-1 p-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-black text-sm"
             />
+            <button
+              onClick={() => setShowCustomModal(true)}
+              className="bg-black hover:bg-gray-800 text-white font-bold px-3 py-2 rounded text-xs whitespace-nowrap transition"
+            >
+              + Custom Artikel
+            </button>
           </div>
 
           {/* Categorie Tegels */}
@@ -483,7 +517,7 @@ export default function POSHome() {
                       {getProductCategory(product)}
                     </span>
                     <span className="font-bold text-sm text-red-600">
-                      {isPriceZero ? 'Open Bedrag' : `€${parseFloat(product.price || 0).toFixed(2)}`}
+                      {isPriceZero ? '€0.00 / Open' : `€${parseFloat(product.price || 0).toFixed(2)}`}
                     </span>
                   </div>
                 </div>
@@ -673,7 +707,44 @@ export default function POSHome() {
         </div>
       )}
 
-      {/* MODAL 2: VARIATIES */}
+      {/* MODAL 2: CUSTOM ARTIKEL */}
+      {showCustomModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-sm w-full p-6">
+            <h3 className="text-lg font-bold mb-4">Custom Artikel Toevoegen</h3>
+            <div className="space-y-3 mb-4">
+              <div>
+                <label className="text-xs font-bold text-gray-600 block mb-1">Artikelnaam</label>
+                <input
+                  type="text"
+                  placeholder="Bijv. Handmatige service"
+                  value={customItem.name}
+                  onChange={(e) => setCustomItem({...customItem, name: e.target.value})}
+                  className="w-full p-2 border rounded text-sm"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-gray-600 block mb-1">Bedrag (€)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  placeholder="0.00"
+                  value={customItem.price}
+                  onChange={(e) => setCustomItem({...customItem, price: e.target.value})}
+                  className="w-full p-2 border rounded text-sm"
+                />
+              </div>
+            </div>
+            <div className="flex space-x-2">
+              <button onClick={() => setShowCustomModal(false)} className="w-1/2 bg-gray-200 py-2 rounded text-xs font-bold">Annuleren</button>
+              <button onClick={handleAddCustomItem} className="w-1/2 bg-red-600 text-white py-2 rounded text-xs font-bold">Toevoegen</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 3: VARIATIES */}
       {selectedProductForVariations && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
@@ -707,7 +778,7 @@ export default function POSHome() {
         </div>
       )}
 
-      {/* MODAL 3: BETAALMETHODE & WISSELGELD */}
+      {/* MODAL 4: BETAALMETHODE & WISSELGELD */}
       {showPaymentModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">

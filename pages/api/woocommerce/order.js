@@ -36,7 +36,11 @@ export default async function handler(req, res) {
       line_items: orderItems.map(item => ({
         product_id: item.product_id || item.id,
         variation_id: item.variation_id || 0,
-        quantity: item.quantity || 1
+        quantity: item.quantity || 1,
+        // Dwing de ingevoerde kassa/open prijs af in WooCommerce
+        price: String(item.price),
+        subtotal: String(parseFloat(item.price) * item.quantity),
+        total: String(parseFloat(item.price) * item.quantity)
       })),
       fee_lines: feeLines,
       meta_data: [
@@ -49,7 +53,6 @@ export default async function handler(req, res) {
     const response = await api.post("orders", orderData);
     const createdOrder = response.data;
 
-    // Punten synchronisatie met WooCommerce
     if (customerId > 0) {
       try {
         const customerRes = await api.get(`customers/${customerId}`);
@@ -57,7 +60,6 @@ export default async function handler(req, res) {
         const pointsMeta = customer.meta_data.find(meta => meta.key === 'wc_points_balance');
         let currentPoints = pointsMeta ? parseInt(pointsMeta.value) : 0;
 
-        // Inwisselen aftrekken & sparen optellen (1 euro = 1 punt)
         let pointsBalance = currentPoints - (totals.pointsUsed || 0);
         if (pointsBalance < 0) pointsBalance = 0;
 

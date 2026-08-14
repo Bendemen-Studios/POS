@@ -34,7 +34,6 @@ export default async function handler(req, res) {
       { key: '_pos_receipt_required', value: 'no' }
     ];
 
-    // Sla contant- en wisselgeldgegevens op in metadata indien contant
     if (paymentMethod === 'cash' && cashDetails) {
       metaData.push({ key: '_pos_cash_given', value: cashDetails.cashGiven });
       metaData.push({ key: '_pos_change_due', value: cashDetails.changeDue });
@@ -49,7 +48,11 @@ export default async function handler(req, res) {
       line_items: orderItems.map(item => ({
         product_id: item.product_id || item.id,
         variation_id: item.variation_id || 0,
-        quantity: item.quantity || 1
+        quantity: item.quantity || 1,
+        // Dwing de ingevoerde kassa/open prijs af in WooCommerce
+        price: String(item.price),
+        subtotal: String(parseFloat(item.price) * item.quantity),
+        total: String(parseFloat(item.price) * item.quantity)
       })),
       fee_lines: feeLines,
       meta_data: metaData
@@ -57,7 +60,7 @@ export default async function handler(req, res) {
 
     const response = await api.post("orders", orderData);
     const createdOrder = response.data;
-    // Punten bijwerken op WooCommerce
+
     if (customerId > 0) {
       try {
         const customerRes = await api.get(`customers/${customerId}`);
