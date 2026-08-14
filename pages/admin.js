@@ -586,6 +586,31 @@ export default function AdminDashboard() {
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <form onSubmit={handleUpdateUser} className="bg-white rounded-lg p-6 max-w-sm w-full space-y-3 shadow-2xl">
             <h3 className="text-md font-bold mb-2">Medewerker Bewerken: {editingUser.username}</h3>
+            
+            <div>
+              <label className="text-xs font-bold text-gray-600 block mb-1">Gebruikersnaam</label>
+              <input 
+                type="text" 
+                value={editingUser.username} 
+                onChange={(e) => setEditingUser({...editingUser, username: e.target.value})}
+                className="w-full p-2 border rounded text-xs"
+                required
+              />
+            </div>
+
+            {editingUser.username.toLowerCase() !== 'bendemen' && (
+              <div>
+                <label className="text-xs font-bold text-gray-600 block mb-1">Nieuw Wachtwoord (leeg laten om niet te wijzigen)</label>
+                <input 
+                  type="password" 
+                  placeholder="Nieuw wachtwoord"
+                  value={editingUser.password || ''}
+                  onChange={(e) => setEditingUser({...editingUser, password: e.target.value})}
+                  className="w-full p-2 border rounded text-xs"
+                />
+              </div>
+            )}
+
             <div>
               <label className="text-xs font-bold text-gray-600 block mb-1">Rol</label>
               <select
@@ -598,6 +623,7 @@ export default function AdminDashboard() {
                 <option value="super_admin">Super Admin</option>
               </select>
             </div>
+
             <div>
               <label className="text-xs font-bold text-gray-600 block mb-1">Koppel Filiaal</label>
               <select
@@ -611,6 +637,7 @@ export default function AdminDashboard() {
                 ))}
               </select>
             </div>
+
             <div className="flex space-x-2 pt-2">
               <button type="button" onClick={() => setEditingUser(null)} className="w-1/2 bg-gray-200 p-2 rounded text-xs font-bold">Annuleren</button>
               <button type="submit" className="w-1/2 bg-red-600 text-white p-2 rounded text-xs font-bold">Opslaan</button>
