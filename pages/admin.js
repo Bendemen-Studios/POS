@@ -9,31 +9,32 @@ const fetcher = (url) => axios.get(url).then((res) => res.data);
 export default function AdminDashboard() {
   const router = useRouter();
   const [user, setUser] = useState(null);
-  const [activeTab, setActiveTab] = useState('store'); // 'store', 'users', 'sumup', 'orders', 'products'
+  const [activeTab, setActiveTab] = useState('stores'); // 'stores', 'users', 'sumup', 'orders', 'products'
 
-  // Winkelbeheer DB State
-  const [storeId, setStoreId] = useState(null);
-  const [storeName, setStoreName] = useState('');
-  const [storeAddress, setStoreAddress] = useState('');
-  const [registerStatus, setRegisterStatus] = useState('open');
-  const [receiptHeader, setReceiptHeader] = useState('');
-  const [receiptFooter, setReceiptFooter] = useState('');
-  const [storeStatusMsg, setStoreStatusMsg] = useState('');
+  // Locaties / Winkels State
+  const [stores, setStores] = useState([]);
+  const [editingStore, setEditingStore] = useState(null);
+  const [showAddStoreModal, setShowAddStoreModal] = useState(false);
+  const [newStoreData, setNewStoreData] = useState({ store_name: '', address: '', receipt_header: '', receipt_footer: '' });
 
-  // SumUp State
+  // Personeel State
+  const [showAddUserModal, setShowAddUserModal] = useState(false);
+  const [newUserData, setNewUserData] = useState({ username: '', password: '', role: 'cashier', store_id: '' });
+
+  // SumUp per Locatie State
+  const [selectedStoreForSumup, setSelectedStoreForSumup] = useState('');
   const [pairingCode, setPairingCode] = useState('');
   const [isPairingSumup, setIsPairingSumup] = useState(false);
 
-  // WooCommerce Live Data
+  // SWR Data Fetching
+  const { data: usersData, mutate: mutateUsers } = useSWR('/api/admin/users', fetcher);
+  const usersList = usersData?.users || [];
+
   const { data: productsData, mutate: mutateProducts } = useSWR('/api/woocommerce/products', fetcher);
   const products = productsData?.products || [];
 
   const { data: ordersData, mutate: mutateOrders } = useSWR('/api/woocommerce/orders', fetcher, { refreshInterval: 10000 });
   const orders = ordersData?.orders || [];
-
-  // Gebruikers DB
-  const { data: usersData, mutate: mutateUsers } = useSWR('/api/admin/users', fetcher);
-  const usersList = Array.isArray(usersData) ? usersData : (usersData?.users || []);
 
   useEffect(() => {
     const userStr = localStorage.getItem('pos_user');
@@ -44,83 +45,124 @@ export default function AdminDashboard() {
 
     try {
       const parsedUser = JSON.parse(userStr);
-      // Accepteer super_admin en admin
       if (parsedUser.role !== 'admin' && parsedUser.role !== 'super_admin') {
         alert('Geen toegang tot het Admin Panel.');
         router.push('/');
         return;
       }
       setUser(parsedUser);
-      fetchStoreSettings();
+      fetchStores();
     } catch (e) {
       router.push('/login');
     }
   }, []);
 
-  const fetchStoreSettings = async () => {
+  const fetchStores = async () => {
     try {
       const res = await fetch('/api/admin/store');
       const data = await res.json();
-      if (data.success && data.store) {
-        setStoreId(data.store.id || null);
-        setStoreName(data.store.store_name || '');
-        setStoreAddress(data.store.address || '');
-        setRegisterStatus(data.store.register_status || 'open');
-        setReceiptHeader(data.store.receipt_header || '');
-        setReceiptFooter(data.store.receipt_footer || '');
+      if (data.success) {
+        const storeArray = Array.isArray(data.stores) ? data.stores : (data.store ? [data.store] : []);
+        setStores(storeArray);
+        if (storeArray.length > 0) setSelectedStoreForSumup(storeArray[0].id.toString());
       }
     } catch (err) {
-      console.error('Fout bij laden winkelbeheer:', err);
+      console.error('Fout bij ophalen winkels:', err);
     }
   };
 
+  // --- LOCATIE ACTIES ---
   const handleSaveStore = async (e) => {
     e.preventDefault();
-    setStoreStatusMsg('Opslaan...');
-
     try {
       const res = await fetch('/api/admin/store', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: storeId,
-          store_name: storeName,
-          address: storeAddress,
-          register_status: registerStatus,
-          receipt_header: receiptHeader,
-          receipt_footer: receiptFooter
-        }),
+        body: JSON.stringify(editingStore || newStoreData),
       });
       const data = await res.json();
       if (data.success) {
-        setStoreStatusMsg('Winkelinstellingen opgeslagen!');
-        fetchStoreSettings();
-        setTimeout(() => setStoreStatusMsg(''), 3000);
+        alert('Winkel succesvol opgeslagen!');
+        setEditingStore(null);
+        setShowAddStoreModal(false);
+        setNewStoreData({ store_name: '', address: '', receipt_header: '', receipt_footer: '' });
+        fetchStores();
       }
     } catch (err) {
-      setStoreStatusMsg('Fout bij opslaan.');
+      alert('Fout bij opslaan winkel.');
     }
   };
 
+  const handleDeleteStore = async (id) => {
+    if (!confirm('Weet je zeker dat je deze locatie wilt verwijderen?')) return;
+    try {
+      await fetch(`/api/admin/store?id=${id}`, { method: 'DELETE' });
+      fetchStores();
+    } catch (err) {
+      alert('Fout bij verwijderen locatie.');
+    }
+  };
+
+  // --- PERSONEEL ACTIES ---
+  const handleAddUser = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newUserData),
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert('Medewerker aangemaakt!');
+        setShowAddUserModal(false);
+        setNewUserData({ username: '', password: '', role: 'cashier', store_id: '' });
+        mutateUsers();
+      } else {
+        alert(data.message || 'Fout bij aanmaken.');
+      }
+    } catch (err) {
+      alert('Fout bij aanmaken medewerker.');
+    }
+  };
+
+  const handleDeleteUser = async (id) => {
+    if (!confirm('Weet je zeker dat je deze medewerker wilt verwijderen uit de kassa?')) return;
+    try {
+      const res = await fetch(`/api/admin/users?id=${id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) {
+        mutateUsers();
+      } else {
+        alert(data.message || 'Fout bij verwijderen.');
+      }
+    } catch (err) {
+      alert('Fout bij verwijderen medewerker.');
+    }
+  };
+
+  // --- SUMUP PER LOCATIE ---
   const handlePairSumup = async () => {
-    if (!pairingCode) return alert('Voer de koppelcode in.');
+    if (!pairingCode) return alert('Voer de pairing code in.');
+
+    const targetStore = stores.find(s => s.id === parseInt(selectedStoreForSumup));
 
     try {
       setIsPairingSumup(true);
       const res = await axios.post('/api/sumup/pair', {
-        storeId: storeId || 1,
+        storeId: selectedStoreForSumup,
         pairingCode: pairingCode.trim(),
-        readerName: `BDM POS - ${storeName || 'Hoofdvestiging'}`
+        readerName: `BDM POS - ${targetStore?.store_name || 'Locatie'}`
       });
 
       if (res.data.success) {
-        alert('SumUp terminal succesvol gekoppeld!');
+        alert(`SumUp Terminal gekoppeld aan locatie ${targetStore?.store_name || ''}!`);
         setPairingCode('');
       } else {
         alert('Koppelen mislukt: ' + res.data.error);
       }
     } catch (err) {
-      alert('Fout bij koppelen: ' + (err.response?.data?.error || err.message));
+      alert('Fout bij koppelen SumUp: ' + (err.response?.data?.error || err.message));
     } finally {
       setIsPairingSumup(false);
     }
@@ -143,12 +185,12 @@ export default function AdminDashboard() {
         </Link>
       </header>
 
-      {/* Tabs Menu */}
+      {/* Navigation Tabs */}
       <div className="bg-white border-b px-6 py-2 flex space-x-2 overflow-x-auto">
         {[
-          { id: 'store', label: '🏪 Winkelbeheer (DB)' },
-          { id: 'users', label: '👥 Gebruikers & Personeel' },
-          { id: 'sumup', label: '💳 SumUp Koppelen' },
+          { id: 'stores', label: '🏪 Locaties & Filialen' },
+          { id: 'users', label: '👥 Personeel & Toegang' },
+          { id: 'sumup', label: '💳 SumUp per Locatie' },
           { id: 'orders', label: '📊 Bestellingen Live' },
           { id: 'products', label: '📦 Voorraad' }
         ].map(tab => (
@@ -162,127 +204,155 @@ export default function AdminDashboard() {
         ))}
       </div>
 
-      {/* Main Tab Content */}
+      {/* Main Content */}
       <div className="p-6 max-w-6xl mx-auto w-full">
-        
-        {/* TAB 1: WINKELBEHEER */}
-        {activeTab === 'store' && (
-          <div className="bg-white p-6 rounded-lg shadow">
-            <h2 className="text-lg font-bold mb-4">🏪 Filiaal & Kassaregister Instellingen</h2>
-            <form onSubmit={handleSaveStore} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="text-xs font-bold text-gray-600 block mb-1">Winkelnaam / Filiaal</label>
-                <input
-                  type="text"
-                  value={storeName}
-                  onChange={(e) => setStoreName(e.target.value)}
-                  placeholder="Bijv. Ons Winkeltje"
-                  className="w-full p-2 border rounded text-sm"
-                  required
-                />
-              </div>
 
-              <div>
-                <label className="text-xs font-bold text-gray-600 block mb-1">Adres / Locatie</label>
-                <input
-                  type="text"
-                  value={storeAddress}
-                  onChange={(e) => setStoreAddress(e.target.value)}
-                  placeholder="Bijv. Centrum Hellevoetsluis"
-                  className="w-full p-2 border rounded text-sm"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs font-bold text-gray-600 block mb-1">Kassaregister Status</label>
-                <select
-                  value={registerStatus}
-                  onChange={(e) => setRegisterStatus(e.target.value)}
-                  className="w-full p-2 border rounded text-sm"
-                >
-                  <option value="open">🟢 Register Geopend</option>
-                  <option value="closed">🔴 Register Gesloten</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="text-xs font-bold text-gray-600 block mb-1">Kassabon Header</label>
-                <input
-                  type="text"
-                  value={receiptHeader}
-                  onChange={(e) => setReceiptHeader(e.target.value)}
-                  className="w-full p-2 border rounded text-sm"
-                />
-              </div>
-
-              <div className="md:col-span-2">
-                <label className="text-xs font-bold text-gray-600 block mb-1">Kassabon Footer</label>
-                <input
-                  type="text"
-                  value={receiptFooter}
-                  onChange={(e) => setReceiptFooter(e.target.value)}
-                  className="w-full p-2 border rounded text-sm"
-                />
-              </div>
-
-              <div className="md:col-span-2 flex items-center justify-between mt-2">
-                <button
-                  type="submit"
-                  className="bg-red-600 hover:bg-red-700 text-white font-bold px-6 py-2 rounded text-sm transition"
-                >
-                  Opslaan in Database
-                </button>
-                {storeStatusMsg && <span className="text-xs font-bold text-green-600">{storeStatusMsg}</span>}
-              </div>
-            </form>
-          </div>
-        )}
-
-        {/* TAB 2: GEBRUIKERS & PERSONEEL */}
-        {activeTab === 'users' && (
-          <div className="bg-white p-6 rounded-lg shadow">
-            <h2 className="text-lg font-bold mb-4">👥 Actieve Kassa Gebruikers (MySQL)</h2>
-            <div className="divide-y max-h-96 overflow-y-auto">
-              {usersList.map((u) => (
-                <div key={u.id} className="py-3 flex justify-between items-center text-sm">
-                  <div>
-                    <span className="font-bold block">{u.username}</span>
-                    <span className="text-xs text-gray-500">{u.email || 'Geen e-mail'}</span>
-                  </div>
-                  <span className="bg-gray-100 text-gray-800 text-xs px-2 py-1 rounded font-bold uppercase">
-                    {u.role || 'cashier'}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* TAB 3: SUMUP PAIRING */}
-        {activeTab === 'sumup' && (
-          <div className="bg-white p-6 rounded-lg shadow max-w-lg">
-            <h2 className="text-lg font-bold mb-2">💳 SumUp Terminal Koppelen</h2>
-            <p className="text-xs text-gray-600 mb-4">Voer de pairing code in die op het scherm van de SumUp Solo staat.</p>
-            <div className="space-y-3">
-              <input
-                type="text"
-                placeholder="Pairing Code (bijv. 8 tekens)"
-                value={pairingCode}
-                onChange={(e) => setPairingCode(e.target.value)}
-                className="w-full p-2 border-2 border-black rounded font-mono font-bold text-lg"
-              />
+        {/* TAB 1: LOCATIES BEHEREN */}
+        {activeTab === 'stores' && (
+          <div className="bg-white p-6 rounded-lg shadow space-y-4">
+            <div className="flex justify-between items-center mb-2">
+              <h2 className="text-lg font-bold">🏪 Winkel & Filiaal Locaties</h2>
               <button
-                onClick={handlePairSumup}
-                disabled={isPairingSumup}
-                className="w-full bg-black text-white font-bold py-2 rounded text-sm hover:bg-gray-800 transition"
+                onClick={() => setShowAddStoreModal(true)}
+                className="bg-red-600 hover:bg-red-700 text-white font-bold px-4 py-2 rounded text-xs transition"
               >
-                {isPairingSumup ? 'Koppelen...' : '🔗 Koppel Terminal'}
+                + Nieuwe Locatie Toevoegen
               </button>
             </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs divide-y">
+                <thead>
+                  <tr className="bg-gray-50">
+                    <th className="p-3">Locatienaam</th>
+                    <th className="p-3">Adres</th>
+                    <th className="p-3">Kassabon Header</th>
+                    <th className="p-3 text-right">Acties</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {stores.length === 0 ? (
+                    <tr><td colSpan="4" className="p-4 text-center text-gray-500">Geen locaties gevonden in database.</td></tr>
+                  ) : (
+                    stores.map((s) => (
+                      <tr key={s.id}>
+                        <td className="p-3 font-bold">{s.store_name}</td>
+                        <td className="p-3 text-gray-600">{s.address || '—'}</td>
+                        <td className="p-3 text-gray-600">{s.receipt_header || '—'}</td>
+                        <td className="p-3 text-right space-x-2">
+                          <button
+                            onClick={() => setEditingStore(s)}
+                            className="bg-gray-100 hover:bg-gray-200 text-black font-bold px-3 py-1 rounded text-xs"
+                          >
+                            ✏️ Bewerken
+                          </button>
+                          <button
+                            onClick={() => handleDeleteStore(s.id)}
+                            className="bg-red-100 hover:bg-red-200 text-red-700 font-bold px-3 py-1 rounded text-xs"
+                          >
+                            🗑️ Verwijderen
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 
-        {/* TAB 4: BESTELLINGEN LIVE */}
+        {/* TAB 2: PERSONEEL BEHEREN + LOCATIE TOEWIJZEN */}
+        {activeTab === 'users' && (
+          <div className="bg-white p-6 rounded-lg shadow space-y-4">
+            <div className="flex justify-between items-center mb-2">
+              <h2 className="text-lg font-bold">👥 Personeel & Gebruikersbeheer</h2>
+              <button
+                onClick={() => setShowAddUserModal(true)}
+                className="bg-black hover:bg-gray-800 text-white font-bold px-4 py-2 rounded text-xs transition"
+              >
+                + Medewerker Toevoegen
+              </button>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs divide-y">
+                <thead>
+                  <tr className="bg-gray-50">
+                    <th className="p-3">Gebruikersnaam</th>
+                    <th className="p-3">Rol</th>
+                    <th className="p-3">Toegewezen Locatie</th>
+                    <th className="p-3 text-right">Acties</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {usersList.map((u) => {
+                    const assignedStore = stores.find(s => s.id === u.store_id);
+                    return (
+                      <tr key={u.id}>
+                        <td className="p-3 font-bold">{u.username}</td>
+                        <td className="p-3 uppercase text-gray-500 font-semibold">{u.role}</td>
+                        <td className="p-3 font-semibold text-red-600">
+                          {assignedStore ? `📍 ${assignedStore.store_name}` : 'Alle Locaties'}
+                        </td>
+                        <td className="p-3 text-right">
+                          <button
+                            onClick={() => handleDeleteUser(u.id)}
+                            className="bg-red-100 hover:bg-red-200 text-red-700 font-bold px-3 py-1 rounded text-xs"
+                          >
+                            🗑️ Verwijderen
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 3: SUMUP PER LOCATIE */}
+        {activeTab === 'sumup' && (
+          <div className="bg-white p-6 rounded-lg shadow max-w-lg space-y-4">
+            <h2 className="text-lg font-bold">💳 SumUp Terminal Koppelen per Locatie</h2>
+            <p className="text-xs text-gray-600">Koppel een specifieke SumUp Solo kaartlezer aan een gekozen vestiging.</p>
+            
+            <div>
+              <label className="text-xs font-bold text-gray-600 block mb-1">Selecteer Locatie</label>
+              <select
+                value={selectedStoreForSumup}
+                onChange={(e) => setSelectedStoreForSumup(e.target.value)}
+                className="w-full p-2 border rounded text-sm font-bold"
+              >
+                {stores.map(s => (
+                  <option key={s.id} value={s.id}>{s.store_name} ({s.address || 'Geen adres'})</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-gray-600 block mb-1">SumUp Pairing Code</label>
+              <input
+                type="text"
+                placeholder="Voer koppelcode in"
+                value={pairingCode}
+                onChange={(e) => setPairingCode(e.target.value)}
+                className="w-full p-2 border-2 border-black rounded text-base font-mono font-bold"
+              />
+            </div>
+
+            <button
+              onClick={handlePairSumup}
+              disabled={isPairingSumup}
+              className="w-full bg-black text-white font-bold py-2 rounded text-sm hover:bg-gray-800 transition"
+            >
+              {isPairingSumup ? 'Koppelen...' : '🔗 Koppel Terminal aan Locatie'}
+            </button>
+          </div>
+        )}
+
+        {/* TAB 4 & 5: LIVE ORDERS & VOORRAAD */}
         {activeTab === 'orders' && (
           <div className="bg-white p-6 rounded-lg shadow">
             <div className="flex justify-between items-center mb-4">
@@ -316,7 +386,6 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* TAB 5: VOORRAAD */}
         {activeTab === 'products' && (
           <div className="bg-white p-6 rounded-lg shadow">
             <div className="flex justify-between items-center mb-4">
@@ -349,6 +418,123 @@ export default function AdminDashboard() {
         )}
 
       </div>
+
+      {/* POP-UP MODAL: LOCATIE AANMAKEN / BEWERKEN */}
+      {(showAddStoreModal || editingStore) && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full">
+            <h3 className="text-lg font-bold mb-4">{editingStore ? 'Locatie Bewerken' : 'Nieuwe Locatie Toevoegen'}</h3>
+            <form onSubmit={handleSaveStore} className="space-y-3">
+              <div>
+                <label className="text-xs font-bold text-gray-600 block mb-1">Locatienaam / Winkelnaam</label>
+                <input
+                  type="text"
+                  value={editingStore ? editingStore.store_name : newStoreData.store_name}
+                  onChange={(e) => editingStore ? setEditingStore({ ...editingStore, store_name: e.target.value }) : setNewStoreData({ ...newStoreData, store_name: e.target.value })}
+                  placeholder="Bijv. Ons Winkeltje"
+                  className="w-full p-2 border rounded text-sm"
+                  required
+                />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-gray-600 block mb-1">Adres</label>
+                <input
+                  type="text"
+                  value={editingStore ? editingStore.address : newStoreData.address}
+                  onChange={(e) => editingStore ? setEditingStore({ ...editingStore, address: e.target.value }) : setNewStoreData({ ...newStoreData, address: e.target.value })}
+                  placeholder="Bijv. Centrum Hellevoetsluis"
+                  className="w-full p-2 border rounded text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-gray-600 block mb-1">Kassabon Header</label>
+                <input
+                  type="text"
+                  value={editingStore ? editingStore.receipt_header : newStoreData.receipt_header}
+                  onChange={(e) => editingStore ? setEditingStore({ ...editingStore, receipt_header: e.target.value }) : setNewStoreData({ ...newStoreData, receipt_header: e.target.value })}
+                  className="w-full p-2 border rounded text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-gray-600 block mb-1">Kassabon Footer</label>
+                <input
+                  type="text"
+                  value={editingStore ? editingStore.receipt_footer : newStoreData.receipt_footer}
+                  onChange={(e) => editingStore ? setEditingStore({ ...editingStore, receipt_footer: e.target.value }) : setNewStoreData({ ...newStoreData, receipt_footer: e.target.value })}
+                  className="w-full p-2 border rounded text-sm"
+                />
+              </div>
+
+              <div className="flex space-x-2 pt-2">
+                <button type="button" onClick={() => { setEditingStore(null); setShowAddStoreModal(false); }} className="w-1/2 bg-gray-200 p-2 rounded text-xs font-bold">Annuleren</button>
+                <button type="submit" className="w-1/2 bg-red-600 text-white p-2 rounded text-xs font-bold">Opslaan</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* POP-UP MODAL: MEDEWERKER TOEVOEGEN + LOCATIE TOEWIJZEN */}
+      {showAddUserModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full">
+            <h3 className="text-lg font-bold mb-4">Nieuwe Medewerker Toevoegen</h3>
+            <form onSubmit={handleAddUser} className="space-y-3">
+              <div>
+                <label className="text-xs font-bold text-gray-600 block mb-1">Gebruikersnaam</label>
+                <input
+                  type="text"
+                  value={newUserData.username}
+                  onChange={(e) => setNewUserData({ ...newUserData, username: e.target.value })}
+                  className="w-full p-2 border rounded text-sm"
+                  required
+                />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-gray-600 block mb-1">Wachtwoord</label>
+                <input
+                  type="password"
+                  value={newUserData.password}
+                  onChange={(e) => setNewUserData({ ...newUserData, password: e.target.value })}
+                  className="w-full p-2 border rounded text-sm"
+                  required
+                />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-gray-600 block mb-1">Rol</label>
+                <select
+                  value={newUserData.role}
+                  onChange={(e) => setNewUserData({ ...newUserData, role: e.target.value })}
+                  className="w-full p-2 border rounded text-sm"
+                >
+                  <option value="cashier">Caissière (Kassa Only)</option>
+                  <option value="admin">Admin</option>
+                  <option value="super_admin">Super Admin</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-gray-600 block mb-1">Winkellocatie Toewijzen</label>
+                <select
+                  value={newUserData.store_id}
+                  onChange={(e) => setNewUserData({ ...newUserData, store_id: e.target.value })}
+                  className="w-full p-2 border rounded text-sm font-semibold"
+                >
+                  <option value="">Alle Locaties (Geen Beperking)</option>
+                  {stores.map(s => (
+                    <option key={s.id} value={s.id}>📍 {s.store_name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex space-x-2 pt-2">
+                <button type="button" onClick={() => setShowAddUserModal(false)} className="w-1/2 bg-gray-200 p-2 rounded text-xs font-bold">Annuleren</button>
+                <button type="submit" className="w-1/2 bg-black text-white p-2 rounded text-xs font-bold">Toevoegen</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
