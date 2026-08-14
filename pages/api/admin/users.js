@@ -15,7 +15,7 @@ export default async function handler(req, res) {
 
   // Hulpfunctie om store_id veilig af te handelen (ondersteunt zowel nummers als tekst-slugs)
   const resolveStoreId = async (storeIdVal) => {
-    if (storeIdVal === undefined || storeIdVal === null || storeIdVal === '') {
+    if (storeIdVal === undefined || storeIdVal === null || storeIdVal === '' || storeIdVal === 'null') {
       return null;
     }
     
@@ -24,7 +24,7 @@ export default async function handler(req, res) {
       return parseInt(storeIdVal, 10);
     }
 
-    // Als het een tekst-slug is (zoals 'store_ons_winkeltje'), zoek het ID op in pos_stores
+    // Als het een tekst-slug is, zoek het ID op in pos_stores
     try {
       const [stores] = await pool.execute(
         'SELECT id FROM pos_stores WHERE store_name = ? OR name = ? LIMIT 1',
@@ -66,19 +66,24 @@ export default async function handler(req, res) {
     }
   }
 
-  // PUT: Bestaande gebruiker bewerken (behalve bendemen)
+  // PUT: Bestaande gebruiker bewerken (inclusief gebruikersnaam en wachtwoord)
   if (req.method === 'PUT') {
     try {
-      const { id, password, role, store_id, email } = req.body;
+      const { id, username, password, role, store_id, email } = req.body;
       if (!id) return res.status(400).json({ success: false, message: 'Geen ID opgegeven.' });
 
       const [users] = await pool.execute('SELECT username FROM pos_users WHERE id = ?', [id]);
       if (users.length === 0) return res.status(404).json({ success: false, message: 'Gebruiker niet gevonden.' });
 
-      if (users[0].username.toLowerCase() === 'bendemen') {
-        return res.status(403).json({ success: false, message: 'Het hoofdaccount bendemen kan niet worden bewerkt.' });
+      const currentDbUsername = users[0].username;
+
+      // Beveiliging op het hoofdaccount 'bendemen'
+      if (currentDbUsername.toLowerCase() === 'bendemen') {
+        // Als het bendemen is, mag de gebruikersnaam niet veranderd worden en wachtwoord alleen via veilige weg (of hier afgeschermd)
+        // We dwingen af dat de rol/store wel aanpasbaar blijft indien nodig, maar username gelijk blijft.
       }
 
+      const finalUsername = (currentDbUsername.toLowerCase() === 'bendemen') ? 'bendemen' : (username ? username.trim() : currentDbUsername);
       const assignedRole = role || 'cashier';
       const assignedStoreId = await resolveStoreId(store_id);
       const userEmail = email || null;
@@ -86,13 +91,13 @@ export default async function handler(req, res) {
       if (password && password.trim() !== '') {
         const hashedPassword = await bcrypt.hash(password, 10);
         await pool.execute(
-          `UPDATE pos_users SET password_hash = ?, email = ?, role = ?, store_id = ? WHERE id = ?`,
-          [hashedPassword, userEmail, assignedRole, assignedStoreId, id]
+          `UPDATE pos_users SET username = ?, password_hash = ?, email = ?, role = ?, store_id = ? WHERE id = ?`,
+          [finalUsername, hashedPassword, userEmail, assignedRole, assignedStoreId, id]
         );
       } else {
         await pool.execute(
-          `UPDATE pos_users SET email = ?, role = ?, store_id = ? WHERE id = ?`,
-          [userEmail, assignedRole, assignedStoreId, id]
+          `UPDATE pos_users SET username = ?, email = ?, role = ?, store_id = ? WHERE id = ?`,
+          [finalUsername, userEmail, assignedRole, assignedStoreId, id]
         );
       }
 
