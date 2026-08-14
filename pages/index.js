@@ -49,15 +49,22 @@ export default function CashRegister() {
 
     try {
       const rawUser = localStorage.getItem('pos_user');
-      if (rawUser && rawUser !== 'undefined') setUser(JSON.parse(rawUser));
-    } catch (e) { console.error('Fout bij parsen pos_user:', e); }
+      if (rawUser && rawUser !== 'undefined') {
+        setUser(JSON.parse(rawUser));
+      } else {
+        router.push('/login');
+      }
+    } catch (e) { 
+      console.error('Fout bij parsen pos_user:', e); 
+      router.push('/login');
+    }
 
     try {
       const rawStore = localStorage.getItem('selectedStore');
       if (rawStore && rawStore !== 'undefined') setStore(JSON.parse(rawStore));
     } catch (e) { console.error('Fout bij parsen selectedStore:', e); }
 
-    // Luister naar netwerk status voor offline sync
+    // Luister naar netwerk status voor offline mode / sync
     const handleOnline = () => {
       setIsOfflineMode(false);
       syncOfflineOrders();
@@ -71,12 +78,21 @@ export default function CashRegister() {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, []);
+  }, [router]);
 
   if (!mounted) return null;
 
   const isAdminOrManager = user?.role === 'administrator' || user?.role === 'manager' || user?.role === 'shop_manager';
   const categories = [...new Set(products.map(p => (p.categories && p.categories.length > 0) ? p.categories[0].name : 'Algemeen'))].sort();
+
+  // Loguit Functie
+  const handleLogout = () => {
+    if (confirm('Weet je zeker dat je wilt uitloggen uit de kassa?')) {
+      localStorage.removeItem('pos_user');
+      localStorage.removeItem('selectedStore');
+      router.push('/login');
+    }
+  };
 
   // Offline Sync Functie
   const syncOfflineOrders = async () => {
@@ -263,7 +279,7 @@ export default function CashRegister() {
         setSumupCancelToken(controller);
 
         try {
-          // Poging 1: Via de VPS API
+          // Poging 1: Via VPS API
           const sumupRes = await axios.post('/api/sumup/checkout', {
             totalAmount: totalPrice,
             terminalId: store?.sumupReaderId || ''
@@ -274,7 +290,7 @@ export default function CashRegister() {
             return alert('PIN betaling geweigerd of mislukt op terminal.');
           }
         } catch (vpsErr) {
-          // Poging 2: Als VPS wegvalt, direct via SumUp Cloud API vanuit browser
+          // Poging 2: Direct via SumUp Cloud API vanuit browser (als VPS offline is)
           console.warn('VPS onbereikbaar voor SumUp. Probeert directe verbinding...');
           const fallbackToken = localStorage.getItem('pos_sumup_access_token');
           const activeTerminalId = store?.sumupReaderId || localStorage.getItem('pos_fallback_terminal_id');
@@ -307,7 +323,7 @@ export default function CashRegister() {
           mutateProducts();
         }
       } catch (orderErr) {
-        // VPS is offline -> Lokaal opslaan
+        // VPS offline -> Lokaal opslaan
         const savedLocal = await saveOfflineOrder(orderPayload);
         if (confirm(`⚠️ OFFLINE MODUS\nBetaling gelukt! Order lokaal opgeslagen (${savedLocal.localId}).\n\nKassabon afdrukken?`)) {
           handlePrintReceipt(savedLocal.localId, cart, totalPrice, parsedCashGiven, changeAmount, store?.name);
@@ -372,6 +388,14 @@ export default function CashRegister() {
 
             <button onClick={() => { localStorage.removeItem('selectedStore'); router.push('/select-store'); }} style={{ padding: '8px 14px', background: '#F1F3F4', color: '#333', border: 'none', borderRadius: '6px', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}>
               Winkel Wisselen
+            </button>
+
+            {/* Loguit Knop */}
+            <button 
+              onClick={handleLogout} 
+              style={{ padding: '8px 14px', background: '#FCE8E6', color: '#C3110C', border: 'none', borderRadius: '6px', fontWeight: '700', fontSize: '13px', cursor: 'pointer' }}
+            >
+              🚪 Uitloggen
             </button>
           </div>
         </div>
