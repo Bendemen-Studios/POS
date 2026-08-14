@@ -13,7 +13,7 @@ export default async function handler(req, res) {
     }
   }
 
-  // POST: Nieuwe gebruiker aanmaken met geselecteerde rol
+  // POST: Nieuwe gebruiker aanmaken
   if (req.method === 'POST') {
     try {
       const { username, password, role, store_id } = req.body;
@@ -38,19 +38,52 @@ export default async function handler(req, res) {
     }
   }
 
-  // DELETE: Verwijder gebruiker (behalve het hoofdaccount 'bendemen')
+  // PUT: Bestaande gebruiker bewerken (behalve bendemen)
+  if (req.method === 'PUT') {
+    try {
+      const { id, password, role, store_id } = req.body;
+      if (!id) return res.status(400).json({ success: false, message: 'Geen ID opgegeven.' });
+
+      const [users] = await pool.execute('SELECT username FROM pos_users WHERE id = ?', [id]);
+      if (users.length === 0) return res.status(404).json({ success: false, message: 'Gebruiker niet gevonden.' });
+
+      if (users[0].username.toLowerCase() === 'bendemen') {
+        return res.status(403).json({ success: false, message: 'Het hoofdaccount bendemen kan niet worden bewerkt.' });
+      }
+
+      const assignedRole = role || 'cashier';
+      const assignedStoreId = store_id ? String(store_id) : null;
+
+      if (password && password.trim() !== '') {
+        const hashedPassword = await bcrypt.hash(password, 10);
+        await pool.execute(
+          `UPDATE pos_users SET password_hash = ?, role = ?, store_id = ? WHERE id = ?`,
+          [hashedPassword, assignedRole, assignedStoreId, id]
+        );
+      } else {
+        await pool.execute(
+          `UPDATE pos_users SET role = ?, store_id = ? WHERE id = ?`,
+          [assignedRole, assignedStoreId, id]
+        );
+      }
+
+      return res.status(200).json({ success: true, message: 'Gebruiker bijgewerkt!' });
+    } catch (error) {
+      console.error("Users PUT Error:", error);
+      return res.status(500).json({ success: false, error: 'Fout bij bijwerken gebruiker.' });
+    }
+  }
+
+  // DELETE: Verwijder gebruiker (behalve bendemen)
   if (req.method === 'DELETE') {
     try {
       const { id } = req.query;
       if (!id) return res.status(400).json({ success: false, message: 'Geen ID opgegeven.' });
 
       const [users] = await pool.execute('SELECT username FROM pos_users WHERE id = ?', [id]);
-      if (users.length === 0) {
-        return res.status(404).json({ success: false, message: 'Gebruiker niet gevonden.' });
-      }
+      if (users.length === 0) return res.status(404).json({ success: false, message: 'Gebruiker niet gevonden.' });
 
-      const targetUsername = users[0].username.toLowerCase();
-      if (targetUsername === 'bendemen') {
+      if (users[0].username.toLowerCase() === 'bendemen') {
         return res.status(403).json({ success: false, message: 'Het hoofdaccount bendemen kan niet worden verwijderd.' });
       }
 
@@ -62,6 +95,6 @@ export default async function handler(req, res) {
     }
   }
 
-  res.setHeader('Allow', ['GET', 'POST', 'DELETE']);
+  res.setHeader('Allow', ['GET', 'POST', 'PUT', 'DELETE']);
   return res.status(405).json({ success: false, message: `Method ${req.method} not allowed` });
 }
