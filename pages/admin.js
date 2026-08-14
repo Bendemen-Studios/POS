@@ -91,7 +91,6 @@ export default function AdminDashboard() {
         const rawProducts = data.products || [];
         setProducts(rawProducts);
 
-        // Laad asynchroon variaties indien nodig
         rawProducts.forEach(async (prod) => {
           if (prod.type === 'variable' && (!prod.variations_data || prod.variations_data.length === 0) && (!prod.variations || prod.variations.length === 0)) {
             try {
@@ -125,10 +124,14 @@ export default function AdminDashboard() {
   const handleCreateUser = async (e) => {
     e.preventDefault();
     try {
+      const payload = {
+        ...newUser,
+        store_id: newUser.store_id !== '' ? parseInt(newUser.store_id, 10) : null
+      };
       const res = await fetch('/api/admin/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newUser)
+        body: JSON.stringify(payload)
       });
       const data = await res.json();
       if (data.success) {
@@ -146,10 +149,14 @@ export default function AdminDashboard() {
   const handleUpdateUser = async (e) => {
     e.preventDefault();
     try {
+      const payload = {
+        ...editingUser,
+        store_id: editingUser.store_id !== '' && editingUser.store_id !== null ? parseInt(editingUser.store_id, 10) : null
+      };
       const res = await fetch('/api/admin/users', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editingUser)
+        body: JSON.stringify(payload)
       });
       const data = await res.json();
       if (data.success) {
@@ -347,29 +354,34 @@ export default function AdminDashboard() {
                           <th className="p-3">ID</th>
                           <th className="p-3">Gebruikersnaam</th>
                           <th className="p-3">Rol</th>
-                          <th className="p-3">Filiaal ID</th>
+                          <th className="p-3">Gekoppeld Filiaal</th>
                           <th className="p-3 text-right">Acties</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y">
-                        {users.map(u => (
-                          <tr key={u.id} className="hover:bg-gray-50">
-                            <td className="p-3">#{u.id}</td>
-                            <td className="p-3 font-bold">{u.username}</td>
-                            <td className="p-3"><span className="bg-gray-200 px-2 py-0.5 rounded uppercase font-semibold text-[10px]">{u.role}</span></td>
-                            <td className="p-3">{u.store_id || 'Geen'}</td>
-                            <td className="p-3 text-right space-x-2">
-                              <button onClick={() => setEditingUser(u)} className="text-blue-600 font-bold hover:underline">
-                                Bewerken
-                              </button>
-                              {u.username.toLowerCase() !== 'bendemen' && (
-                                <button onClick={() => handleDeleteUser(u.id, u.username)} className="text-red-600 font-bold hover:underline">
-                                  Verwijderen
+                        {users.map(u => {
+                          const matchedStore = stores.find(s => String(s.id) === String(u.store_id));
+                          return (
+                            <tr key={u.id} className="hover:bg-gray-50">
+                              <td className="p-3">#{u.id}</td>
+                              <td className="p-3 font-bold">{u.username}</td>
+                              <td className="p-3"><span className="bg-gray-200 px-2 py-0.5 rounded uppercase font-semibold text-[10px]">{u.role}</span></td>
+                              <td className="p-3">
+                                {matchedStore ? (matchedStore.store_name || matchedStore.name) : (u.store_id ? `ID: ${u.store_id}` : 'Geen')}
+                              </td>
+                              <td className="p-3 text-right space-x-2">
+                                <button onClick={() => setEditingUser(u)} className="text-blue-600 font-bold hover:underline">
+                                  Bewerken
                                 </button>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
+                                {u.username.toLowerCase() !== 'bendemen' && (
+                                  <button onClick={() => handleDeleteUser(u.id, u.username)} className="text-red-600 font-bold hover:underline">
+                                    Verwijderen
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -419,7 +431,7 @@ export default function AdminDashboard() {
                         <div>
                           <div className="font-bold text-sm text-red-600">{s.store_name || s.name}</div>
                           <div className="text-xs text-gray-500 mt-1">📍 {s.address || 'Geen adres'}</div>
-                          <div className="text-xs text-gray-400 mt-0.5">Pickup ID: {s.pickup_id || 'N.v.t.'}</div>
+                          <div className="text-xs text-gray-400 mt-0.5">ID: #{s.id} | Pickup ID: {s.pickup_id || 'N.v.t.'}</div>
                         </div>
                         <div className="mt-3 text-right">
                           <button onClick={() => setEditingStore(s)} className="text-xs bg-black text-white px-3 py-1 rounded font-bold hover:bg-gray-800">
@@ -587,13 +599,17 @@ export default function AdminDashboard() {
               </select>
             </div>
             <div>
-              <label className="text-xs font-bold text-gray-600 block mb-1">Koppel Filiaal ID</label>
-              <input
-                type="text"
+              <label className="text-xs font-bold text-gray-600 block mb-1">Koppel Filiaal</label>
+              <select
                 value={editingUser.store_id || ''}
                 onChange={(e) => setEditingUser({...editingUser, store_id: e.target.value})}
                 className="w-full p-2 border rounded text-xs"
-              />
+              >
+                <option value="">Geen Filiaal</option>
+                {stores.map(s => (
+                  <option key={s.id} value={s.id}>{s.store_name || s.name}</option>
+                ))}
+              </select>
             </div>
             <div className="flex space-x-2 pt-2">
               <button type="button" onClick={() => setEditingUser(null)} className="w-1/2 bg-gray-200 p-2 rounded text-xs font-bold">Annuleren</button>
