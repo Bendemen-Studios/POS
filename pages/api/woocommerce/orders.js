@@ -1,91 +1,109 @@
 import axios from 'axios';
+import { saveOfflineOrder } from '../../../lib/db';
+
+// WooCommerce API Credentials vanuit .env
+const WOO_URL = process.env.WOO_URL;
+const WOO_CONSUMER_KEY = process.env.WOO_CONSUMER_KEY;
+const WOO_CONSUMER_SECRET = process.env.WOO_CONSUMER_SECRET;
 
 export default async function handler(req, res) {
-  const siteUrl = process.env.WOO_SITE_URL;
-  const consumerKey = process.env.WOO_CONSUMER_KEY;
-  const consumerSecret = process.env.WOO_CONSUMER_SECRET;
-
-  if (!siteUrl || !consumerKey || !consumerSecret) {
-    return res.status(500).json({ success: false, error: 'WooCommerce API gegevens ontbreken in .env' });
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', ['POST']);
+    return res.status(405).json({ success: false, error: `Method ${req.method} not allowed` });
   }
 
-  // --- GET: Bestellingen ophalen voor het Admin Paneel ---
-  if (req.method === 'GET') {
-    try {
-      const response = await axios.get(`${siteUrl}/wp-json/wc/v3/orders`, {
-        params: {
-          per_page: 20,
-          consumer_key: consumerKey,
-          consumer_secret: consumerSecret
-        }
-      });
+  const orderPayload = req.body;
 
-      return res.status(200).json({
-        success: true,
-        orders: response.data
-      });
-    } catch (error) {
-      console.error('Fout bij ophalen WooCommerce orders:', error.response?.data || error.message);
-      return res.status(500).json({ success: false, error: 'Kon bestellingen niet ophalen.' });
-    }
+  if (!orderPayload || !orderPayload.orderItems || orderPayload.orderItems.length === 0) {
+    return res.status(400).json({ success: false, error: 'Geen producten gevonden in de bestelling.' });
   }
 
-  // --- POST: Nieuwe Kassa Bestelling Aanmaken ---
-  if (req.method === 'POST') {
-    const { orderItems, paymentMethod, storeId, cashierId, customerId, totals } = req.body;
-
-    if (!orderItems || orderItems.length === 0) {
-      return res.status(400).json({ success: false, error: 'Winkelmand is leeg.' });
-    }
-
-    try {
-      // Zet kassa items om naar WooCommerce format
-      const line_items = orderItems.map(item => ({
-        product_id: parseInt(item.id),
+  try {
+    // 1. Formatteer de bestelling voor de WooCommerce REST API
+    const lineItems = orderPayload.orderItems.map(item => {
+      const lineItem = {
+        product_id: item.id,
         quantity: item.quantity,
-        total: (parseFloat(item.price) * item.quantity).toFixed(2)
-      }));
-
-      // Bepaal betaalmethode label
-      let paymentTitle = 'Kassa - PIN (SumUp)';
-      if (paymentMethod === 'cash') paymentTitle = 'Kassa - Contant';
-      if (paymentMethod === 'pin_manual') paymentTitle = 'Kassa - PIN Handmatig';
-
-      const orderData = {
-        payment_method: paymentMethod,
-        payment_method_title: paymentTitle,
-        set_paid: true,
-        customer_id: customerId || 0,
-        line_items: line_items,
-        meta_data: [
-          { key: 'pos_store_id', value: storeId || 1 },
-          { key: 'pos_cashier_id', value: cashierId || 1 },
-          { key: 'pos_cash_given', value: totals?.cashGiven || 0 },
-          { key: 'pos_change_amount', value: totals?.changeAmount || 0 }
-        ]
+        price: item.price.toString()
       };
 
-      const response = await axios.post(`${siteUrl}/wp-json/wc/v3/orders`, orderData, {
-        params: {
-          consumer_key: consumerKey,
-          consumer_secret: consumerSecret
-        }
-      });
+      // Voeg variaties toe indien aanwezig
+      if (item.selectedAttributes) {
+        lineItem.meta_data = Object.entries(item.selectedAttributes).map(([key, value]) => ({
+          key: key,
+          value: value
+        }));
+      }
 
+      return lineItem;
+    });
+
+    // Bereken eventuele kortingen of extra's
+    const feeLines = [];
+    if (orderPayload.totals?.discountAmount > 0) {
+      feeLines.push({
+        name: 'Kassa Korting',
+        total: (-Math.abs(orderPayload.totals.discountAmount)).toFixed(2)
+      });
+    }
+
+    const wooOrderData = {
+      payment_method: orderPayload.paymentMethod === 'sumup' ? 'sumup_pin' : (orderPayload.paymentMethod === 'cash' ? 'cash' : 'manual_pin'),
+      payment_method_title: orderPayload.paymentMethod === 'sumup' ? 'SumUp PIN' : (orderPayload.paymentMethod === 'cash' ? 'Contant' : 'Handmatige PIN'),
+      set_paid: true, // Markeer direct als betaald
+      status: 'completed', // Direct afgerond in de winkel
+      line_items: lineItems,
+      fee_lines: feeLines,
+      customer_id: orderPayload.customerId || 0,
+      meta_data: [
+        { key: '_pos_store_id', value: String(orderPayload.storeId || 1) },
+        { key: '_pos_cashier_id', value: String(orderPayload.cashierId || 1) },
+        { key: '_pos_cash_given', value: String(orderPayload.totals?.cashGiven || 0) },
+        { key: '_pos_change_amount', value: String(orderPayload.totals?.changeAmount || 0) }
+      ]
+    };
+
+    // 2. Probeer de order direct naar WooCommerce te sturen via Basic Auth
+    const wooResponse = await axios.post(
+      `${WOO_URL}/wp-json/wc/v3/orders`,
+      wooOrderData,
+      {
+        auth: {
+          username: WOO_CONSUMER_KEY,
+          password: WOO_CONSUMER_SECRET
+        },
+        timeout: 8000 // 8 seconden timeout
+      }
+    );
+
+    if (wooResponse.data && wooResponse.data.id) {
       return res.status(200).json({
         success: true,
-        orderId: response.data.id,
-        order: response.data
+        orderId: wooResponse.data.id,
+        message: 'Bestelling succesvol geplaatst in WooCommerce!'
       });
+    } else {
+      throw new Error('Geen geldig antwoord ontvangen van WooCommerce.');
+    }
 
-    } catch (error) {
-      console.error('Fout bij aanmaken WooCommerce order:', error.response?.data || error.message);
+  } catch (error) {
+    console.error('Fout bij verzenden naar WooCommerce (valt terug op offline opslag in MariaDB):', error.message);
+
+    // 3. Fallback: Als WooCommerce onbereikbaar is, sla de order veilig op in MariaDB
+    try {
+      const localInsertId = await saveOfflineOrder(orderPayload);
+      return res.status(200).json({
+        success: true,
+        offline: true,
+        orderId: `LOCAL-${localInsertId}`,
+        message: 'Webshop onbereikbaar. Bestelling lokaal opgeslagen in MariaDB voor latere synchronisatie.'
+      });
+    } catch (dbError) {
+      console.error('Kritieke fout bij opslaan in MariaDB:', dbError.message);
       return res.status(500).json({ 
         success: false, 
-        error: error.response?.data?.message || 'Fout bij opslaan van bestelling in WooCommerce.' 
+        error: 'Kan bestelling niet verwerken (zowel WooCommerce als lokale database gaven een fout).' 
       });
     }
   }
-
-  return res.status(405).json({ message: 'Method not allowed' });
 }
