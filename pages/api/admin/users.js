@@ -2,7 +2,6 @@ import pool from '../../../lib/db';
 import bcrypt from 'bcryptjs';
 
 export default async function handler(req, res) {
-  // GET: Haal alle gebruikers op
   if (req.method === 'GET') {
     try {
       const [rows] = await pool.execute('SELECT id, username, email, role, store_id FROM pos_users ORDER BY id ASC');
@@ -13,25 +12,13 @@ export default async function handler(req, res) {
     }
   }
 
-  // Hulpfunctie om store_id veilig om te zetten naar een integer ID
-  const resolveStoreId = async (storeIdVal) => {
-    if (!storeIdVal) return null;
-    if (!isNaN(storeIdVal)) return parseInt(storeIdVal, 10);
-    
-    // Als het een string is (bijv. 'store_ons_winkeltje'), zoek het ID op in pos_stores
-    try {
-      const [stores] = await pool.execute(
-        'SELECT id FROM pos_stores WHERE store_name = ? OR name = ? LIMIT 1',
-        [storeIdVal, storeIdVal]
-      );
-      if (stores.length > 0) return stores[0].id;
-    } catch (e) {
-      console.error("Store resolution error:", e);
-    }
-    return null;
+  // Hulpfunctie om store_id veilig naar een integer te converteren
+  const parseStoreId = (val) => {
+    if (val === '' || val === null || val === undefined) return null;
+    const parsed = parseInt(val, 10);
+    return isNaN(parsed) ? null : parsed;
   };
 
-  // POST: Nieuwe gebruiker aanmaken
   if (req.method === 'POST') {
     try {
       const { username, password, role, store_id, email } = req.body;
@@ -41,7 +28,7 @@ export default async function handler(req, res) {
       }
 
       const assignedRole = role || 'cashier';
-      const assignedStoreId = await resolveStoreId(store_id);
+      const assignedStoreId = parseStoreId(store_id);
       const userEmail = email || null;
       const hashedPassword = await bcrypt.hash(password, 10);
 
@@ -57,7 +44,6 @@ export default async function handler(req, res) {
     }
   }
 
-  // PUT: Bestaande gebruiker bewerken (behalve bendemen)
   if (req.method === 'PUT') {
     try {
       const { id, password, role, store_id, email } = req.body;
@@ -71,7 +57,7 @@ export default async function handler(req, res) {
       }
 
       const assignedRole = role || 'cashier';
-      const assignedStoreId = await resolveStoreId(store_id);
+      const assignedStoreId = parseStoreId(store_id);
       const userEmail = email || null;
 
       if (password && password.trim() !== '') {
@@ -94,7 +80,6 @@ export default async function handler(req, res) {
     }
   }
 
-  // DELETE: Verwijder gebruiker (behalve bendemen)
   if (req.method === 'DELETE') {
     try {
       const { id } = req.query;
