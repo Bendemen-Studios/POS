@@ -35,7 +35,7 @@ export default function AdminDashboard() {
   const { data: usersData, mutate: mutateUsers } = useSWR('/api/admin/users', fetcher);
   const usersList = usersData?.users || [];
 
-  const { data: productsData, mutate: mutateProducts } = useSWR('/api/woocommerce/products', fetcher);
+  const { data: productsData } = useSWR('/api/woocommerce/products', fetcher);
   const products = productsData?.products || [];
 
   const fetchLiveOrders = async () => {
@@ -150,7 +150,10 @@ export default function AdminDashboard() {
       const isEditing = !!editingUser;
       const url = '/api/admin/users';
       const method = isEditing ? 'PUT' : 'POST';
-      const payload = isEditing ? editingUser : newUserData;
+      
+      // Kopieer data en forceer store_id naar een integer of null
+      const payload = isEditing ? { ...editingUser } : { ...newUserData };
+      payload.store_id = payload.store_id !== '' && payload.store_id !== null ? parseInt(payload.store_id, 10) : null;
 
       const res = await axios({ method, url, data: payload });
       if (res.data.success) {
@@ -162,6 +165,7 @@ export default function AdminDashboard() {
         alert(res.data.message || 'Fout bij opslaan medewerker.');
       }
     } catch (err) {
+      console.error(err);
       alert('Fout bij opslaan medewerker.');
     }
   };
