@@ -21,7 +21,7 @@ export default async function handler(req, res) {
     }
   }
 
-  // POST: Opslaan / Bewerken
+  // POST: Opslaan / Bewerken (Slimme query zonder kolomconflicten)
   if (req.method === 'POST') {
     try {
       const { id, store_name, name, address, receipt_header, receipt_footer } = req.body;
@@ -29,26 +29,44 @@ export default async function handler(req, res) {
       const storeId = id ? String(id) : `store_${Date.now()}`;
 
       if (id) {
-        // Update bestaande winkel
-        await pool.execute(
-          `UPDATE pos_stores 
-           SET store_name = ?, name = ?, address = ?, receipt_header = ?, receipt_footer = ? 
-           WHERE id = ?`,
-          [finalName, finalName, address || '', receipt_header || '', receipt_footer || '', storeId]
-        );
+        // Probeer eerst met store_name
+        try {
+          await pool.execute(
+            `UPDATE pos_stores 
+             SET store_name = ?, address = ?, receipt_header = ?, receipt_footer = ? 
+             WHERE id = ?`,
+            [finalName, address || '', receipt_header || '', receipt_footer || '', storeId]
+          );
+        } catch (err) {
+          // Fallback als store_name kolom niet bestaat maar 'name' wel
+          await pool.execute(
+            `UPDATE pos_stores 
+             SET name = ?, address = ?, receipt_header = ?, receipt_footer = ? 
+             WHERE id = ?`,
+            [finalName, address || '', receipt_header || '', receipt_footer || '', storeId]
+          );
+        }
       } else {
-        // Nieuwe winkel invoegen
-        await pool.execute(
-          `INSERT INTO pos_stores (id, store_name, name, address, receipt_header, receipt_footer) 
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          [storeId, finalName, finalName, address || '', receipt_header || '', receipt_footer || '']
-        );
+        // Nieuwe winkel toevoegen
+        try {
+          await pool.execute(
+            `INSERT INTO pos_stores (id, store_name, address, receipt_header, receipt_footer) 
+             VALUES (?, ?, ?, ?, ?)`,
+            [storeId, finalName, address || '', receipt_header || '', receipt_footer || '']
+          );
+        } catch (err) {
+          await pool.execute(
+            `INSERT INTO pos_stores (id, name, address, receipt_header, receipt_footer) 
+             VALUES (?, ?, ?, ?, ?)`,
+            [storeId, finalName, address || '', receipt_header || '', receipt_footer || '']
+          );
+        }
       }
 
       return res.status(200).json({ success: true, message: 'Locatie succesvol opgeslagen!' });
     } catch (error) {
       console.error("Database Store POST Error:", error);
-      return res.status(500).json({ success: false, error: 'Fout bij opslaan van de winkel in de database.' });
+      return res.status(500).json({ success: false, error: 'Fout bij opslaan in database: ' + error.message });
     }
   }
 
