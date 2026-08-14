@@ -2,9 +2,12 @@ import pool from '../../../lib/db';
 import bcrypt from 'bcryptjs';
 
 export default async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).json({ message: 'Method not allowed' });
+  if (req.method !== 'POST') {
+    return res.status(405).json({ message: 'Method not allowed' });
+  }
 
   const { username, password } = req.body;
+
   if (!username || !password) {
     return res.status(400).json({ success: false, message: 'Gebruikersnaam en wachtwoord zijn verplicht.' });
   }
@@ -19,12 +22,20 @@ export default async function handler(req, res) {
       if (isMatch) {
         return res.status(200).json({
           success: true,
-          user: { id: user.id, username: user.username, name: user.name, role: user.role }
+          user: { 
+            id: user.id, 
+            username: user.username, 
+            name: user.name, 
+            role: user.role 
+          }
         });
       }
     }
+
     return res.status(401).json({ success: false, message: 'Ongeldige inloggegevens.' });
+
   } catch (error) {
-    return res.status(500).json({ success: false, message: 'Database fout bij inloggen.' });
+    console.error("Login API Error:", error.message);
+    return res.status(500).json({ success: false, message: 'Interne serverfout bij inloggen.' });
   }
 }
