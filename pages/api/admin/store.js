@@ -15,9 +15,11 @@ export default async function handler(req, res) {
   // POST: Nieuwe locatie toevoegen OF bestaande locatie bewerken
   if (req.method === 'POST') {
     try {
-      const { id, store_name, address, receipt_header, receipt_footer } = req.body;
+      // Vang zowel store_name als name op om veld-mismatches te voorkomen
+      const { id, store_name, name, address, receipt_header, receipt_footer } = req.body;
+      const finalStoreName = store_name || name;
 
-      if (!store_name) {
+      if (!finalStoreName) {
         return res.status(400).json({ success: false, message: 'Locatienaam is verplicht.' });
       }
 
@@ -27,14 +29,14 @@ export default async function handler(req, res) {
           `UPDATE pos_stores 
            SET store_name = ?, address = ?, receipt_header = ?, receipt_footer = ? 
            WHERE id = ?`,
-          [store_name, address || '', receipt_header || '', receipt_footer || '', id]
+          [finalStoreName, address || '', receipt_header || '', receipt_footer || '', id]
         );
       } else {
         // Voeg een nieuwe locatie toe
         await pool.execute(
           `INSERT INTO pos_stores (store_name, address, receipt_header, receipt_footer) 
            VALUES (?, ?, ?, ?)`,
-          [store_name, address || '', receipt_header || '', receipt_footer || '']
+          [finalStoreName, address || '', receipt_header || '', receipt_footer || '']
         );
       }
 
@@ -48,7 +50,7 @@ export default async function handler(req, res) {
     }
   }
 
-  // DELETE: Locatie verwijderen op basis van ID
+  // DELETE: Locatie verwijderen
   if (req.method === 'DELETE') {
     try {
       const { id } = req.query;

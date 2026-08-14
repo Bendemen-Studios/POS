@@ -74,22 +74,25 @@ export default function AdminDashboard() {
   // --- LOCATIE ACTIES ---
   const handleSaveStore = async (e) => {
     e.preventDefault();
+    const payload = editingStore || newStoreData;
+
     try {
       const res = await fetch('/api/admin/store', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editingStore || newStoreData),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (data.success) {
-        alert('Winkel succesvol opgeslagen!');
         setEditingStore(null);
         setShowAddStoreModal(false);
         setNewStoreData({ store_name: '', address: '', receipt_header: '', receipt_footer: '' });
         fetchStores();
+      } else {
+        alert(data.message || 'Fout bij opslaan van de locatie.');
       }
     } catch (err) {
-      alert('Fout bij opslaan winkel.');
+      alert('Fout bij communicatie met de server bij het opslaan.');
     }
   };
 
@@ -114,7 +117,6 @@ export default function AdminDashboard() {
       });
       const data = await res.json();
       if (data.success) {
-        alert('Medewerker aangemaakt!');
         setShowAddUserModal(false);
         setNewUserData({ username: '', password: '', role: 'cashier', store_id: '' });
         mutateUsers();
@@ -262,7 +264,7 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* TAB 2: PERSONEEL BEHEREN + LOCATIE TOEWIJZEN */}
+        {/* TAB 2: PERSONEEL BEHEREN */}
         {activeTab === 'users' && (
           <div className="bg-white p-6 rounded-lg shadow space-y-4">
             <div className="flex justify-between items-center mb-2">
@@ -288,20 +290,31 @@ export default function AdminDashboard() {
                 <tbody className="divide-y">
                   {usersList.map((u) => {
                     const assignedStore = stores.find(s => s.id === u.store_id);
+                    const isProtectedUser = u.username === 'bendemen' || u.email === 'info@bendemen.nl';
+
                     return (
                       <tr key={u.id}>
-                        <td className="p-3 font-bold">{u.username}</td>
+                        <td className="p-3 font-bold flex items-center space-x-1">
+                          <span>{u.username}</span>
+                          {isProtectedUser && <span className="text-xs text-red-600">👑</span>}
+                        </td>
                         <td className="p-3 uppercase text-gray-500 font-semibold">{u.role}</td>
                         <td className="p-3 font-semibold text-red-600">
                           {assignedStore ? `📍 ${assignedStore.store_name}` : 'Alle Locaties'}
                         </td>
                         <td className="p-3 text-right">
-                          <button
-                            onClick={() => handleDeleteUser(u.id)}
-                            className="bg-red-100 hover:bg-red-200 text-red-700 font-bold px-3 py-1 rounded text-xs"
-                          >
-                            🗑️ Verwijderen
-                          </button>
+                          {isProtectedUser ? (
+                            <span className="bg-gray-100 text-gray-500 font-bold px-3 py-1 rounded text-xs cursor-not-allowed">
+                              🔒 Systeem Account
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => handleDeleteUser(u.id)}
+                              className="bg-red-100 hover:bg-red-200 text-red-700 font-bold px-3 py-1 rounded text-xs"
+                            >
+                              🗑️ Verwijderen
+                            </button>
+                          )}
                         </td>
                       </tr>
                     );
@@ -474,7 +487,7 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {/* POP-UP MODAL: MEDEWERKER TOEVOEGEN + LOCATIE TOEWIJZEN */}
+      {/* POP-UP MODAL: MEDEWERKER TOEVOEGEN */}
       {showAddUserModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg p-6 max-w-md w-full">
