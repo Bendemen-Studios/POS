@@ -16,16 +16,32 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Haal de laatste orders op uit WooCommerce
-    const response = await api.get("orders", {
-      per_page: 50,
-      orderby: "date",
-      order: "desc"
-    });
+    let allOrders = [];
+    let page = 1;
+    let totalPages = 1;
+
+    // Loop automatisch door alle pagina's heen (per 50 stuks) totdat alle bestellingen binnen zijn
+    do {
+      const response = await api.get("orders", {
+        per_page: 50,
+        page: page,
+        orderby: "date",
+        order: "desc"
+      });
+
+      const orders = response.data || [];
+      allOrders = allOrders.concat(orders);
+
+      // WooCommerce stuurt de totale hoeveelheid pagina's mee in de response headers
+      const totalPagesHeader = response.headers['x-wp-totalpages'];
+      totalPages = totalPagesHeader ? parseInt(totalPagesHeader, 10) : 1;
+
+      page++;
+    } while (page <= totalPages);
 
     return res.status(200).json({ 
       success: true, 
-      orders: response.data 
+      orders: allOrders 
     });
   } catch (error) {
     console.error("WooCommerce Orders Fetch Error:", error.response?.data || error.message);
