@@ -20,7 +20,6 @@ export default async function handler(req, res) {
     let page = 1;
     let totalPages = 1;
 
-    // Loop automatisch door alle pagina's heen (per 50 stuks) totdat alle bestellingen binnen zijn
     do {
       const response = await api.get("orders", {
         per_page: 50,
@@ -32,7 +31,6 @@ export default async function handler(req, res) {
       const orders = response.data || [];
       allOrders = allOrders.concat(orders);
 
-      // WooCommerce stuurt de totale hoeveelheid pagina's mee in de response headers
       const totalPagesHeader = response.headers['x-wp-totalpages'];
       totalPages = totalPagesHeader ? parseInt(totalPagesHeader, 10) : 1;
 

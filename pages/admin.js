@@ -11,7 +11,7 @@ export default function AdminDashboard() {
   const [user, setUser] = useState(null);
   const [activeTab, setActiveTab] = useState('stores');
 
-  // Locaties / Winkels State (inclusief pickup_id voor Local Pickup Plus)
+  // Locaties / Winkels State
   const [stores, setStores] = useState([]);
   const [editingStore, setEditingStore] = useState(null);
   const [showAddStoreModal, setShowAddStoreModal] = useState(false);
@@ -40,7 +40,7 @@ export default function AdminDashboard() {
   const fetchLiveOrders = async () => {
     try {
       setLoadingOrders(true);
-      const res = await axios.get('/api/woocommerce/orders'); // Haalt echte orders op uit WooCommerce
+      const res = await axios.get('/api/woocommerce/orders'); 
       if (res.data.success && res.data.orders) {
         setLiveOrders(res.data.orders);
       }
@@ -59,7 +59,6 @@ export default function AdminDashboard() {
         status: newStatus
       });
       if (res.data.success) {
-        // Update direct lokaal voor snelle feedback
         setLiveOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: newStatus } : o));
       } else {
         alert('Kon status niet wijzigen: ' + (res.data.error || 'Onbekende fout'));
@@ -91,7 +90,6 @@ export default function AdminDashboard() {
     }
   }, []);
 
-  // Automatisch live verversen van orders elke 15 seconden indien op de orders tab
   useEffect(() => {
     if (activeTab !== 'orders') return;
     const interval = setInterval(() => {
@@ -402,7 +400,7 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* TAB 4: LIVE BESTELLINGEN (MET STATUS WIJZIGEN) */}
+        {/* TAB 4: LIVE BESTELLINGEN (MET STATUS WIJZIGEN EN SEQUENTIAL ORDER NUMBERS) */}
         {activeTab === 'orders' && (
           <div className="bg-white p-6 rounded-lg shadow space-y-4">
             <div className="flex justify-between items-center">
@@ -433,7 +431,7 @@ export default function AdminDashboard() {
                   ) : (
                     liveOrders.map((o) => (
                       <tr key={o.id} className="hover:bg-gray-50">
-                        <td className="p-3 font-bold">#{o.id}</td>
+                        <td className="p-3 font-bold">#{o.number || o.id}</td>
                         <td className="p-3 text-gray-500">{new Date(o.date_created || Date.now()).toLocaleString('nl-NL')}</td>
                         <td className="p-3 font-medium">{o.payment_method_title || o.payment_method || 'Kassa'}</td>
                         <td className="p-3">
@@ -527,7 +525,7 @@ export default function AdminDashboard() {
                   type="text"
                   value={editingStore ? (editingStore.pickup_id || '') : newStoreData.pickup_id}
                   onChange={(e) => editingStore ? setEditingStore({ ...editingStore, pickup_id: e.target.value }) : setNewStoreData({ ...newStoreData, pickup_id: e.target.value })}
-                  placeholder="ID uit WooCommerce Local Pickup Plus"
+                  placeholder="Bijv. 342428"
                   className="w-full p-2 border rounded text-sm font-mono"
                 />
               </div>
