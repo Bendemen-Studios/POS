@@ -1,4 +1,4 @@
-import pool from '../../../../lib/db';
+import pool from '../../../lib/db';
 import bcrypt from 'bcryptjs';
 
 export default async function handler(req, res) {
@@ -44,7 +44,6 @@ export default async function handler(req, res) {
       const { id } = req.query;
       if (!id) return res.status(400).json({ success: false, message: 'Geen ID opgegeven.' });
 
-      // Haal de gebruiker op om te controleren of het bendemen is
       const [users] = await pool.execute('SELECT username FROM pos_users WHERE id = ?', [id]);
       if (users.length === 0) {
         return res.status(404).json({ success: false, message: 'Gebruiker niet gevonden.' });
