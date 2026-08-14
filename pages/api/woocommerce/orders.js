@@ -1,7 +1,6 @@
 import axios from 'axios';
 import { saveOfflineOrder } from '../../../lib/db';
 
-// WooCommerce API Credentials vanuit .env
 const WOO_URL = process.env.WOO_URL;
 const WOO_CONSUMER_KEY = process.env.WOO_CONSUMER_KEY;
 const WOO_CONSUMER_SECRET = process.env.WOO_CONSUMER_SECRET;
@@ -27,7 +26,6 @@ export default async function handler(req, res) {
         price: item.price.toString()
       };
 
-      // Voeg variaties toe indien aanwezig
       if (item.selectedAttributes) {
         lineItem.meta_data = Object.entries(item.selectedAttributes).map(([key, value]) => ({
           key: key,
@@ -38,7 +36,6 @@ export default async function handler(req, res) {
       return lineItem;
     });
 
-    // Bereken eventuele kortingen of extra's
     const feeLines = [];
     if (orderPayload.totals?.discountAmount > 0) {
       feeLines.push({
@@ -50,8 +47,8 @@ export default async function handler(req, res) {
     const wooOrderData = {
       payment_method: orderPayload.paymentMethod === 'sumup' ? 'sumup_pin' : (orderPayload.paymentMethod === 'cash' ? 'cash' : 'manual_pin'),
       payment_method_title: orderPayload.paymentMethod === 'sumup' ? 'SumUp PIN' : (orderPayload.paymentMethod === 'cash' ? 'Contant' : 'Handmatige PIN'),
-      set_paid: true, // Markeer direct als betaald
-      status: 'completed', // Direct afgerond in de winkel
+      set_paid: true,
+      status: 'completed',
       line_items: lineItems,
       fee_lines: feeLines,
       customer_id: orderPayload.customerId || 0,
@@ -63,16 +60,19 @@ export default async function handler(req, res) {
       ]
     };
 
-    // 2. Probeer de order direct naar WooCommerce te sturen via Basic Auth
+    // 2. Genereer de Base64 Basic Auth header (dezelfde methode als curl)
+    const authHeader = 'Basic ' + Buffer.from(`${WOO_CONSUMER_KEY}:${WOO_CONSUMER_SECRET}`).toString('base64');
+
+    // 3. Stuur het verzoek naar WooCommerce met de expliciete header
     const wooResponse = await axios.post(
       `${WOO_URL}/wp-json/wc/v3/orders`,
       wooOrderData,
       {
-        auth: {
-          username: WOO_CONSUMER_KEY,
-          password: WOO_CONSUMER_SECRET
+        headers: {
+          'Authorization': authHeader,
+          'Content-Type': 'application/json'
         },
-        timeout: 8000 // 8 seconden timeout
+        timeout: 8000
       }
     );
 
@@ -87,9 +87,9 @@ export default async function handler(req, res) {
     }
 
   } catch (error) {
-    console.error('Fout bij verzenden naar WooCommerce (valt terug op offline opslag in MariaDB):', error.message);
+    console.error('Fout bij verzenden naar WooCommerce (valt terug op MariaDB):', error.response?.data || error.message);
 
-    // 3. Fallback: Als WooCommerce onbereikbaar is, sla de order veilig op in MariaDB
+    // 4. Fallback: Sla de order lokaal op in MariaDB als WooCommerce faalt
     try {
       const localInsertId = await saveOfflineOrder(orderPayload);
       return res.status(200).json({
