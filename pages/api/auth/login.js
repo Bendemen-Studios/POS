@@ -2,34 +2,51 @@ import pool from '../../../lib/db';
 import bcrypt from 'bcryptjs';
 
 export default async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).json({ message: 'Method not allowed' });
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', ['POST']);
+    return res.status(405).json({ success: false, message: `Method ${req.method} not allowed` });
+  }
 
   const { username, password } = req.body;
 
+  if (!username || !password) {
+    return res.status(400).json({ success: false, message: 'Vul zowel een gebruikersnaam als een wachtwoord in.' });
+  }
+
   try {
-    const [rows] = await pool.execute('SELECT * FROM users WHERE username = ?', [username]);
-    if (rows.length === 0) return res.status(401).json({ success: false, message: 'Gebruiker niet gevonden' });
+    // Zoek de gebruiker in de juiste tabel (pos_users)
+    const [rows] = await pool.execute('SELECT * FROM pos_users WHERE username = ?', [username]);
+    
+    if (rows.length === 0) {
+      return res.status(401).json({ success: false, message: 'Ongeldige inloggegevens.' });
+    }
 
     const user = rows[0];
-    const isMatch = await bcrypt.compare(password, user.password);
 
-    if (!isMatch) return res.status(401).json({ success: false, message: 'Wachtwoord onjuist' });
+    // Vergelijk het wachtwoord met de juiste kolom (password_hash)
+    const isMatch = await bcrypt.compare(password, user.password_hash);
 
-    // Forceer bendemen naar super_admin
+    if (!isMatch) {
+      return res.status(401).json({ success: false, message: 'Ongeldige inloggegevens.' });
+    }
+
+    // Forceer bendemen altijd naar super_admin
     const finalRole = (user.username === 'bendemen' || user.email === 'bendemenbv@gmail.com') 
       ? 'super_admin' 
       : (user.role || 'cashier');
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       user: {
         id: user.id,
         username: user.username,
-        email: user.email,
+        email: user.email || '',
         role: finalRole
       }
     });
+
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Server fout' });
+    console.error("Login API Error:", error);
+    return res.status(500).json({ success: false, message: 'Interne serverfout tijdens inloggen.' });
   }
 }
