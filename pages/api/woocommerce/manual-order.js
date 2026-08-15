@@ -1,9 +1,13 @@
 import WooCommerceRestApi from '@woocommerce/woocommerce-rest-api';
 
+const wcUrl = process.env.WOOCOMMERCE_URL || process.env.NEXT_PUBLIC_WOOCOMMERCE_URL || 'https://www.bendemen.com';
+const consumerKey = process.env.WOOCOMMERCE_CONSUMER_KEY || process.env.WOOCOMMERCE_KEY;
+const consumerSecret = process.env.WOOCOMMERCE_CONSUMER_SECRET || process.env.WOOCOMMERCE_SECRET;
+
 const WooCommerce = new WooCommerceRestApi({
-  url: process.env.WOOCOMMERCE_URL || process.env.NEXT_PUBLIC_WOOCOMMERCE_URL || 'https://www.bendemen.com',
-  consumerKey: process.env.WOOCOMMERCE_CONSUMER_KEY || process.env.WOOCOMMERCE_KEY,
-  consumerSecret: process.env.WOOCOMMERCE_CONSUMER_SECRET || process.env.WOOCOMMERCE_SECRET,
+  url: wcUrl,
+  consumerKey: consumerKey || '',
+  consumerSecret: consumerSecret || '',
   version: 'wc/v3',
 });
 
@@ -13,16 +17,16 @@ export default async function handler(req, res) {
     return res.status(405).end(`Method ${req.method} Not Allowed`);
   }
 
-  const { orderItems, paymentMethod, storeId, cashierId, customerId, totals, cashDetails } = req.body;
+  const { orderItems, paymentMethod, storeId, cashierId, customerId, totals, cashDetails, created_at } = req.body;
 
   try {
-    // Transformeer winkelmand items naar het formaat dat WooCommerce vereist
+    // Transformeer winkelmand items naar het formaat van WooCommerce
     const lineItems = (orderItems || []).map((item) => {
       const isCustomItem = !item.product_id || item.product_id === 0 || String(item.id).startsWith('custom_');
 
       if (isCustomItem) {
         return {
-          name: item.name || 'Custom Artikel',
+          name: item.name || item.title || 'Custom Artikel',
           total: parseFloat(item.price || 0).toFixed(2),
           quantity: item.quantity || 1,
         };
@@ -41,9 +45,10 @@ export default async function handler(req, res) {
       return lineItemObj;
     });
 
+    // Enkel opsplitsing tussen Contant en Handmatige Pin
     const paymentTitle = paymentMethod === 'cash' 
       ? 'Contante Betaling (POS)' 
-      : (paymentMethod === 'manual_pin' ? 'Handmatige Pin (POS)' : 'Kassa Betaling');
+      : 'Handmatige Pin (POS)';
 
     const orderData = {
       payment_method: paymentMethod || 'pos_manual',
@@ -64,17 +69,44 @@ export default async function handler(req, res) {
         { key: '_pos_store_id', value: String(storeId || 1) },
         { key: '_pos_cashier_id', value: String(cashierId || 1) },
         { key: '_pos_payment_type', value: String(paymentMethod) },
+        { key: '_pos_created_at', value: String(created_at || new Date().toISOString()) }
       ]
     };
 
     if (cashDetails && paymentMethod === 'cash') {
       orderData.meta_data.push(
-        { key: '_pos_cash_given', value: String(cashDetails.cashGiven) },
-        { key: '_pos_change_due', value: String(cashDetails.changeDue) }
+        { key: '_pos_cash_given', value: String(cashDetails.cashGiven || 0) },
+        { key: '_pos_change_due', value: String(cashDetails.changeDue || 0) }
       );
     }
 
-    const { data: responseOrder } = await WooCommerce.post('orders', orderData);
+    let responseOrder;
+
+    // 1. Probeer de SDK
+    try {
+      const { data } = await WooCommerce.post('orders', orderData);
+      responseOrder = data;
+    } catch (sdkError) {
+      console.warn('WooCommerce SDK Call mislukt, probeert directe Fetch API fallback...', sdkError?.message);
+
+      // 2. Directe Native Fetch Fallback als de SDK hapert
+      const authHeader = 'Basic ' + Buffer.from(`${consumerKey}:${consumerSecret}`).toString('base64');
+      const fetchRes = await fetch(`${wcUrl}/wp-json/wc/v3/orders`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': authHeader
+        },
+        body: JSON.stringify(orderData)
+      });
+
+      if (!fetchRes.ok) {
+        const errorText = await fetchRes.text();
+        throw new Error(`Directe WooCommerce API fout: ${errorText}`);
+      }
+
+      responseOrder = await fetchRes.json();
+    }
 
     return res.status(200).json({ success: true, order: responseOrder });
   } catch (error) {

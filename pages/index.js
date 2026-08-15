@@ -43,6 +43,7 @@ export default function POSHome() {
   const [loading, setLoading] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [checkoutStatus, setCheckoutStatus] = useState(null);
+  const [pendingOfflineCount, setPendingOfflineCount] = useState(0);
 
   // Betaling & Wisselgeld Modal State
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -78,7 +79,7 @@ export default function POSHome() {
       return;
     }
 
-    const storeStr = localStorage.getItem('selectedStore');
+    const storeStr = localStorage.getItem('selectedStore') || localStorage.getItem('pos_selected_store');
     if (storeStr) {
       try { setSelectedStore(JSON.parse(storeStr)); } catch (e) {}
     } else {
@@ -88,7 +89,52 @@ export default function POSHome() {
     fetchStores();
     handleSyncData();
     fetchPickupOrders();
+    checkOfflineQueue();
   }, []);
+
+  // Automatische Offline Sync Listener
+  useEffect(() => {
+    const syncOfflineOrders = async () => {
+      const savedQueue = JSON.parse(localStorage.getItem('pos_offline_orders') || '[]');
+      if (savedQueue.length === 0) {
+        setPendingOfflineCount(0);
+        return;
+      }
+
+      console.log(`[OFFLINE SYNC] Poging tot synchroniseren van ${savedQueue.length} offline bestelling(en)...`);
+      const remainingQueue = [];
+
+      for (const order of savedQueue) {
+        try {
+          const res = await fetch('/api/woocommerce/manual-order', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(order)
+          });
+          const data = await res.json();
+          if (!data.success) remainingQueue.push(order);
+        } catch (err) {
+          remainingQueue.push(order); // Netwerk/Server nog niet online
+        }
+      }
+
+      localStorage.setItem('pos_offline_orders', JSON.stringify(remainingQueue));
+      setPendingOfflineCount(remainingQueue.length);
+    };
+
+    window.addEventListener('online', syncOfflineOrders);
+    const interval = setInterval(syncOfflineOrders, 30000); // Twee-wekelijkse achtergrond check
+
+    return () => {
+      window.removeEventListener('online', syncOfflineOrders);
+      clearInterval(interval);
+    };
+  }, []);
+
+  const checkOfflineQueue = () => {
+    const queue = JSON.parse(localStorage.getItem('pos_offline_orders') || '[]');
+    setPendingOfflineCount(queue.length);
+  };
 
   const fetchStores = async () => {
     try {
@@ -107,8 +153,20 @@ export default function POSHome() {
   };
 
   const handleSelectStore = (store) => {
-    setSelectedStore(store);
-    localStorage.setItem('selectedStore', JSON.stringify(store));
+    const storeData = {
+      id: store.id || store.store_id || 1,
+      store_id: store.id || store.store_id || 1,
+      name: store.store_name || store.name || 'Ons Winkeltje',
+      store_name: store.store_name || store.name || 'Ons Winkeltje',
+      location: store.address || store.location || '',
+      address: store.address || store.location || '',
+      pickup_id: store.pickup_id || null,
+      terminal_id: store.terminal_id || null
+    };
+
+    setSelectedStore(storeData);
+    localStorage.setItem('selectedStore', JSON.stringify(storeData));
+    localStorage.setItem('pos_selected_store', JSON.stringify(storeData));
     setShowStoreModal(false);
   };
 
@@ -411,6 +469,47 @@ export default function POSHome() {
     setShowPaymentModal(true);
   };
 
+  // SumUp Betalingsafhandeling met VPS -> Cloud API Fallback
+  const processSumUpPayment = async (amount, terminalId) => {
+    // 1. Probeer eerst via de VPS API
+    try {
+      const vpsRes = await fetch('/api/sumup/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ totalAmount: amount, terminalId })
+      });
+
+      if (vpsRes.ok) {
+        const vpsData = await vpsRes.json();
+        if (vpsData.success) return vpsData;
+      }
+    } catch (vpsError) {
+      console.warn('[SUMUP] VPS niet bereikbaar, schakelt over naar directe SumUp Cloud API...', vpsError);
+    }
+
+    // 2. Fallback: Directe Call vanuit de browser naar SumUp Cloud API
+    try {
+      const sumupCloudRes = await fetch(`https://api.sumup.com/v0.1/terminals/${terminalId}/checkouts`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUMUP_API_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          amount: parseFloat(amount),
+          currency: 'EUR',
+          checkout_reference: `BDM-POS-${Date.now()}`
+        })
+      });
+
+      const cloudData = await sumupCloudRes.json();
+      if (!sumupCloudRes.ok) throw new Error(cloudData.message || 'Directe SumUp Cloud API-call mislukt.');
+      return cloudData;
+    } catch (cloudErr) {
+      throw new Error(`SumUp PIN mislukt: ${cloudErr.message}`);
+    }
+  };
+
   const handleProcessPayment = async () => {
     if (selectedPaymentMethod === 'cash' && cashGivenFloat < finalTotal) {
       alert('Het ingegeven contante bedrag is lager dan het totaalbedrag.');
@@ -420,70 +519,61 @@ export default function POSHome() {
     setLoading(true);
     setCheckoutStatus(null);
 
+    const orderPayload = {
+      orderItems: cart,
+      paymentMethod: selectedPaymentMethod,
+      storeId: selectedStore?.id || 1,
+      cashierId: currentUser?.id || 1,
+      customerId: selectedCustomer ? selectedCustomer.id : 0,
+      totals: {
+        subtotal,
+        discountAmount: manualDiscountAmount,
+        pointsDiscount: parseFloat(redeemedDiscount || 0),
+        pointsUsed: parseInt(pointsToRedeem || 0),
+        totalPaid: finalTotal
+      },
+      cashDetails: selectedPaymentMethod === 'cash' ? {
+        cashGiven: cashGivenFloat.toFixed(2),
+        changeDue: changeDue.toFixed(2)
+      } : null,
+      created_at: new Date().toISOString()
+    };
+
     try {
+      // 1. Bij SumUp eerst de terminal-transactie uitvoeren
       if (selectedPaymentMethod === 'sumup') {
-        const sumupRes = await fetch('/api/sumup/checkout', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            totalAmount: finalTotal.toFixed(2),
-            terminalId: selectedStore?.terminal_id || localStorage.getItem('pos_fallback_terminal_id') || 'SOLO_READER_1'
-          }),
-        });
-        const sumupData = await sumupRes.json();
-        if (!sumupData.success) {
-          throw new Error(sumupData.error || 'SumUp betaling kon niet worden gestart.');
-        }
-
-        await fetch('/api/woocommerce/manual-order', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            orderItems: cart,
-            paymentMethod: 'sumup',
-            storeId: selectedStore?.id || 1,
-            cashierId: currentUser?.id || 1,
-            customerId: selectedCustomer ? selectedCustomer.id : 0,
-            totals: {
-              subtotal,
-              discountAmount: manualDiscountAmount,
-              pointsDiscount: parseFloat(redeemedDiscount || 0),
-              pointsUsed: parseInt(pointsToRedeem || 0),
-              totalPaid: finalTotal
-            }
-          }),
-        });
-      } else {
-        const res = await fetch('/api/woocommerce/manual-order', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            orderItems: cart,
-            paymentMethod: selectedPaymentMethod,
-            storeId: selectedStore?.id || 1,
-            cashierId: currentUser?.id || 1,
-            customerId: selectedCustomer ? selectedCustomer.id : 0,
-            totals: {
-              subtotal,
-              discountAmount: manualDiscountAmount,
-              pointsDiscount: parseFloat(redeemedDiscount || 0),
-              pointsUsed: parseInt(pointsToRedeem || 0),
-              totalPaid: finalTotal
-            },
-            cashDetails: selectedPaymentMethod === 'cash' ? {
-              cashGiven: cashGivenFloat.toFixed(2),
-              changeDue: changeDue.toFixed(2)
-            } : null
-          }),
-        });
-
-        const data = await res.json();
-        if (!data.success) throw new Error(data.error || 'Fout bij verwerken van de bestelling.');
+        const terminalId = selectedStore?.terminal_id || localStorage.getItem('pos_fallback_terminal_id') || 'SOLO_READER_1';
+        await processSumUpPayment(finalTotal.toFixed(2), terminalId);
       }
+
+      // 2. Bestelling verzenden naar WooCommerce API
+      const res = await fetch('/api/woocommerce/manual-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(orderPayload),
+      });
+
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'Serverfout bij verwerken.');
 
       const changeText = selectedPaymentMethod === 'cash' && changeDue > 0 ? ` (Wisselgeld: €${changeDue.toFixed(2)})` : '';
       setCheckoutStatus({ success: true, message: `Bestelling succesvol afgerond!${changeText}` });
-      
+
+    } catch (err) {
+      console.warn('[POS OFFLINE FALLBACK] Fout bij online verwerking, bestelling lokaal opgeslagen:', err);
+
+      // Sla op in de lokale offline buffer als de server of WooCommerce plat ligt
+      const offlineQueue = JSON.parse(localStorage.getItem('pos_offline_orders') || '[]');
+      offlineQueue.push(orderPayload);
+      localStorage.setItem('pos_offline_orders', JSON.stringify(offlineQueue));
+      setPendingOfflineCount(offlineQueue.length);
+
+      const changeText = selectedPaymentMethod === 'cash' && changeDue > 0 ? ` (Wisselgeld: €${changeDue.toFixed(2)})` : '';
+      setCheckoutStatus({ 
+        success: true, 
+        message: `Bestelling lokaal opgeslagen (Offline Modus)! Wordt automatisch gesynchroniseerd zodra de server weer bereikbaar is.${changeText}` 
+      });
+    } finally {
       setShowPaymentModal(false);
       setCart([]);
       setSelectedCustomer(null);
@@ -492,11 +582,6 @@ export default function POSHome() {
       setDiscountType('none');
       setDiscountValue(0);
       setCashGiven('');
-
-    } catch (err) {
-      console.error(err);
-      alert(err.message || 'Fout tijdens afrekenen.');
-    } finally {
       setLoading(false);
     }
   };
@@ -538,6 +623,12 @@ export default function POSHome() {
           {currentUser && (
             <span className="text-xs bg-gray-800 text-gray-300 px-2.5 py-1 rounded">
               {currentUser.username} ({currentUser.role})
+            </span>
+          )}
+
+          {pendingOfflineCount > 0 && (
+            <span className="text-[10px] bg-yellow-500 text-black font-extrabold px-2 py-0.5 rounded-full animate-pulse">
+              ⚠️ {pendingOfflineCount} Offline
             </span>
           )}
         </div>
