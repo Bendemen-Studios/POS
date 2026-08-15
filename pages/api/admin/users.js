@@ -13,31 +13,13 @@ export default async function handler(req, res) {
     }
   }
 
-  // Hulpfunctie om store_id veilig af te handelen (ondersteunt zowel nummers als tekst-slugs)
-  const resolveStoreId = async (storeIdVal) => {
-    if (storeIdVal === undefined || storeIdVal === null || storeIdVal === '' || storeIdVal === 'null') {
+  // Hulpfunctie om store_id veilig te parsen
+  const parseStoreId = (val) => {
+    if (val === undefined || val === null || val === '' || val === 'null') {
       return null;
     }
-    
-    // Als het al een getal is (of als getal geschreven string)
-    if (!isNaN(storeIdVal)) {
-      return parseInt(storeIdVal, 10);
-    }
-
-    // Als het een tekst-slug is, zoek het ID op in pos_stores
-    try {
-      const [stores] = await pool.execute(
-        'SELECT id FROM pos_stores WHERE store_name = ? OR name = ? LIMIT 1',
-        [storeIdVal, storeIdVal]
-      );
-      if (stores.length > 0) {
-        return stores[0].id;
-      }
-    } catch (e) {
-      console.error("Store resolution error:", e);
-    }
-
-    return null;
+    const num = Number(val);
+    return isNaN(num) ? null : num;
   };
 
   // POST: Nieuwe gebruiker aanmaken
@@ -50,7 +32,7 @@ export default async function handler(req, res) {
       }
 
       const assignedRole = role || 'cashier';
-      const assignedStoreId = await resolveStoreId(store_id);
+      const assignedStoreId = parseStoreId(store_id);
       const userEmail = email || null;
       const hashedPassword = await bcrypt.hash(password, 10);
 
@@ -66,7 +48,7 @@ export default async function handler(req, res) {
     }
   }
 
-  // PUT: Bestaande gebruiker bewerken (inclusief gebruikersnaam en wachtwoord)
+  // PUT: Bestaande gebruiker bewerken
   if (req.method === 'PUT') {
     try {
       const { id, username, password, role, store_id, email } = req.body;
@@ -76,17 +58,12 @@ export default async function handler(req, res) {
       if (users.length === 0) return res.status(404).json({ success: false, message: 'Gebruiker niet gevonden.' });
 
       const currentDbUsername = users[0].username;
-
-      // Beveiliging op het hoofdaccount 'bendemen'
-      if (currentDbUsername.toLowerCase() === 'bendemen') {
-        // Als het bendemen is, mag de gebruikersnaam niet veranderd worden en wachtwoord alleen via veilige weg (of hier afgeschermd)
-        // We dwingen af dat de rol/store wel aanpasbaar blijft indien nodig, maar username gelijk blijft.
-      }
-
       const finalUsername = (currentDbUsername.toLowerCase() === 'bendemen') ? 'bendemen' : (username ? username.trim() : currentDbUsername);
       const assignedRole = role || 'cashier';
-      const assignedStoreId = await resolveStoreId(store_id);
+      const assignedStoreId = parseStoreId(store_id);
       const userEmail = email || null;
+
+      console.log(`Updating user ID ${id}: role=${assignedRole}, store_id=${assignedStoreId}`);
 
       if (password && password.trim() !== '') {
         const hashedPassword = await bcrypt.hash(password, 10);
@@ -108,7 +85,7 @@ export default async function handler(req, res) {
     }
   }
 
-  // DELETE: Verwijder gebruiker (behalve bendemen)
+  // DELETE: Verwijder gebruiker
   if (req.method === 'DELETE') {
     try {
       const { id } = req.query;
