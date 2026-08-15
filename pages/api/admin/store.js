@@ -24,8 +24,8 @@ export default async function handler(req, res) {
     try {
       const customId = `store_${Date.now()}`;
       await db.query(
-        'INSERT INTO stores (id, store_name, address, receipt_header, receipt_footer, pickup_id, terminal_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [customId, store_name, address || null, receipt_header || null, receipt_footer || null, pickup_id || null, terminal_id || null]
+        'INSERT INTO stores (id, store_id, store_name, address, receipt_header, receipt_footer, pickup_id, terminal_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [customId, customId, store_name, address || null, receipt_header || null, receipt_footer || null, pickup_id || null, terminal_id || null]
       );
       return res.status(200).json({ success: true, id: customId });
     } catch (error) {
@@ -39,8 +39,8 @@ export default async function handler(req, res) {
     const targetId = id || store_id;
     try {
       await db.query(
-        'UPDATE stores SET store_name = ?, address = ?, receipt_header = ?, receipt_footer = ?, pickup_id = ?, terminal_id = ? WHERE id = ? OR store_id = ?',
-        [store_name, address || null, receipt_header || null, receipt_footer || null, pickup_id || null, terminal_id || null, targetId, targetId]
+        'UPDATE stores SET store_name = ?, address = ?, receipt_header = ?, receipt_footer = ?, pickup_id = ?, terminal_id = ? WHERE id = ?',
+        [store_name, address || null, receipt_header || null, receipt_footer || null, pickup_id || null, terminal_id || null, targetId]
       );
       return res.status(200).json({ success: true, message: 'Filiaal bijgewerkt' });
     } catch (error) {
@@ -62,7 +62,7 @@ export default async function handler(req, res) {
         });
       }
 
-      await db.query('DELETE FROM stores WHERE id = ? OR store_id = ?', [id, id]);
+      await db.query('DELETE FROM stores WHERE id = ?', [id]);
       await db.query('UPDATE users SET store_id = NULL WHERE store_id = ?', [id]);
 
       return res.status(200).json({ success: true, message: 'Filiaal succesvol verwijderd' });
