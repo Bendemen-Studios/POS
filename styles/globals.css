@@ -1,0 +1,32 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Fix mobiel & tablet flikkeren en layout bounce */
+html,
+body {
+  height: 100%;
+  height: 100dvh;
+  overflow-x: hidden;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  overscroll-behavior-y: none;
+}
+
+/* Zorg dat invoervelden wel geselecteerd kunnen worden */
+input,
+textarea,
+select {
+  -webkit-user-select: auto !important;
+  user-select: auto !important;
+}
+
+/* Hardware acceleratie forceren om schermflikkeringen te voorkomen */
+* {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+}

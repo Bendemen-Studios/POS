@@ -156,10 +156,10 @@ export default function POSHome() {
   const handleMarkAsPickedUp = async (orderId) => {
     if (!confirm(`Weet je zeker dat bestelling #${orderId} is opgehaald? De status wordt gewijzigd naar Voltooid.`)) return;
     try {
-      const res = await fetch('/api/woocommerce/update-order-status', {
-        method: 'POST',
+      const res = await fetch('/api/woocommerce/orders', {
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderId, status: 'completed' })
+        body: JSON.stringify({ id: orderId, status: 'completed' })
       });
       const data = await res.json();
       if (data.success) {
@@ -435,7 +435,7 @@ export default function POSHome() {
           throw new Error(sumupData.error || 'SumUp betaling kon niet worden gestart.');
         }
 
-        await fetch('/api/woocommerce/order', {
+        await fetch('/api/woocommerce/manual-order', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
