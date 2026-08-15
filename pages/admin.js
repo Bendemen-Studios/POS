@@ -17,8 +17,8 @@ export default function AdminDashboard() {
   // Form states voor nieuwe gebruiker
   const [newUser, setNewUser] = useState({ username: '', password: '', role: 'cashier', store_id: '', email: '' });
   
-  // Form states voor nieuwe winkel
-  const [newStore, setNewStore] = useState({ store_name: '', address: '', receipt_header: '', receipt_footer: '', pickup_id: '', terminal_id: '' });
+  // Form states voor nieuwe winkel (SumUp veld verwijderd)
+  const [newStore, setNewStore] = useState({ store_name: '', address: '', receipt_header: '', receipt_footer: '', pickup_id: '' });
 
   // Bewerk states (Modalen)
   const [editingUser, setEditingUser] = useState(null);
@@ -230,7 +230,7 @@ export default function AdminDashboard() {
       const data = await res.json();
       if (data.success) {
         alert('Filiaal succesvol toegevoegd!');
-        setNewStore({ store_name: '', address: '', receipt_header: '', receipt_footer: '', pickup_id: '', terminal_id: '' });
+        setNewStore({ store_name: '', address: '', receipt_header: '', receipt_footer: '', pickup_id: '' });
         fetchStores();
       } else {
         alert('Fout: ' + data.error);
@@ -474,7 +474,7 @@ export default function AdminDashboard() {
               <div className="space-y-6">
                 <div className="bg-white rounded-lg shadow p-6">
                   <h3 className="text-md font-bold mb-4">Nieuw Filiaal Toevoegen</h3>
-                  <form onSubmit={handleCreateStore} className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <form onSubmit={handleCreateStore} className="grid grid-cols-1 md:grid-cols-3 gap-3">
                     <input
                       type="text"
                       placeholder="Naam Filiaal"
@@ -497,14 +497,7 @@ export default function AdminDashboard() {
                       onChange={(e) => setNewStore({...newStore, pickup_id: e.target.value})}
                       className="p-2 border rounded text-xs"
                     />
-                    <input
-                      type="text"
-                      placeholder="SumUp Terminal ID / Pair Code"
-                      value={newStore.terminal_id}
-                      onChange={(e) => setNewStore({...newStore, terminal_id: e.target.value})}
-                      className="p-2 border rounded text-xs"
-                    />
-                    <button type="submit" className="bg-red-600 hover:bg-red-700 text-white font-bold p-2 rounded text-xs uppercase md:col-span-2">
+                    <button type="submit" className="bg-red-600 hover:bg-red-700 text-white font-bold p-2 rounded text-xs uppercase md:col-span-3">
                       Filiaal Aanmaken
                     </button>
                   </form>
@@ -522,7 +515,7 @@ export default function AdminDashboard() {
                           <div>
                             <div className="font-bold text-sm text-red-600">{sName}</div>
                             <div className="text-xs text-gray-500 mt-1">📍 {s.address || 'Geen adres'}</div>
-                            <div className="text-xs text-gray-400 mt-0.5">ID: #{sId} | Terminal: {s.terminal_id || 'Niet gekoppeld'}</div>
+                            <div className="text-xs text-gray-400 mt-0.5">ID: #{sId}</div>
                           </div>
                           <div className="mt-3 text-right space-x-2">
                             <button onClick={() => setEditingStore(s)} className="text-xs bg-black text-white px-3 py-1 rounded font-bold hover:bg-gray-800">
@@ -800,15 +793,6 @@ export default function AdminDashboard() {
                 value={editingStore.pickup_id || ''}
                 onChange={(e) => setEditingStore({...editingStore, pickup_id: e.target.value})}
                 className="w-full p-2 border rounded text-xs"
-              />
-            </div>
-            <div>
-              <label className="text-xs font-bold text-gray-600 block mb-1">Terminal ID / Pair Code</label>
-              <input
-                type="text"
-                value={editingStore.terminal_id || ''}
-                onChange={(e) => setEditingStore({...editingStore, terminal_id: e.target.value})}
-                className="w-full p-2 border rounded text-xs font-bold"
               />
             </div>
             <div className="flex space-x-2 pt-2">
