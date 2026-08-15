@@ -45,8 +45,8 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4">
-      <div className="bg-white rounded-lg shadow-2xl p-8 max-w-md w-full">
+    <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
+      <div className="bg-white rounded-lg shadow-2xl p-8 max-w-md w-full border border-gray-200">
         <div className="text-center mb-8">
           <h1 className="text-2xl font-black tracking-wider text-black">BDM POS // LOGIN</h1>
           <p className="text-xs text-gray-500 mt-1 uppercase font-semibold">Meld je aan om het kassasysteem te openen</p>
