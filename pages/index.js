@@ -490,7 +490,7 @@ export default function POSHome() {
     } catch (err) {
       console.error(err);
       alert(err.message || 'Fout tijdens afrekenen.');
-    } font-bold {
+    } finally {
       setLoading(false);
     }
   };
