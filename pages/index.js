@@ -53,6 +53,18 @@ export default function POSHome() {
   const [pickupOrders, setPickupOrders] = useState([]);
   const [loadingPickup, setLoadingPickup] = useState(false);
 
+  // HELPER: Format Attribute Text (Geen undefined meer)
+  const formatAttributes = (attributes) => {
+    if (!attributes || !Array.isArray(attributes) || attributes.length === 0) return '';
+    return attributes
+      .map((a) => {
+        const key = a.name || a.slug || 'Optie';
+        const val = a.option || 'Standaard';
+        return `${key}: ${val}`;
+      })
+      .join(' | ');
+  };
+
   useEffect(() => {
     const userStr = localStorage.getItem('pos_user');
     if (!userStr) {
@@ -136,7 +148,7 @@ export default function POSHome() {
       }
     } catch (err) {
       console.error('Fout bij ophalen afhaalbestellingen:', err);
-    } finally {
+    } font-bold {
       setLoadingPickup(false);
     }
   };
@@ -266,10 +278,7 @@ export default function POSHome() {
       return;
     }
 
-    const attrText = variation.attributes && variation.attributes.length > 0 
-      ? variation.attributes.map(a => `${a.name}: ${a.option}`).join(' | ') 
-      : `Variatie #${variation.id}`;
-      
+    const attrText = formatAttributes(variation.attributes) || `Variatie #${variation.id}`;
     const varName = `${selectedProductForVariations.name} - ${attrText}`;
 
     const cartItem = {
@@ -288,9 +297,7 @@ export default function POSHome() {
   const handleConfirmStockWarning = () => {
     const { product, variation, price } = stockWarningModal;
     if (variation) {
-      const attrText = variation.attributes && variation.attributes.length > 0 
-        ? variation.attributes.map(a => `${a.name}: ${a.option}`).join(' | ') 
-        : `Variatie #${variation.id}`;
+      const attrText = formatAttributes(variation.attributes) || `Variatie #${variation.id}`;
       const varName = `${product.name} - ${attrText}`;
       const cartItem = {
         ...product,
@@ -975,7 +982,7 @@ export default function POSHome() {
         </div>
       )}
 
-      {/* MODAL 3: VARIATIES (GEFIXED VOOR VOORKOMEN VAN 'undefined') */}
+      {/* MODAL 3: VARIATIES */}
       {selectedProductForVariations && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
@@ -985,9 +992,7 @@ export default function POSHome() {
             <div className="space-y-2 max-h-60 overflow-y-auto mb-4">
               {(selectedProductForVariations.variations_data || selectedProductForVariations.variations || []).length > 0 ? (
                 (selectedProductForVariations.variations_data || selectedProductForVariations.variations).map((v) => {
-                  const attrText = v.attributes && v.attributes.length > 0 
-                    ? v.attributes.map(a => `${a.name}: ${a.option}`).join(' | ') 
-                    : `Variatie #${v.id}`;
+                  const attrText = formatAttributes(v.attributes) || `Variatie #${v.id}`;
 
                   return (
                     <button
@@ -999,7 +1004,7 @@ export default function POSHome() {
                         <div>{attrText}</div>
                         <div className="text-[10px] text-gray-500">Voorraad: {v.stock_quantity ?? 'N.v.t.'}</div>
                       </div>
-                      <span className="text-red-600 font-bold">€{parseFloat(v.price || selectedProductForVariations.price).toFixed(2)}</span>
+                      <span className="text-red-600 font-bold">€{parseFloat(v.price || selectedProductForVariations.price || 0).toFixed(2)}</span>
                     </button>
                   );
                 })
@@ -1025,7 +1030,7 @@ export default function POSHome() {
             <div className="text-red-600 text-4xl">⚠️</div>
             <h3 className="text-lg font-bold">Voorraad Waarschuwing</h3>
             <p className="text-xs text-gray-600">
-              Dit product ({stockWarningModal.variation ? `${stockWarningModal.product.name} - ${stockWarningModal.variation.attributes.map(a=>a.option).join('/')}` : stockWarningModal.product.name}) heeft een voorraad van <strong>{stockWarningModal.variation ? stockWarningModal.variation.stock_quantity : stockWarningModal.product.stock_quantity}</strong>.
+              Dit product ({stockWarningModal.variation ? `${stockWarningModal.product.name} - ${formatAttributes(stockWarningModal.variation.attributes)}` : stockWarningModal.product.name}) heeft een voorraad van <strong>{stockWarningModal.variation ? stockWarningModal.variation.stock_quantity : stockWarningModal.product.stock_quantity}</strong>.
             </p>
             <p className="text-xs font-bold text-gray-800 bg-yellow-50 p-2 rounded border border-yellow-200">
               Weet je zeker dat je dit product hebt en wilt afrekenen?
@@ -1062,7 +1067,7 @@ export default function POSHome() {
               ) : (
                 allStores.map(store => (
                   <button
-                    key={store.id}
+                    key={store.id || store.store_id}
                     onClick={() => handleSelectStore(store)}
                     className="w-full p-3 border rounded text-left hover:bg-gray-100 transition flex justify-between items-center"
                   >
@@ -1070,7 +1075,7 @@ export default function POSHome() {
                       <div className="font-bold text-sm">{store.store_name || store.name}</div>
                       <div className="text-xs text-gray-500">{store.address || 'Geen adres ingevoerd'}</div>
                     </div>
-                    {selectedStore?.id === store.id && (
+                    {selectedStore?.id === (store.id || store.store_id) && (
                       <span className="text-xs bg-red-600 text-white px-2 py-0.5 rounded font-bold">Actief</span>
                     )}
                   </button>

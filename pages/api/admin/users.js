@@ -1,111 +1,79 @@
-import pool from '../../../lib/db';
-import bcrypt from 'bcryptjs';
+import db from '../../../lib/db'; // Pas aan naar jouw database verbinding pad indien nodig
 
 export default async function handler(req, res) {
-  // GET: Haal alle gebruikers op
-  if (req.method === 'GET') {
+  const { method } = req;
+
+  if (method === 'GET') {
     try {
-      const [rows] = await pool.execute('SELECT id, username, email, role, store_id FROM pos_users ORDER BY id ASC');
-      return res.status(200).json({ success: true, users: rows });
+      const [users] = await db.query('SELECT id, username, role, store_id, email FROM users');
+      return res.status(200).json({ success: true, users });
     } catch (error) {
-      console.error("Users GET Error:", error);
-      return res.status(500).json({ success: false, error: 'Fout bij ophalen gebruikers.' });
+      return res.status(500).json({ success: false, error: error.message });
     }
   }
 
-  // Hulpfunctie om store_id veilig te parsen
-  const parseStoreId = (val) => {
-    if (val === undefined || val === null || val === '' || val === 'null') {
-      return null;
-    }
-    const num = Number(val);
-    return isNaN(num) ? null : num;
-  };
-
-  // POST: Nieuwe gebruiker aanmaken
-  if (req.method === 'POST') {
+  if (method === 'POST') {
+    const { username, password, role, store_id, email } = req.body;
     try {
-      const { username, password, role, store_id, email } = req.body;
+      const parsedStoreId = store_id !== null && store_id !== undefined && store_id !== '' && store_id !== 'null' ? Number(store_id) : null;
+      
+      console.log(`Creating user: username=${username}, role=${role}, store_id=${parsedStoreId}`);
 
-      if (!username || !password) {
-        return res.status(400).json({ success: false, message: 'Gebruikersnaam en wachtwoord zijn verplicht.' });
-      }
-
-      const assignedRole = role || 'cashier';
-      const assignedStoreId = parseStoreId(store_id);
-      const userEmail = email || null;
-      const hashedPassword = await bcrypt.hash(password, 10);
-
-      await pool.execute(
-        `INSERT INTO pos_users (username, password_hash, email, role, store_id) VALUES (?, ?, ?, ?, ?)`,
-        [username.trim(), hashedPassword, userEmail, assignedRole, assignedStoreId]
+      const [result] = await db.query(
+        'INSERT INTO users (username, password, role, store_id, email) VALUES (?, ?, ?, ?, ?)',
+        [username, password, role || 'cashier', parsedStoreId, email || null]
       );
 
-      return res.status(200).json({ success: true, message: 'Medewerker succesvol aangemaakt!' });
+      return res.status(200).json({ success: true, userId: result.insertId });
     } catch (error) {
-      console.error("Users POST Error:", error);
-      return res.status(500).json({ success: false, error: 'Fout bij aanmaken medewerker: ' + error.message });
+      return res.status(500).json({ success: false, error: error.message });
     }
   }
 
-  // PUT: Bestaande gebruiker bewerken
-  if (req.method === 'PUT') {
+  if (method === 'PUT') {
+    const { id, username, password, role, store_id } = req.body;
     try {
-      const { id, username, password, role, store_id, email } = req.body;
-      if (!id) return res.status(400).json({ success: false, message: 'Geen ID opgegeven.' });
+      if (username && username.toLowerCase() === 'bendemen') {
+        return res.status(403).json({ success: false, error: 'Het hoofdaccount bendemen kan niet worden aangepast.' });
+      }
 
-      const [users] = await pool.execute('SELECT username FROM pos_users WHERE id = ?', [id]);
-      if (users.length === 0) return res.status(404).json({ success: false, message: 'Gebruiker niet gevonden.' });
+      const parsedStoreId = store_id !== null && store_id !== undefined && store_id !== '' && store_id !== 'null' ? Number(store_id) : null;
 
-      const currentDbUsername = users[0].username;
-      const finalUsername = (currentDbUsername.toLowerCase() === 'bendemen') ? 'bendemen' : (username ? username.trim() : currentDbUsername);
-      const assignedRole = role || 'cashier';
-      const assignedStoreId = parseStoreId(store_id);
-      const userEmail = email || null;
-
-      console.log(`Updating user ID ${id}: role=${assignedRole}, store_id=${assignedStoreId}`);
+      console.log(`Updating user ID ${id}: role=${role}, store_id=${parsedStoreId}`);
 
       if (password && password.trim() !== '') {
-        const hashedPassword = await bcrypt.hash(password, 10);
-        await pool.execute(
-          `UPDATE pos_users SET username = ?, password_hash = ?, email = ?, role = ?, store_id = ? WHERE id = ?`,
-          [finalUsername, hashedPassword, userEmail, assignedRole, assignedStoreId, id]
+        await db.query(
+          'UPDATE users SET username = ?, password = ?, role = ?, store_id = ? WHERE id = ?',
+          [username, password, role, parsedStoreId, id]
         );
       } else {
-        await pool.execute(
-          `UPDATE pos_users SET username = ?, email = ?, role = ?, store_id = ? WHERE id = ?`,
-          [finalUsername, userEmail, assignedRole, assignedStoreId, id]
+        await db.query(
+          'UPDATE users SET username = ?, role = ?, store_id = ? WHERE id = ?',
+          [username, role, parsedStoreId, id]
         );
       }
 
-      return res.status(200).json({ success: true, message: 'Gebruiker bijgewerkt!' });
+      return res.status(200).json({ success: true, message: 'Gebruiker bijgewerkt' });
     } catch (error) {
-      console.error("Users PUT Error:", error);
-      return res.status(500).json({ success: false, error: 'Fout bij bijwerken gebruiker: ' + error.message });
+      return res.status(500).json({ success: false, error: error.message });
     }
   }
 
-  // DELETE: Verwijder gebruiker
-  if (req.method === 'DELETE') {
+  if (method === 'DELETE') {
+    const { id } = req.query;
     try {
-      const { id } = req.query;
-      if (!id) return res.status(400).json({ success: false, message: 'Geen ID opgegeven.' });
-
-      const [users] = await pool.execute('SELECT username FROM pos_users WHERE id = ?', [id]);
-      if (users.length === 0) return res.status(404).json({ success: false, message: 'Gebruiker niet gevonden.' });
-
-      if (users[0].username.toLowerCase() === 'bendemen') {
-        return res.status(403).json({ success: false, message: 'Het hoofdaccount bendemen kan niet worden verwijderd.' });
+      const [user] = await db.query('SELECT username FROM users WHERE id = ?', [id]);
+      if (user && user[0] && user[0].username.toLowerCase() === 'bendemen') {
+        return res.status(403).json({ success: false, error: 'Het hoofdaccount bendemen kan niet worden verwijderd.' });
       }
 
-      await pool.execute('DELETE FROM pos_users WHERE id = ?', [id]);
-      return res.status(200).json({ success: true, message: 'Gebruiker succesvol verwijderd.' });
+      await db.query('DELETE FROM users WHERE id = ?', [id]);
+      return res.status(200).json({ success: true });
     } catch (error) {
-      console.error("Users DELETE Error:", error);
-      return res.status(500).json({ success: false, error: 'Fout bij verwijderen gebruiker.' });
+      return res.status(500).json({ success: false, error: error.message });
     }
   }
 
   res.setHeader('Allow', ['GET', 'POST', 'PUT', 'DELETE']);
-  return res.status(405).json({ success: false, message: `Method ${req.method} not allowed` });
+  res.status(405).end(`Method ${method} Not Allowed`);
 }

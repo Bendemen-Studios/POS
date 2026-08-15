@@ -29,6 +29,18 @@ export default function AdminDashboard() {
   const [currentPage, setCurrentPage] = useState(1);
   const ordersPerPage = 10;
 
+  // HELPER: Format Attribute Text (Geen undefined meer)
+  const formatAttributes = (attributes) => {
+    if (!attributes || !Array.isArray(attributes) || attributes.length === 0) return '';
+    return attributes
+      .map((a) => {
+        const key = a.name || a.slug || 'Optie';
+        const val = a.option || 'Standaard';
+        return `${key}: ${val}`;
+      })
+      .join(' | ');
+  };
+
   useEffect(() => {
     const userStr = localStorage.getItem('pos_user');
     if (!userStr) {
@@ -175,7 +187,9 @@ export default function AdminDashboard() {
       return;
     }
     try {
-      const storeIdNum = editingUser.store_id !== '' && editingUser.store_id !== null && editingUser.store_id !== 'null' && editingUser.store_id !== undefined ? Number(editingUser.store_id) : null;
+      const rawStoreId = editingUser.store_id;
+      const storeIdNum = rawStoreId !== '' && rawStoreId !== null && rawStoreId !== 'null' && rawStoreId !== undefined ? Number(rawStoreId) : null;
+      
       const payload = {
         ...editingUser,
         store_id: storeIdNum !== null && !isNaN(storeIdNum) ? storeIdNum : null
@@ -388,7 +402,7 @@ export default function AdminDashboard() {
                       {stores.map(s => {
                         const sId = s.id || s.store_id;
                         return (
-                          <option key={sId} value={sId}>{s.store_name || s.name || `Filiaal #${sId}`}</option>
+                          <option key={sId} value={String(sId)}>{s.store_name || s.name || `Filiaal #${sId}`}</option>
                         );
                       })}
                     </select>
@@ -642,9 +656,7 @@ export default function AdminDashboard() {
                             </tr>
                             
                             {product.type === 'variable' && productVariations.map(v => {
-                              const attrText = v.attributes && v.attributes.length > 0 
-                                ? v.attributes.map(a => `${a.name}: ${a.option}`).join(' | ') 
-                                : `Variatie #${v.id}`;
+                              const attrText = formatAttributes(v.attributes) || `Variatie #${v.id}`;
 
                               return (
                                 <tr key={`var_${v.id}`} className="bg-gray-50 text-gray-600">
