@@ -266,7 +266,7 @@ export default function AdminDashboard() {
       });
       const data = await res.json();
       if (data.success) {
-        alert('SumUp Reader succesvol bijgewerkt!');
+        alert('SumUp Reader succesvol gekoppeld/bijgewerkt!');
         setEditingSumUp(null);
         fetchStores();
       } else {
@@ -282,8 +282,6 @@ export default function AdminDashboard() {
   const indexOfFirstOrder = indexOfLastOrder - ordersPerPage;
   const currentOrders = orders.slice(indexOfFirstOrder, indexOfLastOrder);
   const totalPages = Math.ceil(orders.length / ordersPerPage);
-
-  const connectedStores = stores.filter(s => s.terminal_id && s.terminal_id.trim() !== '');
 
   if (!currentUser) return <div className="p-8 text-center font-bold">Laden...</div>;
 
@@ -438,7 +436,7 @@ export default function AdminDashboard() {
             {activeTab === 'stores' && (
               <div className="space-y-6">
                 <div className="bg-white rounded-lg shadow p-6">
-                  <h3 className="text-md font-bold mb-4">Nieuw Filiaal Toevoegen (met Pair Code / Terminal ID)</h3>
+                  <h3 className="text-md font-bold mb-4">Nieuw Filiaal Toevoegen</h3>
                   <form onSubmit={handleCreateStore} className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <input
                       type="text"
@@ -464,14 +462,13 @@ export default function AdminDashboard() {
                     />
                     <input
                       type="text"
-                      placeholder="SumUp Terminal ID / Pair Code (Vereist voor connectie)"
+                      placeholder="SumUp Terminal ID / Pair Code (Optioneel, kan later)"
                       value={newStore.terminal_id}
                       onChange={(e) => setNewStore({...newStore, terminal_id: e.target.value})}
-                      className="p-2 border rounded text-xs border-red-400 font-bold"
-                      required
+                      className="p-2 border rounded text-xs"
                     />
                     <button type="submit" className="bg-red-600 hover:bg-red-700 text-white font-bold p-2 rounded text-xs uppercase md:col-span-2">
-                      Filiaal Aanmaken & Koppelen
+                      Filiaal Aanmaken
                     </button>
                   </form>
                 </div>
@@ -498,25 +495,29 @@ export default function AdminDashboard() {
               </div>
             )}
 
-            {/* 3. SUMUP TAB */}
+            {/* 3. SUMUP TAB (Toont alle filialen met optie om te koppelen/wijzigen) */}
             {activeTab === 'sumup' && (
               <div className="bg-white rounded-lg shadow p-6">
                 <h3 className="text-md font-bold mb-2">💳 SumUp Terminal Koppelingen per Locatie</h3>
-                <p className="text-xs text-gray-500 mb-4">Hier worden uitsluitend filialen getoond die gekoppeld zijn via een actieve Terminal ID / Pair Code.</p>
+                <p className="text-xs text-gray-500 mb-4">Beheer hier per filiaal de gekoppelde SumUp Terminal ID / Pair Code. Je kunt op elk moment een reader koppelen of wijzigen.</p>
                 <div className="space-y-3">
-                  {connectedStores.length === 0 ? (
-                    <div className="text-xs text-gray-400 p-4 border rounded bg-gray-50 text-center">Geen actieve SumUp connecties gevonden. Voeg bij een filiaal een Terminal ID / Pair code toe via 'Filialen Beheren'.</div>
+                  {stores.length === 0 ? (
+                    <div className="text-xs text-gray-400 p-4 border rounded bg-gray-50 text-center">Geen filialen gevonden. Maak eerst een filiaal aan via 'Filialen Beheren'.</div>
                   ) : (
-                    connectedStores.map(s => (
+                    stores.map(s => (
                       <div key={s.id} className="border p-3 rounded flex justify-between items-center bg-gray-50">
                         <div>
                           <span className="font-bold text-sm">{s.store_name || s.name}</span>
-                          <div className="text-xs text-gray-600 mt-0.5">Terminal ID / Code: <span className="font-mono font-bold text-black">{s.terminal_id}</span></div>
+                          <div className="text-xs text-gray-600 mt-0.5">
+                            Terminal ID / Code: <span className="font-mono font-bold text-black">{s.terminal_id ? s.terminal_id : 'Nog niet gekoppeld'}</span>
+                          </div>
                         </div>
                         <div className="flex items-center space-x-2">
-                          <span className="bg-green-100 text-green-800 text-xs px-2 py-1 rounded font-bold">Actief</span>
+                          <span className={`text-xs px-2 py-1 rounded font-bold ${s.terminal_id ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
+                            {s.terminal_id ? 'Gekoppeld' : 'Geen Reader'}
+                          </span>
                           <button onClick={() => setEditingSumUp(s)} className="text-xs bg-black text-white px-3 py-1 rounded font-bold hover:bg-gray-800">
-                            Bewerken
+                            {s.terminal_id ? 'Wijzigen' : 'Koppelen'}
                           </button>
                         </div>
                       </div>
@@ -702,13 +703,13 @@ export default function AdminDashboard() {
             <div>
               <label className="text-xs font-bold text-gray-600 block mb-1">Koppel Filiaal</label>
               <select
-                value={editingUser.store_id !== null && editingUser.store_id !== undefined ? editingUser.store_id : ''}
-                onChange={(e) => setEditingUser({...editingUser, store_id: e.target.value})}
+                value={editingUser.store_id !== null && editingUser.store_id !== undefined ? String(editingUser.store_id) : ''}
+                onChange={(e) => setEditingUser({...editingUser, store_id: e.target.value === '' ? null : Number(e.target.value)})}
                 className="w-full p-2 border rounded text-xs"
               >
                 <option value="">Geen Filiaal</option>
                 {stores.map(s => (
-                  <option key={s.id} value={s.id}>{s.store_name || s.name}</option>
+                  <option key={s.id} value={String(s.id)}>{s.store_name || s.name}</option>
                 ))}
               </select>
             </div>
@@ -771,20 +772,21 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {/* MODAL: SUMUP READER BEWERKEN */}
+      {/* MODAL: SUMUP READER KOPPELEN / BEWERKEN */}
       {editingSumUp && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <form onSubmit={handleUpdateSumUp} className="bg-white rounded-lg p-6 max-w-sm w-full space-y-3 shadow-2xl">
-            <h3 className="text-md font-bold mb-2">SumUp Reader Bewerken: {editingSumUp.store_name || editingSumUp.name}</h3>
+            <h3 className="text-md font-bold mb-2">SumUp Reader Koppelen: {editingSumUp.store_name || editingSumUp.name}</h3>
             <div>
               <label className="text-xs font-bold text-gray-600 block mb-1">Terminal ID / Pair Code</label>
               <input
                 type="text"
+                placeholder="Voer SumUp Pair Code in"
                 value={editingSumUp.terminal_id || ''}
                 onChange={(e) => setEditingSumUp({...editingSumUp, terminal_id: e.target.value})}
                 className="w-full p-2 border rounded text-xs font-bold"
-                required
               />
+              <p className="text-[10px] text-gray-400 mt-1">Laat dit leeg als je de reader wilt ontkoppelen.</p>
             </div>
             <div className="flex space-x-2 pt-2">
               <button type="button" onClick={() => setEditingSumUp(null)} className="w-1/2 bg-gray-200 p-2 rounded text-xs font-bold">Annuleren</button>
