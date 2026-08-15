@@ -32,25 +32,26 @@ export default async function handler(req, res) {
     let stores = [];
 
     if (isAdmin) {
-      // Admins zien alle actieve filialen
+      // Admins zien alle filialen
       const [allStores] = await db.query(
-        'SELECT id, store_name, address, pickup_id, terminal_id FROM stores WHERE is_active = 1 OR is_active IS NULL'
+        'SELECT id, store_name, address, pickup_id, terminal_id FROM stores'
       );
       stores = allStores;
     } else {
-      // Reguliere gebruikers zien alleen de winkel gekoppeld aan hun store_id
+      // Reguliere gebruikers: zoek op hun store_id / id / store_name
+      const userStoreId = user.store_id || '';
+
       const [userStoreRows] = await db.query(
         `SELECT id, store_name, address, pickup_id, terminal_id 
          FROM stores 
-         WHERE (id = ? OR store_name = ?)
-         AND (is_active = 1 OR is_active IS NULL)`,
-        [user.store_id || 0, user.store_id || '']
+         WHERE id = ? OR store_name = ?`,
+        [userStoreId, userStoreId]
       );
 
-      // Fallback: Als er niks matcht via ID, haal alle actieve filialen op
+      // Fallback: Als er geen specifieke match is, haal alle filialen op
       if (userStoreRows.length === 0) {
         const [fallbackStores] = await db.query(
-          'SELECT id, store_name, address, pickup_id, terminal_id FROM stores WHERE is_active = 1 OR is_active IS NULL'
+          'SELECT id, store_name, address, pickup_id, terminal_id FROM stores'
         );
         stores = fallbackStores;
       } else {
@@ -61,6 +62,6 @@ export default async function handler(req, res) {
     return res.status(200).json({ success: true, stores });
   } catch (error) {
     console.error('[STORE SELECTION API ERROR]:', error);
-    return res.status(500).json({ success: false, message: 'Fout bij ophalen van filialen.' });
+    return res.status(500).json({ success: false, message: 'Fout bij ophalen van filialen uit de database.' });
   }
 }
