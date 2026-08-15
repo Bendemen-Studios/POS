@@ -148,7 +148,7 @@ export default function POSHome() {
       }
     } catch (err) {
       console.error('Fout bij ophalen afhaalbestellingen:', err);
-    } font-bold finally {
+    } finally {
       setLoadingPickup(false);
     }
   };
