@@ -1,13 +1,18 @@
-import db from '../../../lib/db'; // Pas aan naar jouw database verbinding pad indien nodig
+import db from '../../../lib/db';
 
 export default async function handler(req, res) {
   const { method } = req;
 
   if (method === 'GET') {
     try {
-      const [users] = await db.query('SELECT id, username, role, store_id, email FROM users');
-      return res.status(200).json({ success: true, users });
+      const [rows] = await db.query('SELECT id, username, role, store_id, email FROM users');
+      
+      // Zorg ervoor dat er altijd een nette array van gebruikers wordt geretourneerd
+      const usersList = Array.isArray(rows) ? rows : [];
+      
+      return res.status(200).json({ success: true, users: usersList });
     } catch (error) {
+      console.error('Fout bij ophalen gebruikers:', error);
       return res.status(500).json({ success: false, error: error.message });
     }
   }
@@ -62,8 +67,10 @@ export default async function handler(req, res) {
   if (method === 'DELETE') {
     const { id } = req.query;
     try {
-      const [user] = await db.query('SELECT username FROM users WHERE id = ?', [id]);
-      if (user && user[0] && user[0].username.toLowerCase() === 'bendemen') {
+      const [rows] = await db.query('SELECT username FROM users WHERE id = ?', [id]);
+      const user = Array.isArray(rows) ? rows[0] : null;
+
+      if (user && user.username && user.username.toLowerCase() === 'bendemen') {
         return res.status(403).json({ success: false, error: 'Het hoofdaccount bendemen kan niet worden verwijderd.' });
       }
 
