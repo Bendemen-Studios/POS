@@ -5,11 +5,13 @@ export default async function handler(req, res) {
 
   if (method === 'GET') {
     try {
-      const [rows] = await db.query('SELECT id, username, role, store_id, email FROM users');
+      const [rows] = await db.query(`
+        SELECT u.id, u.username, u.role, u.store_id, u.email, s.store_name 
+        FROM users u 
+        LEFT JOIN stores s ON u.store_id = s.id
+      `);
       
-      // Zorg ervoor dat er altijd een nette array van gebruikers wordt geretourneerd
       const usersList = Array.isArray(rows) ? rows : [];
-      
       return res.status(200).json({ success: true, users: usersList });
     } catch (error) {
       console.error('Fout bij ophalen gebruikers:', error);
@@ -21,8 +23,6 @@ export default async function handler(req, res) {
     const { username, password, role, store_id, email } = req.body;
     try {
       const parsedStoreId = store_id !== null && store_id !== undefined && store_id !== '' && store_id !== 'null' ? Number(store_id) : null;
-      
-      console.log(`Creating user: username=${username}, role=${role}, store_id=${parsedStoreId}`);
 
       const [result] = await db.query(
         'INSERT INTO users (username, password, role, store_id, email) VALUES (?, ?, ?, ?, ?)',
@@ -43,8 +43,6 @@ export default async function handler(req, res) {
       }
 
       const parsedStoreId = store_id !== null && store_id !== undefined && store_id !== '' && store_id !== 'null' ? Number(store_id) : null;
-
-      console.log(`Updating user ID ${id}: role=${role}, store_id=${parsedStoreId}`);
 
       if (password && password.trim() !== '') {
         await db.query(
