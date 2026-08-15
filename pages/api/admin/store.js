@@ -6,11 +6,11 @@ export default async function handler(req, res) {
   if (method === 'GET') {
     try {
       const [rows] = await db.query('SELECT * FROM stores');
-      const formattedStores = (Array.isArray(rows) ? rows : []).map(s => ({
+      const formattedStores = (Array.isArray(rows) ? rows : []).map((s) => ({
         ...s,
-        id: s.id || s.store_id,
-        store_id: s.store_id || s.id,
-        store_name: s.store_name || s.name || 'Onbekend Filiaal'
+        id: s.id,
+        store_id: s.id,
+        store_name: s.store_name || 'Onbekend Filiaal'
       }));
       return res.status(200).json({ success: true, stores: formattedStores });
     } catch (error) {
@@ -24,8 +24,8 @@ export default async function handler(req, res) {
     try {
       const customId = `store_${Date.now()}`;
       await db.query(
-        'INSERT INTO stores (id, store_id, store_name, address, receipt_header, receipt_footer, pickup_id, terminal_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        [customId, customId, store_name, address || null, receipt_header || null, receipt_footer || null, pickup_id || null, terminal_id || null]
+        'INSERT INTO stores (id, store_name, address, receipt_header, receipt_footer, pickup_id, terminal_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [customId, store_name, address || null, receipt_header || null, receipt_footer || null, pickup_id || null, terminal_id || null]
       );
       return res.status(200).json({ success: true, id: customId });
     } catch (error) {

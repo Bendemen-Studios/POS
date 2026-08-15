@@ -3,7 +3,7 @@ import db from '../../../lib/db';
 export default async function handler(req, res) {
   const { method } = req;
 
-  // 1. Zorg dat de store_id tabel kolom VARCHAR accepteert
+  // Zorg dat de store_id kolom in users VARCHAR accepteert voor string-ID's
   try {
     await db.query('ALTER TABLE users MODIFY COLUMN store_id VARCHAR(255) DEFAULT NULL');
   } catch (e) {
@@ -19,7 +19,7 @@ export default async function handler(req, res) {
           u.role, 
           u.store_id, 
           u.email, 
-          COALESCE(s.store_name, s.name, 'Geen') AS store_name 
+          COALESCE(s.store_name, 'Geen') AS store_name 
         FROM users u 
         LEFT JOIN stores s ON CAST(u.store_id AS CHAR) = CAST(s.id AS CHAR)
       `);
