@@ -1,9 +1,10 @@
 import db from '../../../lib/db';
+import bcrypt from 'bcryptjs';
 
 export default async function handler(req, res) {
   const { method } = req;
 
-  // Zorg dat de store_id kolom in users VARCHAR accepteert voor string-ID's
+  // Zorg dat de store_id kolom VARCHAR accepteert voor string-ID's
   try {
     await db.query('ALTER TABLE users MODIFY COLUMN store_id VARCHAR(255) DEFAULT NULL');
   } catch (e) {
@@ -38,12 +39,19 @@ export default async function handler(req, res) {
 
   if (method === 'POST') {
     const { username, password, role, store_id, email } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({ success: false, error: 'Gebruikersnaam en wachtwoord zijn verplicht.' });
+    }
+
     try {
       const parsedStoreId = (store_id && store_id !== '' && store_id !== 'null' && store_id !== '0') ? String(store_id) : null;
 
+      // Hash het wachtwoord met bcrypt (10 salt rounds)
+      const hashedPassword = await bcrypt.hash(password, 10);
+
       const [result] = await db.query(
         'INSERT INTO users (username, password, role, store_id, email) VALUES (?, ?, ?, ?, ?)',
-        [username, password, role || 'cashier', parsedStoreId, email || null]
+        [username, hashedPassword, role || 'cashier', parsedStoreId, email || null]
       );
 
       return res.status(200).json({ success: true, userId: result.insertId });
@@ -62,9 +70,12 @@ export default async function handler(req, res) {
       const parsedStoreId = (store_id && store_id !== '' && store_id !== 'null' && store_id !== '0') ? String(store_id) : null;
 
       if (password && password.trim() !== '') {
+        // Hash het nieuwe wachtwoord als dit is ingevuld
+        const hashedPassword = await bcrypt.hash(password, 10);
+
         await db.query(
           'UPDATE users SET username = ?, password = ?, role = ?, store_id = ? WHERE id = ?',
-          [username, password, role, parsedStoreId, id]
+          [username, hashedPassword, role, parsedStoreId, id]
         );
       } else {
         await db.query(

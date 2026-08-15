@@ -14,27 +14,50 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Zoek de gebruiker op gebruikersnaam óf e-mailadres
-    const [rows] = await pool.execute('SELECT * FROM pos_users WHERE username = ? OR email = ?', [username, username]);
-    
-    if (rows.length === 0) {
+    const [rows] = await pool.query(
+      `SELECT 
+        u.*, 
+        COALESCE(s.store_name, 'Geen Filiaal') AS store_name 
+       FROM users u 
+       LEFT JOIN stores s ON CAST(u.store_id AS CHAR) = CAST(s.id AS CHAR) 
+       WHERE u.username = ? OR u.email = ?`,
+      [username, username]
+    );
+
+    if (!Array.isArray(rows) || rows.length === 0) {
       return res.status(401).json({ success: false, message: 'Ongeldige inloggegevens.' });
     }
 
     const user = rows[0];
+    const storedPassword = user.password || user.password_hash || '';
 
-    // Vergelijk het ingevoerde wachtwoord met de hash in de database
-    const isMatch = await bcrypt.compare(password, user.password_hash);
+    // Controleer of het opgeslagen wachtwoord een bcrypt hash is (begint met $2a$ of $2b$)
+    const isBcryptHash = storedPassword.startsWith('$2a$') || storedPassword.startsWith('$2b$');
+    let isMatch = false;
+
+    if (isBcryptHash) {
+      isMatch = await bcrypt.compare(password, storedPassword);
+    } else {
+      // Vergelijk tijdelijk met platte tekst
+      isMatch = password === storedPassword;
+
+      // Automatische migratie: zet het platte tekst wachtwoord meteen om naar een bcrypt hash in de DB
+      if (isMatch) {
+        try {
+          const newHash = await bcrypt.hash(password, 10);
+          await pool.query('UPDATE users SET password = ? WHERE id = ?', [newHash, user.id]);
+        } catch (migErr) {
+          console.error('Fout bij automatisch upgraden naar bcrypt hash:', migErr);
+        }
+      }
+    }
 
     if (!isMatch) {
       return res.status(401).json({ success: false, message: 'Ongeldige inloggegevens.' });
     }
 
-    // Is het 'bendemen' hoofdaccount ingelogd?
-    const isMainOwnerAccount = user.username === 'bendemen' || user.email === 'info@bendemen.nl';
+    const isMainOwnerAccount = user.username?.toLowerCase() === 'bendemen' || user.email === 'bendemenbv@gmail.com' || user.email === 'info@bendemen.nl';
 
-    // Bepaal de rol: als het het hoofdaccount is -> super_admin. 
-    // Voor alle overige personeelsaccounts gebruiken we dynamisch de rol uit de database!
     const effectiveRole = isMainOwnerAccount 
       ? 'super_admin' 
       : (user.role || 'cashier');
@@ -47,7 +70,8 @@ export default async function handler(req, res) {
         username: user.username,
         email: user.email || '',
         role: effectiveRole,
-        store_id: user.store_id || null
+        store_id: user.store_id || null,
+        store_name: user.store_name || 'Geen Filiaal'
       }
     });
 
