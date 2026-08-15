@@ -5,7 +5,7 @@ import Link from 'next/link';
 export default function AdminDashboard() {
   const router = useRouter();
   const [currentUser, setCurrentUser] = useState(null);
-  const [activeTab, setActiveTab] = useState('users'); // 'users', 'stores', 'sumup', 'orders', 'inventory'
+  const [activeTab, setActiveTab] = useState('users');
 
   // Data states
   const [users, setUsers] = useState([]);
@@ -29,7 +29,7 @@ export default function AdminDashboard() {
   const [currentPage, setCurrentPage] = useState(1);
   const ordersPerPage = 10;
 
-  // HELPER: Format Attribute Text (Geen undefined meer)
+  // HELPER: Format Attribute Text
   const formatAttributes = (attributes) => {
     if (!attributes || !Array.isArray(attributes) || attributes.length === 0) return '';
     return attributes
@@ -101,22 +101,7 @@ export default function AdminDashboard() {
       const res = await fetch('/api/woocommerce/products');
       const data = await res.json();
       if (data.success) {
-        const rawProducts = data.products || [];
-        setProducts(rawProducts);
-
-        rawProducts.forEach(async (prod) => {
-          if (prod.type === 'variable' && (!prod.variations_data || prod.variations_data.length === 0) && (!prod.variations || prod.variations.length === 0)) {
-            try {
-              const varRes = await fetch(`/api/woocommerce/variations?productId=${prod.id}`);
-              const varData = await varRes.json();
-              if (varData.success && varData.variations) {
-                setProducts(prev => prev.map(p => p.id === prod.id ? { ...p, variations: varData.variations } : p));
-              }
-            } catch (e) {
-              console.error(`Fout bij laden variaties voor product ${prod.id}`, e);
-            }
-          }
-        });
+        setProducts(data.products || []);
       }
     } catch (err) {
       console.error('Fout bij ophalen producten:', err);
@@ -308,7 +293,6 @@ export default function AdminDashboard() {
 
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col">
-      {/* Header */}
       <header className="bg-black text-white p-4 flex justify-between items-center shadow-md">
         <div className="flex items-center space-x-3">
           <span className="font-bold text-xl tracking-wider">BDM POS // Admin Dashboard</span>
@@ -322,7 +306,6 @@ export default function AdminDashboard() {
         </div>
       </header>
 
-      {/* Nav Tabs */}
       <div className="bg-white border-b px-6 py-2 flex space-x-4 shadow-sm overflow-x-auto">
         <button
           onClick={() => setActiveTab('users')}
@@ -356,7 +339,6 @@ export default function AdminDashboard() {
         </button>
       </div>
 
-      {/* Main Content Container */}
       <div className="flex-1 p-6 max-w-7xl mx-auto w-full">
         {loading ? (
           <div className="text-center py-12 font-bold text-gray-500">Gegevens laden...</div>
@@ -429,14 +411,17 @@ export default function AdminDashboard() {
                         {users.map(u => {
                           const matchedStore = stores.find(s => String(s.id || s.store_id) === String(u.store_id));
                           const isBendemen = u.username.toLowerCase() === 'bendemen';
+                          const storeNameDisplay = u.store_name && u.store_name !== 'Geen' 
+                            ? u.store_name 
+                            : (matchedStore ? (matchedStore.store_name || matchedStore.name) : (u.store_id ? `ID: ${u.store_id}` : 'Geen'));
 
                           return (
                             <tr key={u.id} className="hover:bg-gray-50">
                               <td className="p-3">#{u.id}</td>
                               <td className="p-3 font-bold">{u.username}</td>
                               <td className="p-3"><span className="bg-gray-200 px-2 py-0.5 rounded uppercase font-semibold text-[10px]">{u.role}</span></td>
-                              <td className="p-3">
-                                {matchedStore ? (matchedStore.store_name || matchedStore.name) : (u.store_id ? `ID: ${u.store_id}` : 'Geen')}
+                              <td className="p-3 font-semibold text-gray-700">
+                                {storeNameDisplay}
                               </td>
                               <td className="p-3 text-right space-x-2">
                                 {isBendemen ? (
@@ -470,7 +455,7 @@ export default function AdminDashboard() {
                   <form onSubmit={handleCreateStore} className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <input
                       type="text"
-                      placeholder="Naam Filiaal (bijv. Ons Winkeltje)"
+                      placeholder="Naam Filiaal"
                       value={newStore.store_name}
                       onChange={(e) => setNewStore({...newStore, store_name: e.target.value})}
                       className="p-2 border rounded text-xs"
@@ -485,14 +470,14 @@ export default function AdminDashboard() {
                     />
                     <input
                       type="text"
-                      placeholder="Local Pickup Plus ID (optioneel)"
+                      placeholder="Local Pickup Plus ID"
                       value={newStore.pickup_id}
                       onChange={(e) => setNewStore({...newStore, pickup_id: e.target.value})}
                       className="p-2 border rounded text-xs"
                     />
                     <input
                       type="text"
-                      placeholder="SumUp Terminal ID / Pair Code (Optioneel, kan later)"
+                      placeholder="SumUp Terminal ID / Pair Code"
                       value={newStore.terminal_id}
                       onChange={(e) => setNewStore({...newStore, terminal_id: e.target.value})}
                       className="p-2 border rounded text-xs"
@@ -529,10 +514,10 @@ export default function AdminDashboard() {
             {activeTab === 'sumup' && (
               <div className="bg-white rounded-lg shadow p-6">
                 <h3 className="text-md font-bold mb-2">💳 SumUp Terminal Koppelingen per Locatie</h3>
-                <p className="text-xs text-gray-500 mb-4">Beheer hier per filiaal de gekoppelde SumUp Terminal ID / Pair Code. Je kunt op elk moment een reader koppelen of wijzigen.</p>
+                <p className="text-xs text-gray-500 mb-4">Beheer hier per filiaal de gekoppelde SumUp Terminal ID / Pair Code.</p>
                 <div className="space-y-3">
                   {stores.length === 0 ? (
-                    <div className="text-xs text-gray-400 p-4 border rounded bg-gray-50 text-center">Geen filialen gevonden. Maak eerst een filiaal aan via 'Filialen Beheren'.</div>
+                    <div className="text-xs text-gray-400 p-4 border rounded bg-gray-50 text-center">Geen filialen gevonden.</div>
                   ) : (
                     stores.map(s => (
                       <div key={s.id || s.store_id} className="border p-3 rounded flex justify-between items-center bg-gray-50">
@@ -565,7 +550,7 @@ export default function AdminDashboard() {
                   <table className="w-full text-left text-xs divide-y mb-4">
                     <thead>
                       <tr className="bg-gray-50">
-                        <th className="p-3">Order # (Volgnummer)</th>
+                        <th className="p-3">Order #</th>
                         <th className="p-3">Klant</th>
                         <th className="p-3">Status</th>
                         <th className="p-3">Totaal</th>
@@ -621,7 +606,7 @@ export default function AdminDashboard() {
             {/* 5. INVENTORY TAB */}
             {activeTab === 'inventory' && (
               <div className="bg-white rounded-lg shadow p-6">
-                <h3 className="text-md font-bold mb-4">📦 Producten & Voorraad (Inclusief Variaties) ({products.length})</h3>
+                <h3 className="text-md font-bold mb-4">📦 Producten & Voorraad ({products.length})</h3>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs divide-y">
                     <thead>
@@ -634,7 +619,10 @@ export default function AdminDashboard() {
                     </thead>
                     <tbody className="divide-y">
                       {products.map(product => {
-                        const productVariations = product.variations_data || product.variations || [];
+                        const productVariations = Array.isArray(product.variations_data) && product.variations_data.length > 0 
+                          ? product.variations_data 
+                          : (Array.isArray(product.variations) && typeof product.variations[0] === 'object' ? product.variations : []);
+
                         return (
                           <>
                             <tr key={product.id} className="hover:bg-gray-50 font-semibold">
@@ -703,7 +691,7 @@ export default function AdminDashboard() {
             </div>
 
             <div>
-              <label className="text-xs font-bold text-gray-600 block mb-1">Nieuw Wachtwoord (leeg laten om niet te wijzigen)</label>
+              <label className="text-xs font-bold text-gray-600 block mb-1">Nieuw Wachtwoord (optioneel)</label>
               <input 
                 type="password" 
                 placeholder="Nieuw wachtwoord"

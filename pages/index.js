@@ -9,7 +9,7 @@ export default function POSHome() {
   const [currentUser, setCurrentUser] = useState(null);
   const [selectedStore, setSelectedStore] = useState(null);
   const [allStores, setAllStores] = useState([]);
-  const [activeTab, setActiveTab] = useState('pos'); // 'pos' of 'pickup'
+  const [activeTab, setActiveTab] = useState('pos');
 
   // Producten, Cart & Categorieën
   const [products, setProducts] = useState([]);
@@ -17,7 +17,7 @@ export default function POSHome() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('ALL');
 
-  // Modal States: Open Bedrag, Variaties, Custom Artikel & Filiaal
+  // Modal States
   const [selectedProductForVariations, setSelectedProductForVariations] = useState(null);
   const [openAmountProduct, setOpenAmountProduct] = useState(null);
   const [customPriceInput, setCustomPriceInput] = useState('');
@@ -53,7 +53,7 @@ export default function POSHome() {
   const [pickupOrders, setPickupOrders] = useState([]);
   const [loadingPickup, setLoadingPickup] = useState(false);
 
-  // HELPER: Format Attribute Text (Geen undefined meer)
+  // HELPER: Format Attribute Text
   const formatAttributes = (attributes) => {
     if (!attributes || !Array.isArray(attributes) || attributes.length === 0) return '';
     return attributes
@@ -148,7 +148,7 @@ export default function POSHome() {
       }
     } catch (err) {
       console.error('Fout bij ophalen afhaalbestellingen:', err);
-    } finally {
+    } font-bold finally {
       setLoadingPickup(false);
     }
   };
@@ -201,9 +201,15 @@ export default function POSHome() {
   );
 
   const handleProductClick = (product) => {
-    const productVariations = product.variations_data || product.variations || [];
+    const productVariations = Array.isArray(product.variations_data) && product.variations_data.length > 0
+      ? product.variations_data
+      : (Array.isArray(product.variations) && typeof product.variations[0] === 'object' ? product.variations : []);
+
     if (productVariations.length > 0) {
-      setSelectedProductForVariations(product);
+      setSelectedProductForVariations({
+        ...product,
+        variations_data: productVariations
+      });
       return;
     }
 
@@ -517,7 +523,6 @@ export default function POSHome() {
 
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col">
-      {/* Header */}
       <header className="bg-black text-white p-4 flex justify-between items-center shadow-md">
         <div className="flex items-center space-x-3">
           <span className="font-bold text-xl tracking-wider">BDM POS</span>
@@ -525,7 +530,6 @@ export default function POSHome() {
           <button
             onClick={() => setShowStoreModal(true)}
             className="text-xs bg-red-600 hover:bg-red-700 text-white px-2.5 py-1 rounded font-bold uppercase flex items-center space-x-1 shadow-sm transition"
-            title="Klik om van filiaal te wisselen"
           >
             <span>📍</span>
             <span>{storeDisplayName}</span>
@@ -583,7 +587,6 @@ export default function POSHome() {
         </div>
       </header>
 
-      {/* Main Content: Pickup of POS */}
       {activeTab === 'pickup' ? (
         <div className="flex-1 p-6 max-w-6xl mx-auto w-full">
           <div className="bg-white rounded-lg shadow p-6 space-y-4">
@@ -659,7 +662,6 @@ export default function POSHome() {
       ) : (
         <div className="flex-1 flex flex-col md:flex-row p-4 gap-4 overflow-hidden">
           
-          {/* Producten & Categorieën Catalogus */}
           <div className="w-full md:w-3/5 flex flex-col bg-white rounded-lg shadow p-4">
             
             <div className="flex space-x-2 mb-3">
@@ -678,7 +680,6 @@ export default function POSHome() {
               </button>
             </div>
 
-            {/* Categorie Tegels */}
             <div className="flex space-x-2 overflow-x-auto pb-3 mb-3 border-b">
               <button
                 onClick={() => setSelectedCategory('ALL')}
@@ -708,11 +709,12 @@ export default function POSHome() {
               })}
             </div>
 
-            {/* Producten Grid */}
             <div className="flex-1 overflow-y-auto grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[calc(100vh-280px)]">
               {filteredProducts.map((product) => {
                 const imageUrl = product.images && product.images.length > 0 ? product.images[0].src : null;
-                const productVariations = product.variations_data || product.variations || [];
+                const productVariations = Array.isArray(product.variations_data) && product.variations_data.length > 0
+                  ? product.variations_data
+                  : (Array.isArray(product.variations) && typeof product.variations[0] === 'object' ? product.variations : []);
                 const hasVariations = productVariations.length > 0;
                 const isPriceZero = parseFloat(product.price || 0) === 0;
                 const stockQty = product.stock_quantity;
@@ -763,13 +765,12 @@ export default function POSHome() {
             </div>
           </div>
 
-          {/* Winkelmand */}
           <div className="w-full md:w-2/5 flex flex-col bg-white rounded-lg shadow p-4 justify-between">
             <div>
               <h2 className="text-lg font-bold mb-3 border-b pb-2">Huidige Bestelling</h2>
 
               <div className="mb-3 bg-gray-50 p-2 rounded border">
-                <label className="text-xs font-bold text-gray-600 block mb-1">Gekoppelde Klant (voor punten):</label>
+                <label className="text-xs font-bold text-gray-600 block mb-1">Gekoppelde Klant:</label>
                 {selectedCustomer ? (
                   <div className="flex justify-between items-center text-sm">
                     <span className="font-semibold text-black">{selectedCustomer.first_name} {selectedCustomer.last_name}</span>
@@ -990,8 +991,8 @@ export default function POSHome() {
             <p className="text-xs text-gray-600 mb-4">{selectedProductForVariations.name}</p>
 
             <div className="space-y-2 max-h-60 overflow-y-auto mb-4">
-              {(selectedProductForVariations.variations_data || selectedProductForVariations.variations || []).length > 0 ? (
-                (selectedProductForVariations.variations_data || selectedProductForVariations.variations).map((v) => {
+              {(selectedProductForVariations.variations_data || []).length > 0 ? (
+                selectedProductForVariations.variations_data.map((v) => {
                   const attrText = formatAttributes(v.attributes) || `Variatie #${v.id}`;
 
                   return (
