@@ -123,7 +123,7 @@ export default function POSHome() {
     };
 
     window.addEventListener('online', syncOfflineOrders);
-    const interval = setInterval(syncOfflineOrders, 30000); // Twee-wekelijkse achtergrond check
+    const interval = setInterval(syncOfflineOrders, 30000);
 
     return () => {
       window.removeEventListener('online', syncOfflineOrders);
@@ -471,6 +471,10 @@ export default function POSHome() {
 
   // SumUp Betalingsafhandeling met VPS -> Cloud API Fallback
   const processSumUpPayment = async (amount, terminalId) => {
+    if (!terminalId || terminalId === 'SOLO_READER_1') {
+      throw new Error('Geen geldige SumUp Terminal ID gekoppeld aan dit filiaal.');
+    }
+
     // 1. Probeer eerst via de VPS API
     try {
       const vpsRes = await fetch('/api/sumup/checkout', {
@@ -479,20 +483,28 @@ export default function POSHome() {
         body: JSON.stringify({ totalAmount: amount, terminalId })
       });
 
-      if (vpsRes.ok) {
-        const vpsData = await vpsRes.json();
-        if (vpsData.success) return vpsData;
+      const vpsData = await vpsRes.json();
+      if (vpsRes.ok && vpsData.success) {
+        return vpsData;
+      }
+      if (vpsRes.ok && !vpsData.success) {
+        throw new Error(vpsData.error || 'SumUp verzoek afgewezen door VPS.');
       }
     } catch (vpsError) {
-      console.warn('[SUMUP] VPS niet bereikbaar, schakelt over naar directe SumUp Cloud API...', vpsError);
+      console.warn('[SUMUP] VPS niet bereikbaar/fout, schakelt over naar directe SumUp Cloud API...', vpsError.message);
     }
 
     // 2. Fallback: Directe Call vanuit de browser naar SumUp Cloud API
+    const apiKey = process.env.NEXT_PUBLIC_SUMUP_API_KEY;
+    if (!apiKey) {
+      throw new Error('Geen directe SumUp API-sleutel (NEXT_PUBLIC_SUMUP_API_KEY) geconfigureerd.');
+    }
+
     try {
       const sumupCloudRes = await fetch(`https://api.sumup.com/v0.1/terminals/${terminalId}/checkouts`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUMUP_API_KEY}`,
+          'Authorization': `Bearer ${apiKey}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
@@ -503,7 +515,9 @@ export default function POSHome() {
       });
 
       const cloudData = await sumupCloudRes.json();
-      if (!sumupCloudRes.ok) throw new Error(cloudData.message || 'Directe SumUp Cloud API-call mislukt.');
+      if (!sumupCloudRes.ok) {
+        throw new Error(cloudData.message || cloudData.error || 'Directe SumUp Cloud API-call mislukt.');
+      }
       return cloudData;
     } catch (cloudErr) {
       throw new Error(`SumUp PIN mislukt: ${cloudErr.message}`);
@@ -519,6 +533,20 @@ export default function POSHome() {
     setLoading(true);
     setCheckoutStatus(null);
 
+    // STAP 1: SumUp Transactie Verwerken (indien geselecteerd)
+    if (selectedPaymentMethod === 'sumup') {
+      try {
+        const terminalId = selectedStore?.terminal_id || localStorage.getItem('pos_fallback_terminal_id');
+        await processSumUpPayment(finalTotal.toFixed(2), terminalId);
+      } catch (sumupErr) {
+        console.error('[SUMUP ERROR]:', sumupErr.message);
+        alert(`❌ SumUp Betaling Mislukt / Geen verbinding:\n\n${sumupErr.message}\n\nDe bestelling is NIET verwerkt. Kies eventueel voor Contant of Handmatige PIN.`);
+        setLoading(false);
+        return; // STOP HIER! Blokkeer verdere afhandeling.
+      }
+    }
+
+    // STAP 2: Payload opbouwen voor WooCommerce / Offline opslag
     const orderPayload = {
       orderItems: cart,
       paymentMethod: selectedPaymentMethod,
@@ -539,14 +567,8 @@ export default function POSHome() {
       created_at: new Date().toISOString()
     };
 
+    // STAP 3: Order naar WooCommerce sturen (met offline fallback)
     try {
-      // 1. Bij SumUp eerst de terminal-transactie uitvoeren
-      if (selectedPaymentMethod === 'sumup') {
-        const terminalId = selectedStore?.terminal_id || localStorage.getItem('pos_fallback_terminal_id') || 'SOLO_READER_1';
-        await processSumUpPayment(finalTotal.toFixed(2), terminalId);
-      }
-
-      // 2. Bestelling verzenden naar WooCommerce API
       const res = await fetch('/api/woocommerce/manual-order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -562,7 +584,6 @@ export default function POSHome() {
     } catch (err) {
       console.warn('[POS OFFLINE FALLBACK] Fout bij online verwerking, bestelling lokaal opgeslagen:', err);
 
-      // Sla op in de lokale offline buffer als de server of WooCommerce plat ligt
       const offlineQueue = JSON.parse(localStorage.getItem('pos_offline_orders') || '[]');
       offlineQueue.push(orderPayload);
       localStorage.setItem('pos_offline_orders', JSON.stringify(offlineQueue));
