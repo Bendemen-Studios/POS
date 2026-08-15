@@ -189,7 +189,8 @@ export default function POSHome() {
   );
 
   const handleProductClick = (product) => {
-    if (product.variations && product.variations.length > 0) {
+    const productVariations = product.variations_data || product.variations || [];
+    if (productVariations.length > 0) {
       setSelectedProductForVariations(product);
       return;
     }
@@ -265,7 +266,11 @@ export default function POSHome() {
       return;
     }
 
-    const varName = `${selectedProductForVariations.name} - ${variation.attributes ? variation.attributes.map(a => a.option).join('/') : 'Variatie'}`;
+    const attrText = variation.attributes && variation.attributes.length > 0 
+      ? variation.attributes.map(a => `${a.name}: ${a.option}`).join(' | ') 
+      : `Variatie #${variation.id}`;
+      
+    const varName = `${selectedProductForVariations.name} - ${attrText}`;
 
     const cartItem = {
       ...selectedProductForVariations,
@@ -283,7 +288,10 @@ export default function POSHome() {
   const handleConfirmStockWarning = () => {
     const { product, variation, price } = stockWarningModal;
     if (variation) {
-      const varName = `${product.name} - ${variation.attributes ? variation.attributes.map(a => a.option).join('/') : 'Variatie'}`;
+      const attrText = variation.attributes && variation.attributes.length > 0 
+        ? variation.attributes.map(a => `${a.name}: ${a.option}`).join(' | ') 
+        : `Variatie #${variation.id}`;
+      const varName = `${product.name} - ${attrText}`;
       const cartItem = {
         ...product,
         id: `${product.id}_var_${variation.id}`,
@@ -406,7 +414,7 @@ export default function POSHome() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 
             totalAmount: finalTotal.toFixed(2),
-            terminalId: localStorage.getItem('pos_fallback_terminal_id') || 'SOLO_READER_1'
+            terminalId: selectedStore?.terminal_id || localStorage.getItem('pos_fallback_terminal_id') || 'SOLO_READER_1'
           }),
         });
         const sumupData = await sumupRes.json();
@@ -697,7 +705,8 @@ export default function POSHome() {
             <div className="flex-1 overflow-y-auto grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[calc(100vh-280px)]">
               {filteredProducts.map((product) => {
                 const imageUrl = product.images && product.images.length > 0 ? product.images[0].src : null;
-                const hasVariations = product.variations && product.variations.length > 0;
+                const productVariations = product.variations_data || product.variations || [];
+                const hasVariations = productVariations.length > 0;
                 const isPriceZero = parseFloat(product.price || 0) === 0;
                 const stockQty = product.stock_quantity;
 
@@ -966,7 +975,7 @@ export default function POSHome() {
         </div>
       )}
 
-      {/* MODAL 3: VARIATIES */}
+      {/* MODAL 3: VARIATIES (GEFIXED VOOR VOORKOMEN VAN 'undefined') */}
       {selectedProductForVariations && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
@@ -974,20 +983,26 @@ export default function POSHome() {
             <p className="text-xs text-gray-600 mb-4">{selectedProductForVariations.name}</p>
 
             <div className="space-y-2 max-h-60 overflow-y-auto mb-4">
-              {selectedProductForVariations.variations && selectedProductForVariations.variations.length > 0 ? (
-                selectedProductForVariations.variations.map((v) => (
-                  <button
-                    key={v.id}
-                    onClick={() => handleSelectVariation(v)}
-                    className="w-full text-left p-3 border rounded hover:border-black flex justify-between items-center bg-gray-50 font-semibold text-xs"
-                  >
-                    <div>
-                      <div>{v.attributes ? v.attributes.map(a => a.option).join(' / ') : `Variatie #${v.id}`}</div>
-                      <div className="text-[10px] text-gray-500">Voorraad: {v.stock_quantity ?? 'N.v.t.'}</div>
-                    </div>
-                    <span className="text-red-600 font-bold">€{parseFloat(v.price || selectedProductForVariations.price).toFixed(2)}</span>
-                  </button>
-                ))
+              {(selectedProductForVariations.variations_data || selectedProductForVariations.variations || []).length > 0 ? (
+                (selectedProductForVariations.variations_data || selectedProductForVariations.variations).map((v) => {
+                  const attrText = v.attributes && v.attributes.length > 0 
+                    ? v.attributes.map(a => `${a.name}: ${a.option}`).join(' | ') 
+                    : `Variatie #${v.id}`;
+
+                  return (
+                    <button
+                      key={v.id}
+                      onClick={() => handleSelectVariation(v)}
+                      className="w-full text-left p-3 border rounded hover:border-black flex justify-between items-center bg-gray-50 font-semibold text-xs"
+                    >
+                      <div>
+                        <div>{attrText}</div>
+                        <div className="text-[10px] text-gray-500">Voorraad: {v.stock_quantity ?? 'N.v.t.'}</div>
+                      </div>
+                      <span className="text-red-600 font-bold">€{parseFloat(v.price || selectedProductForVariations.price).toFixed(2)}</span>
+                    </button>
+                  );
+                })
               ) : (
                 <p className="text-xs text-gray-500 py-2">Geen gedetailleerde variaties geladen.</p>
               )}

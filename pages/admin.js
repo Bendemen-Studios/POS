@@ -144,9 +144,10 @@ export default function AdminDashboard() {
   const handleCreateUser = async (e) => {
     e.preventDefault();
     try {
+      const storeIdNum = newUser.store_id && newUser.store_id !== '' && newUser.store_id !== 'null' ? Number(newUser.store_id) : null;
       const payload = {
         ...newUser,
-        store_id: newUser.store_id !== '' && newUser.store_id !== null ? Number(newUser.store_id) : null
+        store_id: storeIdNum !== null && !isNaN(storeIdNum) ? storeIdNum : null
       };
       const res = await fetch('/api/admin/users', {
         method: 'POST',
@@ -168,10 +169,16 @@ export default function AdminDashboard() {
 
   const handleUpdateUser = async (e) => {
     e.preventDefault();
+    if (editingUser.username.toLowerCase() === 'bendemen') {
+      alert('Het hoofdaccount bendemen kan niet worden bewerkt.');
+      setEditingUser(null);
+      return;
+    }
     try {
+      const storeIdNum = editingUser.store_id !== '' && editingUser.store_id !== null && editingUser.store_id !== 'null' && editingUser.store_id !== undefined ? Number(editingUser.store_id) : null;
       const payload = {
         ...editingUser,
-        store_id: editingUser.store_id !== '' && editingUser.store_id !== null && editingUser.store_id !== 'null' ? Number(editingUser.store_id) : null
+        store_id: storeIdNum !== null && !isNaN(storeIdNum) ? storeIdNum : null
       };
       
       const res = await fetch('/api/admin/users', {
@@ -373,14 +380,17 @@ export default function AdminDashboard() {
                       <option value="super_admin">Super Admin</option>
                     </select>
                     <select
-                      value={newUser.store_id}
+                      value={newUser.store_id || ''}
                       onChange={(e) => setNewUser({...newUser, store_id: e.target.value})}
                       className="p-2 border rounded text-xs"
                     >
                       <option value="">Kies Filiaal (Optioneel)</option>
-                      {stores.map(s => (
-                        <option key={s.id} value={s.id}>{s.store_name || s.name}</option>
-                      ))}
+                      {stores.map(s => {
+                        const sId = s.id || s.store_id;
+                        return (
+                          <option key={sId} value={sId}>{s.store_name || s.name || `Filiaal #${sId}`}</option>
+                        );
+                      })}
                     </select>
                     <button type="submit" className="bg-red-600 hover:bg-red-700 text-white font-bold p-2 rounded text-xs uppercase">
                       Aanmaken
@@ -403,7 +413,9 @@ export default function AdminDashboard() {
                       </thead>
                       <tbody className="divide-y">
                         {users.map(u => {
-                          const matchedStore = stores.find(s => String(s.id) === String(u.store_id));
+                          const matchedStore = stores.find(s => String(s.id || s.store_id) === String(u.store_id));
+                          const isBendemen = u.username.toLowerCase() === 'bendemen';
+
                           return (
                             <tr key={u.id} className="hover:bg-gray-50">
                               <td className="p-3">#{u.id}</td>
@@ -413,13 +425,17 @@ export default function AdminDashboard() {
                                 {matchedStore ? (matchedStore.store_name || matchedStore.name) : (u.store_id ? `ID: ${u.store_id}` : 'Geen')}
                               </td>
                               <td className="p-3 text-right space-x-2">
-                                <button onClick={() => setEditingUser(u)} className="text-blue-600 font-bold hover:underline">
-                                  Bewerken
-                                </button>
-                                {u.username.toLowerCase() !== 'bendemen' && (
-                                  <button onClick={() => handleDeleteUser(u.id, u.username)} className="text-red-600 font-bold hover:underline">
-                                    Verwijderen
-                                  </button>
+                                {isBendemen ? (
+                                  <span className="text-gray-400 font-semibold italic text-[11px]">Beveiligd</span>
+                                ) : (
+                                  <>
+                                    <button onClick={() => setEditingUser(u)} className="text-blue-600 font-bold hover:underline">
+                                      Bewerken
+                                    </button>
+                                    <button onClick={() => handleDeleteUser(u.id, u.username)} className="text-red-600 font-bold hover:underline">
+                                      Verwijderen
+                                    </button>
+                                  </>
                                 )}
                               </td>
                             </tr>
@@ -477,11 +493,11 @@ export default function AdminDashboard() {
                   <h3 className="text-md font-bold mb-4">Actieve Filialen ({stores.length})</h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     {stores.map(s => (
-                      <div key={s.id} className="border p-4 rounded-lg bg-gray-50 flex flex-col justify-between">
+                      <div key={s.id || s.store_id} className="border p-4 rounded-lg bg-gray-50 flex flex-col justify-between">
                         <div>
                           <div className="font-bold text-sm text-red-600">{s.store_name || s.name}</div>
                           <div className="text-xs text-gray-500 mt-1">📍 {s.address || 'Geen adres'}</div>
-                          <div className="text-xs text-gray-400 mt-0.5">ID: #{s.id} | Terminal: {s.terminal_id || 'Niet gekoppeld'}</div>
+                          <div className="text-xs text-gray-400 mt-0.5">ID: #{s.id || s.store_id} | Terminal: {s.terminal_id || 'Niet gekoppeld'}</div>
                         </div>
                         <div className="mt-3 text-right">
                           <button onClick={() => setEditingStore(s)} className="text-xs bg-black text-white px-3 py-1 rounded font-bold hover:bg-gray-800">
@@ -495,7 +511,7 @@ export default function AdminDashboard() {
               </div>
             )}
 
-            {/* 3. SUMUP TAB (Toont alle filialen met optie om te koppelen/wijzigen) */}
+            {/* 3. SUMUP TAB */}
             {activeTab === 'sumup' && (
               <div className="bg-white rounded-lg shadow p-6">
                 <h3 className="text-md font-bold mb-2">💳 SumUp Terminal Koppelingen per Locatie</h3>
@@ -505,7 +521,7 @@ export default function AdminDashboard() {
                     <div className="text-xs text-gray-400 p-4 border rounded bg-gray-50 text-center">Geen filialen gevonden. Maak eerst een filiaal aan via 'Filialen Beheren'.</div>
                   ) : (
                     stores.map(s => (
-                      <div key={s.id} className="border p-3 rounded flex justify-between items-center bg-gray-50">
+                      <div key={s.id || s.store_id} className="border p-3 rounded flex justify-between items-center bg-gray-50">
                         <div>
                           <span className="font-bold text-sm">{s.store_name || s.name}</span>
                           <div className="text-xs text-gray-600 mt-0.5">
@@ -674,18 +690,16 @@ export default function AdminDashboard() {
               />
             </div>
 
-            {editingUser.username.toLowerCase() !== 'bendemen' && (
-              <div>
-                <label className="text-xs font-bold text-gray-600 block mb-1">Nieuw Wachtwoord (leeg laten om niet te wijzigen)</label>
-                <input 
-                  type="password" 
-                  placeholder="Nieuw wachtwoord"
-                  value={editingUser.password || ''}
-                  onChange={(e) => setEditingUser({...editingUser, password: e.target.value})}
-                  className="w-full p-2 border rounded text-xs"
-                />
-              </div>
-            )}
+            <div>
+              <label className="text-xs font-bold text-gray-600 block mb-1">Nieuw Wachtwoord (leeg laten om niet te wijzigen)</label>
+              <input 
+                type="password" 
+                placeholder="Nieuw wachtwoord"
+                value={editingUser.password || ''}
+                onChange={(e) => setEditingUser({...editingUser, password: e.target.value})}
+                className="w-full p-2 border rounded text-xs"
+              />
+            </div>
 
             <div>
               <label className="text-xs font-bold text-gray-600 block mb-1">Rol</label>
@@ -703,14 +717,17 @@ export default function AdminDashboard() {
             <div>
               <label className="text-xs font-bold text-gray-600 block mb-1">Koppel Filiaal</label>
               <select
-                value={editingUser.store_id !== null && editingUser.store_id !== undefined ? String(editingUser.store_id) : ''}
-                onChange={(e) => setEditingUser({...editingUser, store_id: e.target.value === '' ? null : Number(e.target.value)})}
+                value={editingUser.store_id !== null && editingUser.store_id !== undefined && editingUser.store_id !== 'null' ? String(editingUser.store_id) : ''}
+                onChange={(e) => setEditingUser({...editingUser, store_id: e.target.value})}
                 className="w-full p-2 border rounded text-xs"
               >
                 <option value="">Geen Filiaal</option>
-                {stores.map(s => (
-                  <option key={s.id} value={String(s.id)}>{s.store_name || s.name}</option>
-                ))}
+                {stores.map(s => {
+                  const sId = s.id || s.store_id;
+                  return (
+                    <option key={sId} value={String(sId)}>{s.store_name || s.name || `Filiaal #${sId}`}</option>
+                  );
+                })}
               </select>
             </div>
 
