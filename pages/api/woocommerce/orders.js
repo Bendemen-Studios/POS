@@ -1,77 +1,93 @@
-import WooCommerceRestApi from "@woocommerce/woocommerce-rest-api";
-
-const WooCommerce = WooCommerceRestApi.default || WooCommerceRestApi;
-
-const api = new WooCommerce({
-  url: process.env.WOO_SITE_URL || process.env.WOOCOMMERCE_URL || "https://www.bendemen.com",
-  consumerKey: process.env.WOO_CONSUMER_KEY,
-  consumerSecret: process.env.WOO_CONSUMER_SECRET,
-  version: "wc/v3"
-});
+import WooCommerceRestApi from '@woocommerce/woocommerce-rest-api';
 
 export default async function handler(req, res) {
-  // GET: Alle bestellingen ophalen met paginering
-  if (req.method === 'GET') {
-    try {
-      let allOrders = [];
-      let page = 1;
-      let totalPages = 1;
-
-      do {
-        const response = await api.get("orders", {
-          per_page: 50,
-          page: page,
-          orderby: "date",
-          order: "desc"
-        });
-
-        const orders = response.data || [];
-        allOrders = allOrders.concat(orders);
-
-        const totalPagesHeader = response.headers['x-wp-totalpages'];
-        totalPages = totalPagesHeader ? parseInt(totalPagesHeader, 10) : 1;
-
-        page++;
-      } while (page <= totalPages);
-
-      return res.status(200).json({ 
-        success: true, 
-        orders: allOrders 
-      });
-    } catch (error) {
-      console.error("WooCommerce Orders Fetch Error:", error.response?.data || error.message);
-      return res.status(500).json({ 
-        success: false, 
-        error: error.response?.data?.message || error.message || 'Fout bij ophalen bestellingen' 
-      });
-    }
+  if (req.method !== 'GET') {
+    res.setHeader('Allow', ['GET']);
+    return res.status(405).end(`Method ${req.method} Not Allowed`);
   }
 
-  // PUT: Status van een specifieke bestelling aanpassen
-  if (req.method === 'PUT') {
-    try {
-      const { id, status } = req.body;
+  const url = process.env.WOOCOMMERCE_URL || process.env.NEXT_PUBLIC_WOOCOMMERCE_URL || 'https://www.bendemen.com';
+  const consumerKey = process.env.WOOCOMMERCE_CONSUMER_KEY || process.env.NEXT_PUBLIC_WOOCOMMERCE_KEY;
+  const consumerSecret = process.env.WOOCOMMERCE_CONSUMER_SECRET || process.env.NEXT_PUBLIC_WOOCOMMERCE_SECRET;
 
-      if (!id || !status) {
-        return res.status(400).json({ success: false, message: 'Order ID en status zijn verplicht.' });
-      }
-
-      const response = await api.put(`orders/${id}`, { status });
-
-      return res.status(200).json({ 
-        success: true, 
-        message: 'Bestelling status succesvol bijgewerkt!',
-        order: response.data 
-      });
-    } catch (error) {
-      console.error("WooCommerce Order Update Error:", error.response?.data || error.message);
-      return res.status(500).json({ 
-        success: false, 
-        error: error.response?.data?.message || error.message || 'Fout bij bijwerken bestelling status' 
-      });
-    }
+  if (!consumerKey || !consumerSecret) {
+    return res.status(500).json({
+      success: false,
+      error: 'WooCommerce API sleutels ontbreken in .env'
+    });
   }
 
-  res.setHeader('Allow', ['GET', 'PUT']);
-  return res.status(405).json({ success: false, message: `Method ${req.method} not allowed` });
+  const api = new WooCommerceRestApi({
+    url,
+    consumerKey,
+    consumerSecret,
+    version: 'wc/v3'
+  });
+
+  try {
+    const { data: rawProducts } = await api.get('products', {
+      per_page: 100,
+      status: 'publish'
+    });
+
+    const products = await Promise.all(
+      rawProducts.map(async (product) => {
+        let variationsData = [];
+
+        if (product.type === 'variable' && Array.isArray(product.variations) && product.variations.length > 0) {
+          try {
+            const { data: variations } = await api.get(`products/${product.id}/variations`, {
+              per_page: 100
+            });
+
+            variationsData = variations.map((v) => ({
+              id: v.id,
+              variation_id: v.id,
+              price: v.price || v.regular_price || 0,
+              regular_price: v.regular_price || 0,
+              sale_price: v.sale_price || null,
+              stock_quantity: v.stock_quantity,
+              in_stock: v.in_stock ?? v.stock_status === 'instock',
+              attributes: Array.isArray(v.attributes) ? v.attributes : []
+            }));
+          } catch (varErr) {
+            console.error(`Fout bij ophalen variaties voor product #${product.id}:`, varErr.message);
+          }
+        }
+
+        return {
+          id: product.id,
+          name: product.name,
+          slug: product.slug,
+          price: product.price || product.regular_price || 0,
+          regular_price: product.regular_price || 0,
+          sale_price: product.sale_price || null,
+          stock_quantity: product.stock_quantity,
+          in_stock: product.in_stock ?? product.stock_status === 'instock',
+          type: product.type,
+          categories: Array.isArray(product.categories)
+            ? product.categories.map((c) => ({ id: c.id, name: c.name, slug: c.slug }))
+            : [],
+          images: Array.isArray(product.images)
+            ? product.images.map((img) => ({ id: img.id, src: img.src, alt: img.alt }))
+            : [],
+          attributes: product.attributes || [],
+          variations: product.variations || [],
+          variations_data: variationsData
+        };
+      })
+    );
+
+    return res.status(200).json({
+      success: true,
+      count: products.length,
+      products
+    });
+  } catch (error) {
+    console.error('Fout bij ophalen WooCommerce producten:', error.response?.data || error.message);
+    return res.status(500).json({
+      success: false,
+      error: error.response?.data?.message || error.message || 'Fout bij ophalen producten'
+    });
+  }
 }

@@ -5,8 +5,15 @@ export default async function handler(req, res) {
 
   if (method === 'GET') {
     try {
+      // Gebruik een COALESCE fallback zodat de query nooit faalt als store_name NULL is
       const [rows] = await db.query(`
-        SELECT u.id, u.username, u.role, u.store_id, u.email, s.store_name 
+        SELECT 
+          u.id, 
+          u.username, 
+          u.role, 
+          u.store_id, 
+          u.email, 
+          COALESCE(s.store_name, s.name, 'Geen') AS store_name 
         FROM users u 
         LEFT JOIN stores s ON u.store_id = s.id
       `);
@@ -14,8 +21,15 @@ export default async function handler(req, res) {
       const usersList = Array.isArray(rows) ? rows : [];
       return res.status(200).json({ success: true, users: usersList });
     } catch (error) {
-      console.error('Fout bij ophalen gebruikers:', error);
-      return res.status(500).json({ success: false, error: error.message });
+      console.error('Fout bij ophalen gebruikers met join, terugvallen op basiquery:', error.message);
+      
+      // Fallback query zonder JOIN als de stores tabel problemen geeft
+      try {
+        const [fallbackRows] = await db.query('SELECT id, username, role, store_id, email FROM users');
+        return res.status(200).json({ success: true, users: Array.isArray(fallbackRows) ? fallbackRows : [] });
+      } catch (fallbackError) {
+        return res.status(500).json({ success: false, error: fallbackError.message });
+      }
     }
   }
 
