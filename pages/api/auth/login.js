@@ -1,10 +1,10 @@
-import pool from '../../../lib/db';
+import db from '../../../lib/db';
 import bcrypt from 'bcryptjs';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', ['POST']);
-    return res.status(405).json({ success: false, message: `Method ${req.method} not allowed` });
+    return res.status(405).json({ success: false, message: `Method ${req.method} Not Allowed` });
   }
 
   const { username, password } = req.body;
@@ -14,53 +14,71 @@ export default async function handler(req, res) {
   }
 
   try {
-    const [rows] = await pool.query(
-      `SELECT 
-        u.*, 
-        COALESCE(s.store_name, 'Geen Filiaal') AS store_name 
-       FROM users u 
-       LEFT JOIN stores s ON CAST(u.store_id AS CHAR) = CAST(s.id AS CHAR) 
-       WHERE u.username = ? OR u.email = ?`,
+    // Zoek gebruiker op gebruikersnaam of email
+    const [rows] = await db.query(
+      'SELECT * FROM users WHERE username = ? OR email = ?',
       [username, username]
     );
 
     if (!Array.isArray(rows) || rows.length === 0) {
+      console.log(`[LOGIN FAILED] Gebruiker niet gevonden in DB: "${username}"`);
       return res.status(401).json({ success: false, message: 'Ongeldige inloggegevens.' });
     }
 
     const user = rows[0];
+
+    // Bepaal opgeslagen wachtwoord (ondersteunt 'password' én 'password_hash')
     const storedPassword = user.password || user.password_hash || '';
 
-    // Controleer of het opgeslagen wachtwoord een bcrypt hash is (begint met $2a$ of $2b$)
-    const isBcryptHash = storedPassword.startsWith('$2a$') || storedPassword.startsWith('$2b$');
+    if (!storedPassword) {
+      console.error(`[LOGIN ERROR] Geen wachtwoord gevonden in DB voor gebruiker: ${username}`);
+      return res.status(500).json({ success: false, message: 'Fout in gebruikersprofiel (geen wachtwoord).' });
+    }
+
+    // Controleer of het opgeslagen wachtwoord al een bcrypt hash is (begint met $2a$ of $2b$)
+    const isBcrypt = storedPassword.startsWith('$2a$') || storedPassword.startsWith('$2b$');
     let isMatch = false;
 
-    if (isBcryptHash) {
+    if (isBcrypt) {
+      // Wachtwoord is al gehashed -> vergelijk via bcrypt
       isMatch = await bcrypt.compare(password, storedPassword);
     } else {
-      // Vergelijk tijdelijk met platte tekst
+      // Wachtwoord is nog een gewoon wachtwoord -> vergelijk direct
       isMatch = password === storedPassword;
 
-      // Automatische migratie: zet het platte tekst wachtwoord meteen om naar een bcrypt hash in de DB
+      // AUTOMATISCHE HASHING: Als het gewone wachtwoord klopt, direct omzetten naar bcrypt hash in DB
       if (isMatch) {
         try {
           const newHash = await bcrypt.hash(password, 10);
-          await pool.query('UPDATE users SET password = ? WHERE id = ?', [newHash, user.id]);
-        } catch (migErr) {
-          console.error('Fout bij automatisch upgraden naar bcrypt hash:', migErr);
+          await db.query('UPDATE users SET password = ? WHERE id = ?', [newHash, user.id]);
+          console.log(`[SECURITY UPGRADE] Gewoon wachtwoord voor gebruiker "${user.username}" succesvol gehashed naar bcrypt!`);
+        } catch (hashErr) {
+          console.error('Fout bij automatisch omzetten naar bcrypt hash:', hashErr);
         }
       }
     }
 
     if (!isMatch) {
+      console.log(`[LOGIN FAILED] Wachtwoord komt niet overeen voor gebruiker: "${username}"`);
       return res.status(401).json({ success: false, message: 'Ongeldige inloggegevens.' });
     }
 
-    const isMainOwnerAccount = user.username?.toLowerCase() === 'bendemen' || user.email === 'bendemenbv@gmail.com' || user.email === 'info@bendemen.nl';
+    // Haal eventueel gekoppelde winkelnaam op
+    let storeName = 'Geen Filiaal';
+    if (user.store_id) {
+      try {
+        const [storeRows] = await db.query('SELECT store_name FROM stores WHERE id = ?', [user.store_id]);
+        if (Array.isArray(storeRows) && storeRows.length > 0) {
+          storeName = storeRows[0].store_name;
+        }
+      } catch (sErr) {
+        console.error('Fout bij ophalen winkelnaam:', sErr.message);
+      }
+    }
 
-    const effectiveRole = isMainOwnerAccount 
-      ? 'super_admin' 
-      : (user.role || 'cashier');
+    const isMainOwner = user.username?.toLowerCase() === 'bendemen' || user.email === 'bendemenbv@gmail.com';
+
+    console.log(`[LOGIN SUCCESS] Gebruiker ingelogd: ${user.username}`);
 
     return res.status(200).json({
       success: true,
@@ -69,14 +87,14 @@ export default async function handler(req, res) {
         id: user.id,
         username: user.username,
         email: user.email || '',
-        role: effectiveRole,
+        role: isMainOwner ? 'super_admin' : (user.role || 'cashier'),
         store_id: user.store_id || null,
-        store_name: user.store_name || 'Geen Filiaal'
+        store_name: storeName
       }
     });
 
   } catch (error) {
-    console.error("Login API Error:", error);
-    return res.status(500).json({ success: false, message: 'Interne serverfout tijdens inloggen.' });
+    console.error('[LOGIN API EXCEPTION]:', error);
+    return res.status(500).json({ success: false, message: 'Interne serverfout bij inloggen.' });
   }
 }
