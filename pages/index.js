@@ -148,7 +148,7 @@ export default function POSHome() {
       }
     } catch (err) {
       console.error('Fout bij ophalen afhaalbestellingen:', err);
-    } font-bold {
+    } finally {
       setLoadingPickup(false);
     }
   };
@@ -490,7 +490,7 @@ export default function POSHome() {
     } catch (err) {
       console.error(err);
       alert(err.message || 'Fout tijdens afrekenen.');
-    } finally {
+    } font-bold {
       setLoading(false);
     }
   };
