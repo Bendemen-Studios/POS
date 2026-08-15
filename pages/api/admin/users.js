@@ -3,7 +3,13 @@ import db from '../../../lib/db';
 export default async function handler(req, res) {
   const { method } = req;
 
-  // 1. MEDEWERKERS OPHALEN INCLUSIEF FILIAALNAAM
+  // 1. Zorg dat de store_id tabel kolom VARCHAR accepteert
+  try {
+    await db.query('ALTER TABLE users MODIFY COLUMN store_id VARCHAR(255) DEFAULT NULL');
+  } catch (e) {
+    // Negeer als kolom al VARCHAR is
+  }
+
   if (method === 'GET') {
     try {
       const [rows] = await db.query(`
@@ -15,13 +21,12 @@ export default async function handler(req, res) {
           u.email, 
           COALESCE(s.store_name, s.name, 'Geen') AS store_name 
         FROM users u 
-        LEFT JOIN stores s ON u.store_id = s.id
+        LEFT JOIN stores s ON CAST(u.store_id AS CHAR) = CAST(s.id AS CHAR)
       `);
       
-      const usersList = Array.isArray(rows) ? rows : [];
-      return res.status(200).json({ success: true, users: usersList });
+      return res.status(200).json({ success: true, users: Array.isArray(rows) ? rows : [] });
     } catch (error) {
-      console.error('Fout bij ophalen gebruikers met join, terugvallen op basisquery:', error.message);      
+      console.error('Fout bij ophalen gebruikers:', error.message);
       try {
         const [fallbackRows] = await db.query('SELECT id, username, role, store_id, email FROM users');
         return res.status(200).json({ success: true, users: Array.isArray(fallbackRows) ? fallbackRows : [] });
@@ -31,15 +36,10 @@ export default async function handler(req, res) {
     }
   }
 
-  // 2. NIEUWE MEDEWERKER AANMAKEN EN FILIAAL OPSLAAN
   if (method === 'POST') {
     const { username, password, role, store_id, email } = req.body;
     try {
-      const parsedStoreId = (store_id !== null && store_id !== undefined && store_id !== '' && store_id !== 'null' && store_id !== '0') 
-        ? Number(store_id) 
-        : null;
-
-      console.log(`Nieuwe medewerker opslaan: username=${username}, role=${role}, store_id=${parsedStoreId}`);
+      const parsedStoreId = (store_id && store_id !== '' && store_id !== 'null' && store_id !== '0') ? String(store_id) : null;
 
       const [result] = await db.query(
         'INSERT INTO users (username, password, role, store_id, email) VALUES (?, ?, ?, ?, ?)',
@@ -48,12 +48,10 @@ export default async function handler(req, res) {
 
       return res.status(200).json({ success: true, userId: result.insertId });
     } catch (error) {
-      console.error('Fout bij aanmaken gebruiker:', error.message);
       return res.status(500).json({ success: false, error: error.message });
     }
   }
 
-  // 3. BESTAANDE MEDEWERKER BEWERKEN EN FILIAAL BIJWERKEN
   if (method === 'PUT') {
     const { id, username, password, role, store_id } = req.body;
     try {
@@ -61,11 +59,7 @@ export default async function handler(req, res) {
         return res.status(403).json({ success: false, error: 'Het hoofdaccount bendemen kan niet worden aangepast.' });
       }
 
-      const parsedStoreId = (store_id !== null && store_id !== undefined && store_id !== '' && store_id !== 'null' && store_id !== '0') 
-        ? Number(store_id) 
-        : null;
-
-      console.log(`Update medewerker ID ${id}: role=${role}, store_id=${parsedStoreId}`);
+      const parsedStoreId = (store_id && store_id !== '' && store_id !== 'null' && store_id !== '0') ? String(store_id) : null;
 
       if (password && password.trim() !== '') {
         await db.query(
@@ -81,12 +75,10 @@ export default async function handler(req, res) {
 
       return res.status(200).json({ success: true, message: 'Gebruiker bijgewerkt' });
     } catch (error) {
-      console.error('Fout bij bijwerken gebruiker:', error.message);
       return res.status(500).json({ success: false, error: error.message });
     }
   }
 
-  // 4. MEDEWERKER VERWIJDEREN
   if (method === 'DELETE') {
     const { id } = req.query;
     try {

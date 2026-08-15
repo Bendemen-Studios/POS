@@ -141,10 +141,9 @@ export default function AdminDashboard() {
   const handleCreateUser = async (e) => {
     e.preventDefault();
     try {
-      const storeIdNum = newUser.store_id && newUser.store_id !== '' && newUser.store_id !== 'null' ? Number(newUser.store_id) : null;
       const payload = {
         ...newUser,
-        store_id: storeIdNum !== null && !isNaN(storeIdNum) ? storeIdNum : null
+        store_id: newUser.store_id && newUser.store_id !== '' && newUser.store_id !== 'null' ? String(newUser.store_id) : null
       };
       const res = await fetch('/api/admin/users', {
         method: 'POST',
@@ -173,11 +172,11 @@ export default function AdminDashboard() {
     }
     try {
       const rawStoreId = editingUser.store_id;
-      const storeIdNum = rawStoreId !== '' && rawStoreId !== null && rawStoreId !== 'null' && rawStoreId !== undefined ? Number(rawStoreId) : null;
+      const storeIdStr = rawStoreId !== '' && rawStoreId !== null && rawStoreId !== 'null' && rawStoreId !== undefined ? String(rawStoreId) : null;
       
       const payload = {
         ...editingUser,
-        store_id: storeIdNum !== null && !isNaN(storeIdNum) ? storeIdNum : null
+        store_id: storeIdStr
       };
       
       const res = await fetch('/api/admin/users', {
@@ -259,6 +258,29 @@ export default function AdminDashboard() {
       }
     } catch (err) {
       alert('Fout bij bijwerken filiaal.');
+    }
+  };
+
+  const handleDeleteStore = async (storeId, storeName) => {
+    if (stores.length <= 1) {
+      alert('Er moet minimaal 1 actief filiaal aanwezig blijven in het systeem.');
+      return;
+    }
+
+    if (!confirm(`Weet je zeker dat je filiaal "${storeName}" wilt verwijderen?`)) return;
+
+    try {
+      const res = await fetch(`/api/admin/store?id=${storeId}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) {
+        alert('Filiaal succesvol verwijderd!');
+        fetchStores();
+        fetchUsers();
+      } else {
+        alert('Fout bij verwijderen: ' + (data.error || 'Onbekende fout'));
+      }
+    } catch (err) {
+      alert('Fout bij verwijderen filiaal.');
     }
   };
 
@@ -382,9 +404,9 @@ export default function AdminDashboard() {
                     >
                       <option value="">Kies Filiaal (Optioneel)</option>
                       {stores.map(s => {
-                        const sId = s.id || s.store_id;
+                        const sId = String(s.id || s.store_id);
                         return (
-                          <option key={sId} value={String(sId)}>{s.store_name || s.name || `Filiaal #${sId}`}</option>
+                          <option key={sId} value={sId}>{s.store_name || s.name || `Filiaal #${sId}`}</option>
                         );
                       })}
                     </select>
@@ -491,20 +513,28 @@ export default function AdminDashboard() {
                 <div className="bg-white rounded-lg shadow p-6">
                   <h3 className="text-md font-bold mb-4">Actieve Filialen ({stores.length})</h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {stores.map(s => (
-                      <div key={s.id || s.store_id} className="border p-4 rounded-lg bg-gray-50 flex flex-col justify-between">
-                        <div>
-                          <div className="font-bold text-sm text-red-600">{s.store_name || s.name}</div>
-                          <div className="text-xs text-gray-500 mt-1">📍 {s.address || 'Geen adres'}</div>
-                          <div className="text-xs text-gray-400 mt-0.5">ID: #{s.id || s.store_id} | Terminal: {s.terminal_id || 'Niet gekoppeld'}</div>
+                    {stores.map(s => {
+                      const sId = s.id || s.store_id;
+                      const sName = s.store_name || s.name;
+
+                      return (
+                        <div key={sId} className="border p-4 rounded-lg bg-gray-50 flex flex-col justify-between">
+                          <div>
+                            <div className="font-bold text-sm text-red-600">{sName}</div>
+                            <div className="text-xs text-gray-500 mt-1">📍 {s.address || 'Geen adres'}</div>
+                            <div className="text-xs text-gray-400 mt-0.5">ID: #{sId} | Terminal: {s.terminal_id || 'Niet gekoppeld'}</div>
+                          </div>
+                          <div className="mt-3 text-right space-x-2">
+                            <button onClick={() => setEditingStore(s)} className="text-xs bg-black text-white px-3 py-1 rounded font-bold hover:bg-gray-800">
+                              Bewerken
+                            </button>
+                            <button onClick={() => handleDeleteStore(sId, sName)} className="text-xs bg-red-600 text-white px-3 py-1 rounded font-bold hover:bg-red-700">
+                              Verwijderen
+                            </button>
+                          </div>
                         </div>
-                        <div className="mt-3 text-right">
-                          <button onClick={() => setEditingStore(s)} className="text-xs bg-black text-white px-3 py-1 rounded font-bold hover:bg-gray-800">
-                            Bewerken
-                          </button>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               </div>
@@ -723,9 +753,9 @@ export default function AdminDashboard() {
               >
                 <option value="">Geen Filiaal</option>
                 {stores.map(s => {
-                  const sId = s.id || s.store_id;
+                  const sId = String(s.id || s.store_id);
                   return (
-                    <option key={sId} value={String(sId)}>{s.store_name || s.name || `Filiaal #${sId}`}</option>
+                    <option key={sId} value={sId}>{s.store_name || s.name || `Filiaal #${sId}`}</option>
                   );
                 })}
               </select>

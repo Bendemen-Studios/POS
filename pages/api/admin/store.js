@@ -1,97 +1,74 @@
-import pool from '../../../lib/db';
+import db from '../../../lib/db';
 
 export default async function handler(req, res) {
-  // GET: Haal alle locaties op
-  if (req.method === 'GET') {
-    try {
-      const [rows] = await pool.execute('SELECT * FROM pos_stores ORDER BY id ASC');
-      
-      const formattedStores = rows.map(s => ({
-        ...s,
-        store_name: s.store_name ?? s.name ?? '',
-        address: s.address ?? s.location ?? '',
-        receipt_header: s.receipt_header ?? '',
-        receipt_footer: s.receipt_footer ?? '',
-        pickup_id: s.pickup_id ?? ''
-      }));
+  const { method } = req;
 
-      return res.status(200).json({ success: true, stores: formattedStores });
+  if (method === 'GET') {
+    try {
+      const [rows] = await db.query('SELECT * FROM stores');
+      return res.status(200).json({ success: true, stores: Array.isArray(rows) ? rows : [] });
     } catch (error) {
-      console.error("Database Store GET Error:", error);
-      return res.status(500).json({ success: false, error: 'Databasefout bij ophalen locaties.' });
+      console.error('Fout bij ophalen winkels:', error);
+      return res.status(500).json({ success: false, error: error.message });
     }
   }
 
-  // POST: Opslaan / Bewerken
-  if (req.method === 'POST') {
+  if (method === 'POST') {
+    const { store_name, address, receipt_header, receipt_footer, pickup_id, terminal_id } = req.body;
     try {
-      const { id, store_name, name, address, receipt_header, receipt_footer, pickup_id } = req.body;
-      
-      const finalName = store_name || name;
+      const customId = `store_${Date.now()}`;
+      await db.query(
+        'INSERT INTO stores (id, store_name, address, receipt_header, receipt_footer, pickup_id, terminal_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [customId, store_name, address || null, receipt_header || null, receipt_footer || null, pickup_id || null, terminal_id || null]
+      );
+      return res.status(200).json({ success: true, id: customId });
+    } catch (error) {
+      console.error('Fout bij toevoegen winkel:', error);
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  }
 
-      if (!finalName) {
-        return res.status(400).json({ success: false, message: 'Locatienaam mag niet leeg zijn.' });
+  if (method === 'PUT') {
+    const { id, store_name, address, receipt_header, receipt_footer, pickup_id, terminal_id } = req.body;
+    try {
+      await db.query(
+        'UPDATE stores SET store_name = ?, address = ?, receipt_header = ?, receipt_footer = ?, pickup_id = ?, terminal_id = ? WHERE id = ?',
+        [store_name, address || null, receipt_header || null, receipt_footer || null, pickup_id || null, terminal_id || null, id]
+      );
+      return res.status(200).json({ success: true, message: 'Filiaal bijgewerkt' });
+    } catch (error) {
+      console.error('Fout bij bijwerken winkel:', error);
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  }
+
+  if (method === 'DELETE') {
+    const { id } = req.query;
+    try {
+      // 1. Controleer dat er minimaal 1 filiaal overblijft
+      const [countRows] = await db.query('SELECT COUNT(*) AS total FROM stores');
+      const totalStores = countRows[0]?.total || 0;
+
+      if (totalStores <= 1) {
+        return res.status(400).json({
+          success: false,
+          error: 'Er moet minimaal 1 actief filiaal in het systeem aanwezig blijven.'
+        });
       }
 
-      const storeId = id ? String(id) : `store_${Date.now()}`;
-      const finalPickupId = pickup_id || '';
+      // 2. Verwijder het filiaal
+      await db.query('DELETE FROM stores WHERE id = ?', [id]);
 
-      if (id) {
-        // Probeer update inclusief pickup_id
-        try {
-          await pool.execute(
-            `UPDATE pos_stores 
-             SET store_name = ?, name = ?, address = ?, receipt_header = ?, receipt_footer = ?, pickup_id = ? 
-             WHERE id = ?`,
-            [finalName, finalName, address || '', receipt_header || '', receipt_footer || '', finalPickupId, storeId]
-          );
-        } catch (err) {
-          // Fallback als pickup_id kolom onverhoopt toch niet bestaat
-          await pool.execute(
-            `UPDATE pos_stores 
-             SET store_name = ?, name = ?, address = ?, receipt_header = ?, receipt_footer = ? 
-             WHERE id = ?`,
-            [finalName, finalName, address || '', receipt_header || '', receipt_footer || '', storeId]
-          );
-        }
-      } else {
-        // Nieuwe winkel invoegen inclusief pickup_id
-        try {
-          await pool.execute(
-            `INSERT INTO pos_stores (id, store_name, name, address, receipt_header, receipt_footer, pickup_id) 
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            [storeId, finalName, finalName, address || '', receipt_header || '', receipt_footer || '', finalPickupId]
-          );
-        } catch (err) {
-          await pool.execute(
-            `INSERT INTO pos_stores (id, store_name, name, address, receipt_header, receipt_footer) 
-             VALUES (?, ?, ?, ?, ?, ?)`,
-            [storeId, finalName, finalName, address || '', receipt_header || '', receipt_footer || '']
-          );
-        }
-      }
+      // 3. Zet gekoppelde medewerkers terug naar NULL
+      await db.query('UPDATE users SET store_id = NULL WHERE store_id = ?', [id]);
 
-      return res.status(200).json({ success: true, message: 'Locatie succesvol opgeslagen!' });
+      return res.status(200).json({ success: true, message: 'Filiaal succesvol verwijderd' });
     } catch (error) {
-      console.error("Database Store POST Error:", error);
-      return res.status(500).json({ success: false, error: 'Fout bij opslaan in database.' });
+      console.error('Fout bij verwijderen winkel:', error);
+      return res.status(500).json({ success: false, error: error.message });
     }
   }
 
-  // DELETE: Verwijderen
-  if (req.method === 'DELETE') {
-    try {
-      const { id } = req.query;
-      if (!id) return res.status(400).json({ success: false, message: 'Geen ID opgegeven.' });
-
-      await pool.execute('DELETE FROM pos_stores WHERE id = ?', [String(id)]);
-      return res.status(200).json({ success: true, message: 'Locatie verwijderd.' });
-    } catch (error) {
-      console.error("Database Store DELETE Error:", error);
-      return res.status(500).json({ success: false, error: 'Fout bij verwijderen.' });
-    }
-  }
-
-  res.setHeader('Allow', ['GET', 'POST', 'DELETE']);
-  return res.status(405).json({ success: false, message: `Method ${req.method} not allowed` });
+  res.setHeader('Allow', ['GET', 'POST', 'PUT', 'DELETE']);
+  res.status(405).end(`Method ${method} Not Allowed`);
 }
