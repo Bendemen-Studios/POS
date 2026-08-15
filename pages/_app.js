@@ -19,37 +19,6 @@ export default function App({ Component, pageProps }) {
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
       </Head>
 
-      <style jsx global>{`
-        html, body {
-          padding: 0;
-          margin: 0;
-          height: 100%;
-          height: 100dvh;
-          background-color: #ffffff;
-          color: #111111;
-          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-          -webkit-tap-highlight-color: transparent;
-          -webkit-touch-callout: none;
-          user-select: none;
-          overscroll-behavior-y: none;
-          overflow-x: hidden;
-        }
-
-        *, *::before, *::after {
-          box-sizing: border-box;
-          -webkit-font-smoothing: antialiased;
-          -moz-osx-font-smoothing: grayscale;
-          -webkit-backface-visibility: hidden;
-          backface-visibility: hidden;
-        }
-
-        input, select, textarea, button {
-          font-family: inherit;
-          -webkit-user-select: auto !important;
-          user-select: auto !important;
-        }
-      `}</style>
-
       <Component {...pageProps} />
     </>
   );

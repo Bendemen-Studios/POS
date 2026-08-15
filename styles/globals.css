@@ -2,31 +2,31 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Fix mobiel & tablet flikkeren en layout bounce */
-html,
-body {
+html, body {
+  padding: 0;
+  margin: 0;
   height: 100%;
   height: 100dvh;
-  overflow-x: hidden;
+  background-color: #ffffff;
+  color: #111111;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   -webkit-tap-highlight-color: transparent;
   -webkit-touch-callout: none;
-  -webkit-user-select: none;
   user-select: none;
   overscroll-behavior-y: none;
+  overflow-x: hidden;
 }
 
-/* Zorg dat invoervelden wel geselecteerd kunnen worden */
-input,
-textarea,
-select {
-  -webkit-user-select: auto !important;
-  user-select: auto !important;
-}
-
-/* Hardware acceleratie forceren om schermflikkeringen te voorkomen */
-* {
+*, *::before, *::after {
+  box-sizing: border-box;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   -webkit-backface-visibility: hidden;
   backface-visibility: hidden;
+}
+
+input, select, textarea, button {
+  font-family: inherit;
+  -webkit-user-select: auto !important;
+  user-select: auto !important;
 }
