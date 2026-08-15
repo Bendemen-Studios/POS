@@ -11,7 +11,12 @@ export default function LoginPage() {
   useEffect(() => {
     const user = localStorage.getItem('pos_user');
     if (user) {
-      router.push('/');
+      const selectedStore = localStorage.getItem('selectedStore');
+      if (selectedStore) {
+        router.push('/');
+      } else {
+        router.push('/select-store');
+      }
     }
   }, [router]);
 
@@ -32,7 +37,9 @@ export default function LoginPage() {
       if (data.success) {
         localStorage.setItem('pos_user', JSON.stringify(data.user));
         if (data.token) localStorage.setItem('pos_token', data.token);
-        router.push('/');
+        
+        // Stuur direct door naar vestiging selectie
+        router.push('/select-store');
       } else {
         setError(data.message || 'Inloggen mislukt.');
       }
