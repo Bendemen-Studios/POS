@@ -13,7 +13,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    // 1. Controleer rol van de gebruiker
+    // 1. Haal de gebruiker op uit de DB
     const [userRows] = await db.query(
       'SELECT id, username, role, store_id FROM users WHERE id = ?',
       [userId]
@@ -38,17 +38,24 @@ export default async function handler(req, res) {
       );
       stores = allStores;
     } else {
-      // Reguliere gebruikers zien alleen filialen die via user_stores of hun store_id zijn gekoppeld
+      // Reguliere gebruikers zien alleen de winkel gekoppeld aan hun store_id
       const [userStoreRows] = await db.query(
-        `SELECT s.id, s.store_name, s.address, s.pickup_id, s.terminal_id 
-         FROM stores s
-         LEFT JOIN user_stores us ON s.id = us.store_id
-         WHERE (us.user_id = ? OR s.id = ?)
-         AND (s.is_active = 1 OR s.is_active IS NULL)
-         GROUP BY s.id`,
-        [user.id, user.store_id || 0]
+        `SELECT id, store_name, address, pickup_id, terminal_id 
+         FROM stores 
+         WHERE (id = ? OR store_name = ?)
+         AND (is_active = 1 OR is_active IS NULL)`,
+        [user.store_id || 0, user.store_id || '']
       );
-      stores = userStoreRows;
+
+      // Fallback: Als er niks matcht via ID, haal alle actieve filialen op
+      if (userStoreRows.length === 0) {
+        const [fallbackStores] = await db.query(
+          'SELECT id, store_name, address, pickup_id, terminal_id FROM stores WHERE is_active = 1 OR is_active IS NULL'
+        );
+        stores = fallbackStores;
+      } else {
+        stores = userStoreRows;
+      }
     }
 
     return res.status(200).json({ success: true, stores });
