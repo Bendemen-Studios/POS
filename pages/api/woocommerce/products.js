@@ -20,75 +20,74 @@ export default async function handler(req, res) {
   }
 
   const authHeader = 'Basic ' + Buffer.from(`${consumerKey}:${consumerSecret}`).toString('base64');
-
-  const api = new WooCommerceRestApi({
-    url,
-    consumerKey,
-    consumerSecret,
-    version: 'wc/v3',
-    axiosConfig: {
-      timeout: 25000,
-      headers: {
-        'Content-Type': 'application/json',
-        'Connection': 'close'
-      }
-    }
-  });
+  const customHeaders = {
+    'Authorization': authHeader,
+    'Content-Type': 'application/json',
+    'User-Agent': 'BDM-POS-Client/1.0 (Mozilla/5.0; Node.js)',
+    'Connection': 'close'
+  };
 
   try {
     let rawProducts = [];
 
-    // Ophalen van gepubliceerde producten (inclusief fallback)
+    // Ophalen van gepubliceerde producten via Native Fetch met User-Agent
     try {
-      const response = await api.get('products', { per_page: 100, status: 'publish' });
-      rawProducts = response.data || [];
-    } catch (sdkErr) {
-      console.warn('[PRODUCTS API]: SDK faalt bij ophalen producten, schakelt over op fetch fallback...', sdkErr.message);
       const fetchRes = await fetch(`${url}/wp-json/wc/v3/products?per_page=100&status=publish`, {
-        headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' }
+        headers: customHeaders
       });
+
       if (!fetchRes.ok) throw new Error(`HTTP ${fetchRes.status}: ${await fetchRes.text()}`);
       rawProducts = await fetchRes.json();
+    } catch (fetchErr) {
+      console.warn('[PRODUCTS API]: Directe fetch mislukt, probeert SDK fallback...', fetchErr.message);
+      const api = new WooCommerceRestApi({
+        url,
+        consumerKey,
+        consumerSecret,
+        version: 'wc/v3',
+        axiosConfig: {
+          timeout: 25000,
+          headers: customHeaders
+        }
+      });
+      const response = await api.get('products', { per_page: 100, status: 'publish' });
+      rawProducts = response.data || [];
     }
 
     const products = [];
 
-    // Verwerk producten strikt 1 voor 1 om Nginx ECONNRESET / socket hang up te voorkomen
+    // Verwerk producten strikt 1 voor 1 met een micro-pauze om Nginx / Wordfence rate-limiting te voorkomen
     for (const product of rawProducts) {
       let variationsData = [];
 
       if (product.type === 'variable' && Array.isArray(product.variations) && product.variations.length > 0) {
         try {
-          let rawVariations = [];
-          try {
-            const { data: variations } = await api.get(`products/${product.id}/variations`, { per_page: 100 });
-            rawVariations = variations || [];
-          } catch (varSdkErr) {
-            console.warn(`[VARIATION FETCH FALLBACK] Product #${product.id}: SDK faalt, probeert native fetch...`);
-            const fetchVarRes = await fetch(`${url}/wp-json/wc/v3/products/${product.id}/variations?per_page=100`, {
-              headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' }
-            });
-            if (fetchVarRes.ok) {
-              rawVariations = await fetchVarRes.json();
-            }
-          }
+          // Pauzeer 50ms tussen verzoeken om de webserver rust te geven
+          await new Promise((resolve) => setTimeout(resolve, 50));
 
-          variationsData = rawVariations.map((v) => ({
-            id: v.id,
-            variation_id: v.id,
-            price: v.price || v.regular_price || 0,
-            regular_price: v.regular_price || 0,
-            sale_price: v.sale_price || null,
-            stock_quantity: v.stock_quantity,
-            in_stock: v.in_stock ?? v.stock_status === 'instock',
-            attributes: Array.isArray(v.attributes)
-              ? v.attributes.map((attr) => ({
-                  id: attr.id,
-                  name: attr.name,
-                  option: attr.option
-                }))
-              : []
-          }));
+          const fetchVarRes = await fetch(`${url}/wp-json/wc/v3/products/${product.id}/variations?per_page=100`, {
+            headers: customHeaders
+          });
+
+          if (fetchVarRes.ok) {
+            const rawVariations = await fetchVarRes.json();
+            variationsData = (rawVariations || []).map((v) => ({
+              id: v.id,
+              variation_id: v.id,
+              price: v.price || v.regular_price || 0,
+              regular_price: v.regular_price || 0,
+              sale_price: v.sale_price || null,
+              stock_quantity: v.stock_quantity,
+              in_stock: v.in_stock ?? v.stock_status === 'instock',
+              attributes: Array.isArray(v.attributes)
+                ? v.attributes.map((attr) => ({
+                    id: attr.id,
+                    name: attr.name,
+                    option: attr.option
+                  }))
+                : []
+            }));
+          }
         } catch (varErr) {
           console.error(`[VARIATION SKIPPED] Fout bij ophalen variaties voor product #${product.id}:`, varErr.message);
         }
@@ -123,10 +122,10 @@ export default async function handler(req, res) {
     });
 
   } catch (error) {
-    console.error('Fout bij ophalen WooCommerce producten:', error.response?.data || error.message);
+    console.error('Fout bij ophalen WooCommerce producten:', error.message);
     return res.status(500).json({
       success: false,
-      error: error.response?.data?.message || error.message || 'Fout bij ophalen producten'
+      error: error.message || 'Fout bij ophalen producten'
     });
   }
 }
