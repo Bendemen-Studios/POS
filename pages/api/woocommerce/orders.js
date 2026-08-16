@@ -15,41 +15,70 @@ export default async function handler(req, res) {
     });
   }
 
-  const api = new WooCommerceRestApi({
-    url,
-    consumerKey,
-    consumerSecret,
-    version: 'wc/v3',
-    axiosConfig: {
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    },
-  });
+  const authHeader = 'Basic ' + Buffer.from(`${consumerKey}:${consumerSecret}`).toString('base64');
 
+  // GET: Bestellingen ophalen
   if (method === 'GET') {
     try {
-      const { data: orders } = await api.get('orders', {
-        per_page: 50,
-        order: 'desc',
-        orderby: 'date'
-      });
+      let orders = [];
+
+      try {
+        const api = new WooCommerceRestApi({
+          url,
+          consumerKey,
+          consumerSecret,
+          version: 'wc/v3',
+          axiosConfig: {
+            timeout: 15000,
+            headers: {
+              'Content-Type': 'application/json',
+              'Connection': 'close'
+            }
+          }
+        });
+
+        const { data } = await api.get('orders', {
+          per_page: 50,
+          order: 'desc',
+          orderby: 'date'
+        });
+        orders = data;
+      } catch (sdkErr) {
+        console.warn('[ORDERS API]: SDK GET mislukt/timeout, schakelt over naar native fetch fallback...', sdkErr.message);
+
+        const fetchRes = await fetch(`${url}/wp-json/wc/v3/orders?per_page=50&order=desc&orderby=date`, {
+          method: 'GET',
+          headers: {
+            'Authorization': authHeader,
+            'Content-Type': 'application/json'
+          }
+        });
+
+        if (!fetchRes.ok) {
+          const errText = await fetchRes.text();
+          throw new Error(`HTTP ${fetchRes.status}: ${errText}`);
+        }
+
+        orders = await fetchRes.json();
+      }
 
       return res.status(200).json({
         success: true,
         count: Array.isArray(orders) ? orders.length : 0,
         orders: Array.isArray(orders) ? orders : []
       });
+
     } catch (error) {
-      console.error('Fout bij ophalen WooCommerce bestellingen:', error.response?.data || error.message);
+      console.error('Fout bij ophalen WooCommerce bestellingen:', error.message);
       return res.status(500).json({
         success: false,
-        error: error.response?.data?.message || error.message || 'Fout bij ophalen bestellingen',
+        error: error.message || 'Fout bij ophalen bestellingen',
         orders: []
       });
     }
   }
 
+  // PUT: Orderstatus bijwerken
   if (method === 'PUT') {
     const { id, status } = req.body;
     if (!id || !status) {
@@ -57,13 +86,52 @@ export default async function handler(req, res) {
     }
 
     try {
-      const { data: updatedOrder } = await api.put(`orders/${id}`, { status });
+      let updatedOrder;
+
+      try {
+        const api = new WooCommerceRestApi({
+          url,
+          consumerKey,
+          consumerSecret,
+          version: 'wc/v3',
+          axiosConfig: {
+            timeout: 15000,
+            headers: {
+              'Content-Type': 'application/json',
+              'Connection': 'close'
+            }
+          }
+        });
+
+        const { data } = await api.put(`orders/${id}`, { status });
+        updatedOrder = data;
+      } catch (sdkErr) {
+        console.warn(`[ORDERS API]: SDK PUT mislukt voor order #${id}, schakelt over naar native fetch fallback...`, sdkErr.message);
+
+        const fetchRes = await fetch(`${url}/wp-json/wc/v3/orders/${id}`, {
+          method: 'PUT',
+          headers: {
+            'Authorization': authHeader,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ status })
+        });
+
+        if (!fetchRes.ok) {
+          const errText = await fetchRes.text();
+          throw new Error(`HTTP ${fetchRes.status}: ${errText}`);
+        }
+
+        updatedOrder = await fetchRes.json();
+      }
+
       return res.status(200).json({ success: true, order: updatedOrder });
+
     } catch (error) {
-      console.error(`Fout bij bijwerken orderstatus #${id}:`, error.response?.data || error.message);
+      console.error(`Fout bij bijwerken orderstatus #${id}:`, error.message);
       return res.status(500).json({
         success: false,
-        error: error.response?.data?.message || error.message || 'Fout bij bijwerken orderstatus'
+        error: error.message || 'Fout bij bijwerken orderstatus'
       });
     }
   }

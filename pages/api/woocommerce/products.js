@@ -19,11 +19,20 @@ export default async function handler(req, res) {
     });
   }
 
+  const authHeader = 'Basic ' + Buffer.from(`${consumerKey}:${consumerSecret}`).toString('base64');
+
   const api = new WooCommerceRestApi({
     url,
     consumerKey,
     consumerSecret,
-    version: 'wc/v3'
+    version: 'wc/v3',
+    axiosConfig: {
+      timeout: 25000,
+      headers: {
+        'Content-Type': 'application/json',
+        'Connection': 'close'
+      }
+    }
   });
 
   try {
@@ -34,8 +43,7 @@ export default async function handler(req, res) {
       const response = await api.get('products', { per_page: 100, status: 'publish' });
       rawProducts = response.data || [];
     } catch (sdkErr) {
-      console.warn('[PRODUCTS API]: SDK faalt, probeert directe Fetch fallback...', sdkErr.message);
-      const authHeader = 'Basic ' + Buffer.from(`${consumerKey}:${consumerSecret}`).toString('base64');
+      console.warn('[PRODUCTS API]: SDK faalt bij ophalen producten, schakelt over op fetch fallback...', sdkErr.message);
       const fetchRes = await fetch(`${url}/wp-json/wc/v3/products?per_page=100&status=publish`, {
         headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' }
       });
@@ -43,57 +51,70 @@ export default async function handler(req, res) {
       rawProducts = await fetchRes.json();
     }
 
-    const products = await Promise.all(
-      rawProducts.map(async (product) => {
-        let variationsData = [];
+    const products = [];
 
-        // Als het een variabel product is, haal de variaties op
-        if (product.type === 'variable' && Array.isArray(product.variations) && product.variations.length > 0) {
+    // Verwerk producten strikt 1 voor 1 om Nginx ECONNRESET / socket hang up te voorkomen
+    for (const product of rawProducts) {
+      let variationsData = [];
+
+      if (product.type === 'variable' && Array.isArray(product.variations) && product.variations.length > 0) {
+        try {
+          let rawVariations = [];
           try {
             const { data: variations } = await api.get(`products/${product.id}/variations`, { per_page: 100 });
-            variationsData = (variations || []).map((v) => ({
-              id: v.id,
-              variation_id: v.id,
-              price: v.price || v.regular_price || 0,
-              regular_price: v.regular_price || 0,
-              sale_price: v.sale_price || null,
-              stock_quantity: v.stock_quantity,
-              in_stock: v.in_stock ?? v.stock_status === 'instock',
-              attributes: Array.isArray(v.attributes)
-                ? v.attributes.map((attr) => ({
-                    id: attr.id,
-                    name: attr.name,
-                    option: attr.option
-                  }))
-                : []
-            }));
-          } catch (varErr) {
-            console.error(`Fout bij ophalen variaties voor product #${product.id}:`, varErr.message);
+            rawVariations = variations || [];
+          } catch (varSdkErr) {
+            console.warn(`[VARIATION FETCH FALLBACK] Product #${product.id}: SDK faalt, probeert native fetch...`);
+            const fetchVarRes = await fetch(`${url}/wp-json/wc/v3/products/${product.id}/variations?per_page=100`, {
+              headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' }
+            });
+            if (fetchVarRes.ok) {
+              rawVariations = await fetchVarRes.json();
+            }
           }
-        }
 
-        return {
-          id: product.id,
-          name: product.name,
-          slug: product.slug,
-          price: product.price || product.regular_price || 0,
-          regular_price: product.regular_price || 0,
-          sale_price: product.sale_price || null,
-          stock_quantity: product.stock_quantity,
-          in_stock: product.in_stock ?? product.stock_status === 'instock',
-          type: product.type,
-          categories: Array.isArray(product.categories)
-            ? product.categories.map((c) => ({ id: c.id, name: c.name, slug: c.slug }))
-            : [],
-          images: Array.isArray(product.images)
-            ? product.images.map((img) => ({ id: img.id, src: img.src, alt: img.alt }))
-            : [],
-          attributes: product.attributes || [],
-          variations: product.variations || [],
-          variations_data: variationsData
-        };
-      })
-    );
+          variationsData = rawVariations.map((v) => ({
+            id: v.id,
+            variation_id: v.id,
+            price: v.price || v.regular_price || 0,
+            regular_price: v.regular_price || 0,
+            sale_price: v.sale_price || null,
+            stock_quantity: v.stock_quantity,
+            in_stock: v.in_stock ?? v.stock_status === 'instock',
+            attributes: Array.isArray(v.attributes)
+              ? v.attributes.map((attr) => ({
+                  id: attr.id,
+                  name: attr.name,
+                  option: attr.option
+                }))
+              : []
+          }));
+        } catch (varErr) {
+          console.error(`[VARIATION SKIPPED] Fout bij ophalen variaties voor product #${product.id}:`, varErr.message);
+        }
+      }
+
+      products.push({
+        id: product.id,
+        name: product.name,
+        slug: product.slug,
+        price: product.price || product.regular_price || 0,
+        regular_price: product.regular_price || 0,
+        sale_price: product.sale_price || null,
+        stock_quantity: product.stock_quantity,
+        in_stock: product.in_stock ?? product.stock_status === 'instock',
+        type: product.type,
+        categories: Array.isArray(product.categories)
+          ? product.categories.map((c) => ({ id: c.id, name: c.name, slug: c.slug }))
+          : [],
+        images: Array.isArray(product.images)
+          ? product.images.map((img) => ({ id: img.id, src: img.src, alt: img.alt }))
+          : [],
+        attributes: product.attributes || [],
+        variations: product.variations || [],
+        variations_data: variationsData
+      });
+    }
 
     return res.status(200).json({
       success: true,
