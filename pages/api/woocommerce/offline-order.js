@@ -6,10 +6,10 @@ export default async function handler(req, res) {
     return res.status(405).json({ success: false, error: `Method ${req.method} Not Allowed` });
   }
 
-  // Omgevingsvariabelen uitlezen
+  // Omgevingsvariabelen uitlezen (met brede fallback)
   const wcUrl = process.env.WOOCOMMERCE_URL || process.env.NEXT_PUBLIC_WOOCOMMERCE_URL || 'https://www.bendemen.com';
-  const consumerKey = process.env.WOOCOMMERCE_CONSUMER_KEY || process.env.WOOCOMMERCE_KEY;
-  const consumerSecret = process.env.WOOCOMMERCE_CONSUMER_SECRET || process.env.WOOCOMMERCE_SECRET;
+  const consumerKey = process.env.WOOCOMMERCE_CONSUMER_KEY || process.env.WOOCOMMERCE_KEY || process.env.NEXT_PUBLIC_WOOCOMMERCE_KEY;
+  const consumerSecret = process.env.WOOCOMMERCE_CONSUMER_SECRET || process.env.WOOCOMMERCE_SECRET || process.env.NEXT_PUBLIC_WOOCOMMERCE_SECRET;
 
   if (!consumerKey || !consumerSecret) {
     console.error('[OFFLINE ORDER ERROR]: WooCommerce API keys ontbreken in .env');
@@ -82,7 +82,6 @@ export default async function handler(req, res) {
       );
     }
 
-    // Directe WooCommerce API call via SDK / fetch fallback
     let responseOrder;
     try {
       const WooCommerce = new WooCommerceRestApi({

@@ -3,14 +3,16 @@ import WooCommerceRestApi from '@woocommerce/woocommerce-rest-api';
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
     res.setHeader('Allow', ['GET']);
-    return res.status(405).end(`Method ${req.method} Not Allowed`);
+    return res.status(405).json({ success: false, error: `Method ${req.method} Not Allowed` });
   }
 
+  // Flexibele check voor URL en API keys (pakt alle varianten uit .env)
   const url = process.env.WOOCOMMERCE_URL || process.env.NEXT_PUBLIC_WOOCOMMERCE_URL || 'https://www.bendemen.com';
-  const consumerKey = process.env.WOOCOMMERCE_CONSUMER_KEY || process.env.NEXT_PUBLIC_WOOCOMMERCE_KEY;
-  const consumerSecret = process.env.WOOCOMMERCE_CONSUMER_SECRET || process.env.NEXT_PUBLIC_WOOCOMMERCE_SECRET;
+  const consumerKey = process.env.WOOCOMMERCE_CONSUMER_KEY || process.env.WOOCOMMERCE_KEY || process.env.NEXT_PUBLIC_WOOCOMMERCE_KEY;
+  const consumerSecret = process.env.WOOCOMMERCE_CONSUMER_SECRET || process.env.WOOCOMMERCE_SECRET || process.env.NEXT_PUBLIC_WOOCOMMERCE_SECRET;
 
   if (!consumerKey || !consumerSecret) {
+    console.error('[PRODUCTS API ERROR]: WooCommerce API keys ontbreken in .env');
     return res.status(500).json({
       success: false,
       error: 'WooCommerce API sleutels zijn niet geconfigureerd in .env'
@@ -25,23 +27,31 @@ export default async function handler(req, res) {
   });
 
   try {
-    const { data: rawProducts } = await api.get('products', {
-      per_page: 100,
-      status: 'publish'
-    });
+    let rawProducts = [];
+
+    // Ophalen van gepubliceerde producten (inclusief fallback)
+    try {
+      const response = await api.get('products', { per_page: 100, status: 'publish' });
+      rawProducts = response.data || [];
+    } catch (sdkErr) {
+      console.warn('[PRODUCTS API]: SDK faalt, probeert directe Fetch fallback...', sdkErr.message);
+      const authHeader = 'Basic ' + Buffer.from(`${consumerKey}:${consumerSecret}`).toString('base64');
+      const fetchRes = await fetch(`${url}/wp-json/wc/v3/products?per_page=100&status=publish`, {
+        headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' }
+      });
+      if (!fetchRes.ok) throw new Error(`HTTP ${fetchRes.status}: ${await fetchRes.text()}`);
+      rawProducts = await fetchRes.json();
+    }
 
     const products = await Promise.all(
       rawProducts.map(async (product) => {
         let variationsData = [];
 
-        // Als het een variabel product is, haal de variatie-details (met ID & Attributen) op
+        // Als het een variabel product is, haal de variaties op
         if (product.type === 'variable' && Array.isArray(product.variations) && product.variations.length > 0) {
           try {
-            const { data: variations } = await api.get(`products/${product.id}/variations`, {
-              per_page: 100
-            });
-
-            variationsData = variations.map((v) => ({
+            const { data: variations } = await api.get(`products/${product.id}/variations`, { per_page: 100 });
+            variationsData = (variations || []).map((v) => ({
               id: v.id,
               variation_id: v.id,
               price: v.price || v.regular_price || 0,
@@ -90,6 +100,7 @@ export default async function handler(req, res) {
       count: products.length,
       products
     });
+
   } catch (error) {
     console.error('Fout bij ophalen WooCommerce producten:', error.response?.data || error.message);
     return res.status(500).json({
