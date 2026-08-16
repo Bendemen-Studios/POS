@@ -1,52 +1,38 @@
 import WooCommerceRestApi from '@woocommerce/woocommerce-rest-api';
-import path from 'path';
-import dotenv from 'dotenv';
 
-// Dwing het laden van .env.local af op OS-niveau
-dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
-dotenv.config({ path: path.resolve(process.cwd(), '.env') });
+const WooCommerce = new WooCommerceRestApi({
+  url: process.env.WOOCOMMERCE_URL || 'https://www.bendemen.com',
+  consumerKey: process.env.WOOCOMMERCE_CONSUMER_KEY,
+  consumerSecret: process.env.WOOCOMMERCE_CONSUMER_SECRET,
+  version: 'wc/v3',
+});
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
-    res.setHeader('Allow', ['POST']);
-    return res.status(405).json({ success: false, error: `Method ${req.method} Not Allowed` });
+    return res.status(405).json({ message: 'Method not allowed' });
   }
 
-  // Haal variabelen op (inclusief fallback check op proces- en geladen variabelen)
-  const wcUrl = process.env.WOOCOMMERCE_URL || process.env.NEXT_PUBLIC_WOOCOMMERCE_URL || 'https://www.bendemen.com';
-  const consumerKey = process.env.WOOCOMMERCE_CONSUMER_KEY || process.env.WOOCOMMERCE_KEY || process.env.WC_CONSUMER_KEY;
-  const consumerSecret = process.env.WOOCOMMERCE_CONSUMER_SECRET || process.env.WOOCOMMERCE_SECRET || process.env.WC_CONSUMER_SECRET;
-
-  if (!consumerKey || !consumerSecret) {
-    console.error('[MANUAL ORDER ERROR]: WooCommerce Key of Secret ontbreekt in process.env');
-    return res.status(500).json({
-      success: false,
-      error: 'Serverconfiguratiefout: WooCommerce Consumer Key of Secret is niet geladen.'
-    });
-  }
-
-  const { orderItems, paymentMethod, storeId, cashierId, customerId, totals, cashDetails, created_at } = req.body;
+  const { orderItems, paymentMethod, storeId, cashierId, customerId, totals, cashDetails } = req.body;
 
   try {
-    const lineItems = (orderItems || []).map((item) => {
-      const isCustomItem = !item.product_id || item.product_id === 0 || String(item.id).startsWith('custom_');
-
-      if (isCustomItem) {
+    const lineItems = orderItems.map((item) => {
+      // Custom artikel afhandeling
+      if (!item.product_id || item.product_id === 0 || String(item.id).startsWith('custom_')) {
         return {
-          name: item.name || item.title || 'Custom Artikel',
-          total: parseFloat(item.price || 0).toFixed(2),
-          quantity: item.quantity || 1,
+          name: item.name || 'Custom Artikel',
+          total: parseFloat(item.price).toFixed(2),
+          quantity: item.quantity,
         };
       }
 
       const lineItemObj = {
-        product_id: Number(item.product_id || item.id),
-        quantity: item.quantity || 1,
-        total: (parseFloat(item.price || 0) * (item.quantity || 1)).toFixed(2)
+        product_id: item.product_id,
+        quantity: item.quantity,
+        total: (parseFloat(item.price) * item.quantity).toFixed(2)
       };
 
       if (item.variation_id && item.variation_id !== 0) {
-        lineItemObj.variation_id = Number(item.variation_id);
+        lineItemObj.variation_id = item.variation_id;
       }
 
       return lineItemObj;
@@ -61,7 +47,7 @@ export default async function handler(req, res) {
       payment_method_title: paymentTitle,
       set_paid: true,
       status: 'completed',
-      customer_id: customerId ? Number(customerId) : 0,
+      customer_id: customerId ? parseInt(customerId) : 0,
       line_items: lineItems,
       fee_lines: totals?.discountAmount > 0 ? [
         {
@@ -74,8 +60,7 @@ export default async function handler(req, res) {
       meta_data: [
         { key: '_pos_store_id', value: String(storeId || 1) },
         { key: '_pos_cashier_id', value: String(cashierId || 1) },
-        { key: '_pos_payment_type', value: String(paymentMethod) },
-        { key: '_pos_created_at', value: String(created_at || new Date().toISOString()) }
+        { key: '_pos_payment_type', value: String(paymentMethod) }
       ]
     };
 
@@ -86,47 +71,11 @@ export default async function handler(req, res) {
       );
     }
 
-    let responseOrder;
+    const response = await WooCommerce.post('orders', orderData);
 
-    try {
-      const WooCommerce = new WooCommerceRestApi({
-        url: wcUrl,
-        consumerKey: consumerKey,
-        consumerSecret: consumerSecret,
-        version: 'wc/v3',
-      });
-
-      const { data } = await WooCommerce.post('orders', orderData);
-      responseOrder = data;
-    } catch (sdkError) {
-      console.warn('[MANUAL ORDER]: SDK aanroep mislukt, schakelt over naar native fetch fallback...', sdkError?.message);
-
-      const authHeader = 'Basic ' + Buffer.from(`${consumerKey}:${consumerSecret}`).toString('base64');
-      const fetchRes = await fetch(`${wcUrl}/wp-json/wc/v3/orders`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': authHeader
-        },
-        body: JSON.stringify(orderData)
-      });
-
-      const fetchText = await fetchRes.text();
-
-      if (!fetchRes.ok) {
-        throw new Error(`WooCommerce HTTP ${fetchRes.status}: ${fetchText}`);
-      }
-
-      responseOrder = JSON.parse(fetchText);
-    }
-
-    return res.status(200).json({ success: true, order: responseOrder });
-
+    res.status(200).json({ success: true, order: response.data });
   } catch (error) {
-    console.error('[MANUAL ORDER PROCESS ERROR]:', error?.response?.data || error.message);
-    return res.status(500).json({
-      success: false,
-      error: error?.response?.data?.message || error.message || 'Fout bij verwerken van de bestelling.'
-    });
+    console.error('WooCommerce API Error:', error.response?.data || error.message);
+    res.status(500).json({ success: false, error: 'Fout bij aanmaken van de bestelling in WooCommerce' });
   }
 }

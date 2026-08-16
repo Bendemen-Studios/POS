@@ -92,41 +92,59 @@ export default function POSHome() {
     checkOfflineQueue();
   }, []);
 
-  // Automatische Offline Sync Listener
-  useEffect(() => {
-    const syncOfflineOrders = async () => {
-      const savedQueue = JSON.parse(localStorage.getItem('pos_offline_orders') || '[]');
-      if (savedQueue.length === 0) {
-        setPendingOfflineCount(0);
-        return;
-      }
+  // Automatische & Handmatige Offline Sync via het offline endpoint
+  const triggerOfflineSync = async () => {
+    const savedQueue = JSON.parse(localStorage.getItem('pos_offline_orders') || '[]');
+    if (savedQueue.length === 0) {
+      setPendingOfflineCount(0);
+      return;
+    }
 
-      console.log(`[OFFLINE SYNC] Poging tot synchroniseren van ${savedQueue.length} offline bestelling(en)...`);
-      const remainingQueue = [];
+    console.log(`[OFFLINE SYNC] Poging tot synchroniseren van ${savedQueue.length} offline bestelling(en)...`);
+    setIsSyncing(true);
+    let successCount = 0;
+    const remainingQueue = [];
+    let lastError = '';
 
-      for (const order of savedQueue) {
-        try {
-          const res = await fetch('/api/woocommerce/manual-order', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(order)
-          });
-          const data = await res.json();
-          if (!data.success) remainingQueue.push(order);
-        } catch (err) {
-          remainingQueue.push(order); // Netwerk/Server nog niet online
+    for (const order of savedQueue) {
+      try {
+        const res = await fetch('/api/woocommerce/offline-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(order)
+        });
+
+        const data = await res.json();
+
+        if (res.ok && data.success) {
+          successCount++;
+        } else {
+          lastError = data.error || data.message || `HTTP ${res.status}`;
+          remainingQueue.push(order);
         }
+      } catch (err) {
+        lastError = err.message || 'Geen verbinding met de server';
+        remainingQueue.push(order);
       }
+    }
 
-      localStorage.setItem('pos_offline_orders', JSON.stringify(remainingQueue));
-      setPendingOfflineCount(remainingQueue.length);
-    };
+    localStorage.setItem('pos_offline_orders', JSON.stringify(remainingQueue));
+    setPendingOfflineCount(remainingQueue.length);
+    setIsSyncing(false);
 
-    window.addEventListener('online', syncOfflineOrders);
-    const interval = setInterval(syncOfflineOrders, 30000);
+    if (successCount > 0 && remainingQueue.length === 0) {
+      alert(`✅ Alle ${successCount} offline bestelling(en) succesvol gesynchroniseerd!`);
+    } else if (remainingQueue.length > 0 && lastError) {
+      console.warn('[OFFLINE SYNC ERROR]:', lastError);
+    }
+  };
+
+  useEffect(() => {
+    window.addEventListener('online', triggerOfflineSync);
+    const interval = setInterval(triggerOfflineSync, 30000);
 
     return () => {
-      window.removeEventListener('online', syncOfflineOrders);
+      window.removeEventListener('online', triggerOfflineSync);
       clearInterval(interval);
     };
   }, []);
@@ -173,6 +191,7 @@ export default function POSHome() {
   const handleSyncData = async () => {
     setIsSyncing(true);
     await Promise.all([fetchProducts(), fetchCustomers(), fetchPickupOrders()]);
+    await triggerOfflineSync();
     setIsSyncing(false);
   };
 
@@ -648,9 +667,13 @@ export default function POSHome() {
           )}
 
           {pendingOfflineCount > 0 && (
-            <span className="text-[10px] bg-yellow-500 text-black font-extrabold px-2 py-0.5 rounded-full animate-pulse">
-              ⚠️ {pendingOfflineCount} Offline
-            </span>
+            <button
+              onClick={triggerOfflineSync}
+              title="Klik om te synchroniseren"
+              className="text-[10px] bg-yellow-500 hover:bg-yellow-400 text-black font-extrabold px-2.5 py-1 rounded-full transition flex items-center space-x-1 shadow animate-pulse"
+            >
+              <span>⚠️ {pendingOfflineCount} Offline</span>
+            </button>
           )}
         </div>
         
