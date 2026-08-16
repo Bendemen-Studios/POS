@@ -1,4 +1,10 @@
 import WooCommerceRestApi from '@woocommerce/woocommerce-rest-api';
+import path from 'path';
+import dotenv from 'dotenv';
+
+// Dwing het laden van .env.local af op OS-niveau
+dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
+dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -6,12 +12,11 @@ export default async function handler(req, res) {
     return res.status(405).json({ success: false, error: `Method ${req.method} Not Allowed` });
   }
 
-  // 1. Haal de omgevingsvariabelen op met fallbacks
+  // Haal variabelen op (inclusief fallback check op proces- en geladen variabelen)
   const wcUrl = process.env.WOOCOMMERCE_URL || process.env.NEXT_PUBLIC_WOOCOMMERCE_URL || 'https://www.bendemen.com';
   const consumerKey = process.env.WOOCOMMERCE_CONSUMER_KEY || process.env.WOOCOMMERCE_KEY || process.env.WC_CONSUMER_KEY;
   const consumerSecret = process.env.WOOCOMMERCE_CONSUMER_SECRET || process.env.WOOCOMMERCE_SECRET || process.env.WC_CONSUMER_SECRET;
 
-  // 2. Controleer direct op aanwezigheid van de keys vóór de SDK wordt gestart
   if (!consumerKey || !consumerSecret) {
     console.error('[MANUAL ORDER ERROR]: WooCommerce Key of Secret ontbreekt in process.env');
     return res.status(500).json({
@@ -23,7 +28,6 @@ export default async function handler(req, res) {
   const { orderItems, paymentMethod, storeId, cashierId, customerId, totals, cashDetails, created_at } = req.body;
 
   try {
-    // 3. Transformeer winkelmand items
     const lineItems = (orderItems || []).map((item) => {
       const isCustomItem = !item.product_id || item.product_id === 0 || String(item.id).startsWith('custom_');
 
@@ -84,7 +88,6 @@ export default async function handler(req, res) {
 
     let responseOrder;
 
-    // 4. Veilige SDK-initialisatie BINNEN de handler
     try {
       const WooCommerce = new WooCommerceRestApi({
         url: wcUrl,
@@ -98,7 +101,6 @@ export default async function handler(req, res) {
     } catch (sdkError) {
       console.warn('[MANUAL ORDER]: SDK aanroep mislukt, schakelt over naar native fetch fallback...', sdkError?.message);
 
-      // Fallback: Directe HTTP Request via Native Fetch
       const authHeader = 'Basic ' + Buffer.from(`${consumerKey}:${consumerSecret}`).toString('base64');
       const fetchRes = await fetch(`${wcUrl}/wp-json/wc/v3/orders`, {
         method: 'POST',
