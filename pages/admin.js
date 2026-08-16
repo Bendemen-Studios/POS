@@ -18,7 +18,7 @@ export default function AdminDashboard() {
   const [newUser, setNewUser] = useState({ username: '', password: '', role: 'cashier', store_id: '', email: '' });
   
   // Form states voor nieuwe winkel (Inclusief verplichte KVK en BTW)
-  const [newStore, setNewStore] = useState({ store_name: '', address: '', kvk: '', vat: '', pickup_id: '' });
+  const [newStore, setNewStore] = useState({ store_name: '', address: '', kvk: '', btw: '', pickup_id: '' });
 
   // Bewerk states (Modalen)
   const [editingUser, setEditingUser] = useState(null);
@@ -230,7 +230,7 @@ export default function AdminDashboard() {
       const data = await res.json();
       if (data.success) {
         alert('Filiaal succesvol toegevoegd!');
-        setNewStore({ store_name: '', address: '', kvk: '', vat: '', pickup_id: '' });
+        setNewStore({ store_name: '', address: '', kvk: '', btw: '', pickup_id: '' });
         fetchStores();
       } else {
         alert('Fout: ' + data.error);
@@ -502,8 +502,8 @@ export default function AdminDashboard() {
                     <input
                       type="text"
                       placeholder="BTW Nummer (Verplicht)"
-                      value={newStore.vat}
-                      onChange={(e) => setNewStore({...newStore, vat: e.target.value})}
+                      value={newStore.btw}
+                      onChange={(e) => setNewStore({...newStore, btw: e.target.value})}
                       className="p-2 border rounded text-xs"
                       required
                     />
@@ -533,7 +533,7 @@ export default function AdminDashboard() {
                             <div className="font-bold text-sm text-red-600">{sName}</div>
                             <div className="text-xs text-gray-500 mt-1">📍 {s.address || 'Geen adres'}</div>
                             <div className="text-xs text-gray-600 mt-1">KvK: <span className="font-bold">{s.kvk || '-'}</span></div>
-                            <div className="text-xs text-gray-600 mt-0.5">BTW: <span className="font-bold">{s.vat || '-'}</span></div>
+                            <div className="text-xs text-gray-600 mt-0.5">BTW: <span className="font-bold">{s.btw || '-'}</span></div>
                             <div className="text-xs text-gray-400 mt-0.5">ID: #{sId}</div>
                           </div>
                           <div className="mt-3 text-right space-x-2">
@@ -820,8 +820,8 @@ export default function AdminDashboard() {
               <label className="text-xs font-bold text-gray-600 block mb-1">BTW Nummer</label>
               <input
                 type="text"
-                value={editingStore.vat || ''}
-                onChange={(e) => setEditingStore({...editingStore, vat: e.target.value})}
+                value={editingStore.btw || ''}
+                onChange={(e) => setEditingStore({...editingStore, btw: e.target.value})}
                 className="w-full p-2 border rounded text-xs"
                 required
               />
