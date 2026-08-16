@@ -6,7 +6,6 @@ export default async function handler(req, res) {
     return res.status(405).json({ success: false, error: `Method ${req.method} Not Allowed` });
   }
 
-  // Omgevingsvariabelen uitlezen (met brede fallback)
   const wcUrl = process.env.WOOCOMMERCE_URL || process.env.NEXT_PUBLIC_WOOCOMMERCE_URL || 'https://www.bendemen.com';
   const consumerKey = process.env.WOOCOMMERCE_CONSUMER_KEY || process.env.WOOCOMMERCE_KEY || process.env.NEXT_PUBLIC_WOOCOMMERCE_KEY;
   const consumerSecret = process.env.WOOCOMMERCE_CONSUMER_SECRET || process.env.WOOCOMMERCE_SECRET || process.env.NEXT_PUBLIC_WOOCOMMERCE_SECRET;
@@ -22,30 +21,45 @@ export default async function handler(req, res) {
   const { orderItems, paymentMethod, storeId, cashierId, customerId, totals, cashDetails, created_at } = req.body;
 
   try {
-    // Transformeer de artikelen
-    const lineItems = (orderItems || []).map((item) => {
-      const isCustomItem = !item.product_id || item.product_id === 0 || String(item.id).startsWith('custom_');
+    const lineItems = [];
+    const feeLines = [];
+
+    // Verwerk de bestelregels en vang custom / ongeldige items op
+    (orderItems || []).forEach((item) => {
+      const pid = Number(item.product_id || item.id);
+      const isCustomItem = !pid || isNaN(pid) || pid === 0 || String(item.id).startsWith('custom_');
 
       if (isCustomItem) {
-        return {
+        feeLines.push({
           name: item.name || item.title || 'Custom Artikel',
-          total: parseFloat(item.price || 0).toFixed(2),
+          total: (parseFloat(item.price || 0) * (item.quantity || 1)).toFixed(2),
+          tax_class: '',
+          tax_status: 'none'
+        });
+      } else {
+        const lineObj = {
+          product_id: pid,
           quantity: item.quantity || 1,
+          total: (parseFloat(item.price || 0) * (item.quantity || 1)).toFixed(2)
         };
+
+        if (item.variation_id && Number(item.variation_id) > 0) {
+          lineObj.variation_id = Number(item.variation_id);
+        }
+
+        lineItems.push(lineObj);
       }
-
-      const lineItemObj = {
-        product_id: Number(item.product_id || item.id),
-        quantity: item.quantity || 1,
-        total: (parseFloat(item.price || 0) * (item.quantity || 1)).toFixed(2)
-      };
-
-      if (item.variation_id && item.variation_id !== 0) {
-        lineItemObj.variation_id = Number(item.variation_id);
-      }
-
-      return lineItemObj;
     });
+
+    // Voeg korting toe aan fee_lines
+    if (totals?.discountAmount > 0) {
+      feeLines.push({
+        name: 'Handmatige Korting',
+        total: `-${parseFloat(totals.discountAmount).toFixed(2)}`,
+        tax_class: '',
+        tax_status: 'none'
+      });
+    }
 
     const paymentTitle = paymentMethod === 'cash' 
       ? 'Contant (Offline Gesynchroniseerd)' 
@@ -58,14 +72,7 @@ export default async function handler(req, res) {
       status: 'completed',
       customer_id: customerId ? Number(customerId) : 0,
       line_items: lineItems,
-      fee_lines: totals?.discountAmount > 0 ? [
-        {
-          name: 'Handmatige Korting',
-          total: `-${parseFloat(totals.discountAmount).toFixed(2)}`,
-          tax_class: '',
-          tax_status: 'none'
-        }
-      ] : [],
+      fee_lines: feeLines,
       meta_data: [
         { key: '_pos_store_id', value: String(storeId || 1) },
         { key: '_pos_cashier_id', value: String(cashierId || 1) },
