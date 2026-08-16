@@ -644,8 +644,8 @@ export default function POSHome() {
     } catch (err) {
       console.warn('[POS OFFLINE FALLBACK] Directe checkout mislukt, opslaan in offline opslag:', err.message);
 
-      // STAP 4: Als online verwerking faalt, pas offline lokaal opslaan
-      const offlineQueue = JSON.parse(localStorage.getItem('pos_offline_orders'] || '[]');
+      // STAP 4: Als online verwerking faalt, pas offline lokaal opslaan (Corrected bracket error)
+      const offlineQueue = JSON.parse(localStorage.getItem('pos_offline_orders') || '[]');
       offlineQueue.push(orderPayload);
       localStorage.setItem('pos_offline_orders', JSON.stringify(offlineQueue));
       setPendingOfflineCount(offlineQueue.length);
