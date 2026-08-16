@@ -108,15 +108,15 @@ export default function POSHome() {
 
     for (const order of savedQueue) {
       try {
-        let res = await fetch('/api/woocommerce/offline-order', {
+        let res = await fetch('/api/woocommerce/checkout', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(order)
         });
 
-        // Fallback naar manual-order als offline-order nog niet bestaat (404)
+        // Fallback naar offline-order endpoint als checkout 404 geeft
         if (res.status === 404) {
-          res = await fetch('/api/woocommerce/manual-order', {
+          res = await fetch('/api/woocommerce/offline-order', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(order)
@@ -602,23 +602,27 @@ export default function POSHome() {
       created_at: new Date().toISOString()
     };
 
-    // STAP 3: Order naar WooCommerce sturen (met offline fallback)
+    // STAP 3: Eerst direct proberen te versturen via /api/woocommerce/checkout
     try {
-      const res = await fetch('/api/woocommerce/manual-order', {
+      const res = await fetch('/api/woocommerce/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(orderPayload),
       });
 
       const data = await res.json();
-      if (!data.success) throw new Error(data.error || 'Serverfout bij verwerken.');
 
-      const changeText = selectedPaymentMethod === 'cash' && changeDue > 0 ? ` (Wisselgeld: €${changeDue.toFixed(2)})` : '';
-      setCheckoutStatus({ success: true, message: `Bestelling succesvol afgerond!${changeText}` });
+      if (res.ok && data.success) {
+        const changeText = selectedPaymentMethod === 'cash' && changeDue > 0 ? ` (Wisselgeld: €${changeDue.toFixed(2)})` : '';
+        setCheckoutStatus({ success: true, message: `Bestelling direct verwerkt in WooCommerce!${changeText}` });
+      } else {
+        throw new Error(data.error || `Server retourneerde HTTP ${res.status}`);
+      }
 
     } catch (err) {
-      console.warn('[POS OFFLINE FALLBACK] Fout bij online verwerking, bestelling lokaal opgeslagen:', err);
+      console.warn('[POS OFFLINE FALLBACK] Directe checkout mislukt, opslaan in offline opslag:', err.message);
 
+      // STAP 4: Als online verwerking faalt, pas offline lokaal opslaan
       const offlineQueue = JSON.parse(localStorage.getItem('pos_offline_orders') || '[]');
       offlineQueue.push(orderPayload);
       localStorage.setItem('pos_offline_orders', JSON.stringify(offlineQueue));
@@ -627,7 +631,7 @@ export default function POSHome() {
       const changeText = selectedPaymentMethod === 'cash' && changeDue > 0 ? ` (Wisselgeld: €${changeDue.toFixed(2)})` : '';
       setCheckoutStatus({ 
         success: true, 
-        message: `Bestelling lokaal opgeslagen (Offline Modus)! Wordt automatisch gesynchroniseerd zodra de server weer bereikbaar is.${changeText}` 
+        message: `⚠️ Directe checkout mislukt (${err.message}). Bestelling lokaal opgeslagen en wordt automatisch gesynchroniseerd zodra de server weer bereikbaar is.${changeText}` 
       });
     } finally {
       setShowPaymentModal(false);
