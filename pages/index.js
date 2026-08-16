@@ -25,6 +25,9 @@ export default function POSHome() {
   const [customItem, setCustomItem] = useState({ name: '', price: '' });
   const [showStoreModal, setShowStoreModal] = useState(false);
 
+  // Bon Keuze Modal State (Optie 1)
+  const [completedOrderForReceipt, setCompletedOrderForReceipt] = useState(null);
+
   // Negatieve voorraad / waarschuwingspopup state
   const [stockWarningModal, setStockWarningModal] = useState({ show: false, product: null, variation: null, price: 0 });
 
@@ -114,7 +117,6 @@ export default function POSHome() {
           body: JSON.stringify(order)
         });
 
-        // Fallback naar offline-order endpoint als checkout 404 geeft
         if (res.status === 404) {
           res = await fetch('/api/woocommerce/offline-order', {
             method: 'POST',
@@ -506,6 +508,26 @@ export default function POSHome() {
     setShowPaymentModal(true);
   };
 
+  // Functie om de kassabon print-endpoint aan te roepen
+  const triggerPrintReceipt = async (orderData) => {
+    try {
+      const response = await fetch('/api/pos/print-receipt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(orderData)
+      });
+
+      const htmlBlob = await response.text();
+      const printWindow = window.open('', '_blank', 'width=400,height=600');
+      if (printWindow) {
+        printWindow.document.write(htmlBlob);
+        printWindow.document.close();
+      }
+    } catch (err) {
+      console.error('Fout bij afdrukken van bon:', err);
+    }
+  };
+
   // SumUp Betalingsafhandeling met VPS -> Cloud API Fallback
   const processSumUpPayment = async (amount, terminalId) => {
     if (!terminalId || terminalId === 'SOLO_READER_1') {
@@ -623,7 +645,7 @@ export default function POSHome() {
       console.warn('[POS OFFLINE FALLBACK] Directe checkout mislukt, opslaan in offline opslag:', err.message);
 
       // STAP 4: Als online verwerking faalt, pas offline lokaal opslaan
-      const offlineQueue = JSON.parse(localStorage.getItem('pos_offline_orders') || '[]');
+      const offlineQueue = JSON.parse(localStorage.getItem('pos_offline_orders'] || '[]');
       offlineQueue.push(orderPayload);
       localStorage.setItem('pos_offline_orders', JSON.stringify(offlineQueue));
       setPendingOfflineCount(offlineQueue.length);
@@ -635,6 +657,19 @@ export default function POSHome() {
       });
     } finally {
       setShowPaymentModal(false);
+
+      // Sla op voor de Bon Keuze Popup (Optie 1)
+      setCompletedOrderForReceipt({
+        order: orderPayload,
+        store: selectedStore,
+        cashier: currentUser,
+        paymentDetails: {
+          method: selectedPaymentMethod,
+          cashGiven: selectedPaymentMethod === 'cash' ? cashGivenFloat : null,
+          changeDue: selectedPaymentMethod === 'cash' ? changeDue : null,
+        }
+      });
+
       setCart([]);
       setSelectedCustomer(null);
       setPointsToRedeem(0);
@@ -1329,6 +1364,37 @@ export default function POSHome() {
                 className="w-2/3 bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded text-xs uppercase transition tracking-wider"
               >
                 {loading ? 'Verwerken...' : 'Betaling Voltooien'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 6: KASSABON KEUZE (OPTIE 1) */}
+      {completedOrderForReceipt && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-2xl max-w-sm w-full p-6 text-center space-y-4">
+            <div className="text-3xl">🧾</div>
+            <h3 className="text-lg font-bold">Kassabon Afdrukken?</h3>
+            <p className="text-xs text-gray-600">
+              Bestelling succesvol verwerkt! Wilt de klant een papieren kassabon mee?
+            </p>
+
+            <div className="flex space-x-2 pt-2">
+              <button
+                onClick={() => setCompletedOrderForReceipt(null)}
+                className="w-1/2 bg-gray-200 hover:bg-gray-300 text-black font-bold py-3 rounded text-xs uppercase"
+              >
+                Nee, Sluiten
+              </button>
+              <button
+                onClick={() => {
+                  triggerPrintReceipt(completedOrderForReceipt);
+                  setCompletedOrderForReceipt(null);
+                }}
+                className="w-1/2 bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded text-xs uppercase transition shadow"
+              >
+                🖨️ Ja, Print Bon
               </button>
             </div>
           </div>

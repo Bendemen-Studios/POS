@@ -17,8 +17,8 @@ export default function AdminDashboard() {
   // Form states voor nieuwe gebruiker
   const [newUser, setNewUser] = useState({ username: '', password: '', role: 'cashier', store_id: '', email: '' });
   
-  // Form states voor nieuwe winkel (SumUp veld verwijderd)
-  const [newStore, setNewStore] = useState({ store_name: '', address: '', receipt_header: '', receipt_footer: '', pickup_id: '' });
+  // Form states voor nieuwe winkel (Inclusief verplichte KVK en BTW)
+  const [newStore, setNewStore] = useState({ store_name: '', address: '', kvk: '', vat: '', pickup_id: '' });
 
   // Bewerk states (Modalen)
   const [editingUser, setEditingUser] = useState(null);
@@ -230,7 +230,7 @@ export default function AdminDashboard() {
       const data = await res.json();
       if (data.success) {
         alert('Filiaal succesvol toegevoegd!');
-        setNewStore({ store_name: '', address: '', receipt_header: '', receipt_footer: '', pickup_id: '' });
+        setNewStore({ store_name: '', address: '', kvk: '', vat: '', pickup_id: '' });
         fetchStores();
       } else {
         alert('Fout: ' + data.error);
@@ -469,12 +469,12 @@ export default function AdminDashboard() {
               </div>
             )}
 
-            {/* 2. STORES TAB */}
+            {/* 2. STORES TAB (Verplichte KvK en BTW) */}
             {activeTab === 'stores' && (
               <div className="space-y-6">
                 <div className="bg-white rounded-lg shadow p-6">
-                  <h3 className="text-md font-bold mb-4">Nieuw Filiaal Toevoegen</h3>
-                  <form onSubmit={handleCreateStore} className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <h3 className="text-md font-bold mb-4">Nieuw Filiaal Toevoegen (KvK & BTW Verplicht)</h3>
+                  <form onSubmit={handleCreateStore} className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <input
                       type="text"
                       placeholder="Naam Filiaal"
@@ -489,15 +489,32 @@ export default function AdminDashboard() {
                       value={newStore.address}
                       onChange={(e) => setNewStore({...newStore, address: e.target.value})}
                       className="p-2 border rounded text-xs"
+                      required
+                    />
+                    <input
+                      type="text"
+                      placeholder="KvK Nummer (Verplicht)"
+                      value={newStore.kvk}
+                      onChange={(e) => setNewStore({...newStore, kvk: e.target.value})}
+                      className="p-2 border rounded text-xs"
+                      required
+                    />
+                    <input
+                      type="text"
+                      placeholder="BTW Nummer (Verplicht)"
+                      value={newStore.vat}
+                      onChange={(e) => setNewStore({...newStore, vat: e.target.value})}
+                      className="p-2 border rounded text-xs"
+                      required
                     />
                     <input
                       type="text"
                       placeholder="Local Pickup Plus ID"
                       value={newStore.pickup_id}
                       onChange={(e) => setNewStore({...newStore, pickup_id: e.target.value})}
-                      className="p-2 border rounded text-xs"
+                      className="p-2 border rounded text-xs md:col-span-2"
                     />
-                    <button type="submit" className="bg-red-600 hover:bg-red-700 text-white font-bold p-2 rounded text-xs uppercase md:col-span-3">
+                    <button type="submit" className="bg-red-600 hover:bg-red-700 text-white font-bold p-2 rounded text-xs uppercase md:col-span-2">
                       Filiaal Aanmaken
                     </button>
                   </form>
@@ -515,6 +532,8 @@ export default function AdminDashboard() {
                           <div>
                             <div className="font-bold text-sm text-red-600">{sName}</div>
                             <div className="text-xs text-gray-500 mt-1">📍 {s.address || 'Geen adres'}</div>
+                            <div className="text-xs text-gray-600 mt-1">KvK: <span className="font-bold">{s.kvk || '-'}</span></div>
+                            <div className="text-xs text-gray-600 mt-0.5">BTW: <span className="font-bold">{s.vat || '-'}</span></div>
                             <div className="text-xs text-gray-400 mt-0.5">ID: #{sId}</div>
                           </div>
                           <div className="mt-3 text-right space-x-2">
@@ -762,7 +781,7 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {/* MODAL: WINKEL BEWERKEN */}
+      {/* MODAL: WINKEL BEWERKEN (Inclusief KvK en BTW) */}
       {editingStore && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <form onSubmit={handleUpdateStore} className="bg-white rounded-lg p-6 max-w-sm w-full space-y-3 shadow-2xl">
@@ -784,6 +803,27 @@ export default function AdminDashboard() {
                 value={editingStore.address || ''}
                 onChange={(e) => setEditingStore({...editingStore, address: e.target.value})}
                 className="w-full p-2 border rounded text-xs"
+                required
+              />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-gray-600 block mb-1">KvK Nummer</label>
+              <input
+                type="text"
+                value={editingStore.kvk || ''}
+                onChange={(e) => setEditingStore({...editingStore, kvk: e.target.value})}
+                className="w-full p-2 border rounded text-xs"
+                required
+              />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-gray-600 block mb-1">BTW Nummer</label>
+              <input
+                type="text"
+                value={editingStore.vat || ''}
+                onChange={(e) => setEditingStore({...editingStore, vat: e.target.value})}
+                className="w-full p-2 border rounded text-xs"
+                required
               />
             </div>
             <div>
