@@ -143,7 +143,7 @@ export default function POSHome() {
 
     if (successCount > 0 && remainingQueue.length === 0) {
       alert(`✅ Alle ${successCount} offline bestelling(en) succesvol gesynchroniseerd!`);
-      fetchProducts(); // Ververs voorraad direct na succesvolle sync
+      fetchProducts();
     } else if (remainingQueue.length > 0 && isManualClick) {
       const wantToClear = confirm(
         `⚠️ Synchroniseren van ${remainingQueue.length} offline bestelling(en) mislukt.\n\nFoutmelding van server:\n"${lastError}"\n\nWil je deze vastgelopen offline bestelling(en) WISSEN uit de kassa?`
@@ -243,7 +243,7 @@ export default function POSHome() {
       }
     } catch (err) {
       console.error('Fout bij ophalen afhaalbestellingen:', err);
-    } fontally {
+    } finally {
       setLoadingPickup(false);
     }
   };
@@ -577,7 +577,7 @@ export default function POSHome() {
         console.error('[SUMUP ERROR]:', sumupErr.message);
         alert(`❌ SumUp Betaling Mislukt / Geen verbinding:\n\n${sumupErr.message}\n\nDe bestelling is NIET verwerkt. Kies eventueel voor Contant of Handmatige PIN.`);
         setLoading(false);
-        return; // STOP HIER! Blokkeer verdere afhandeling.
+        return;
       }
     }
 
