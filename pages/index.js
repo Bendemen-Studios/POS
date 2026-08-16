@@ -92,15 +92,15 @@ export default function POSHome() {
     checkOfflineQueue();
   }, []);
 
-  // Automatische & Handmatige Offline Sync via het offline endpoint
-  const triggerOfflineSync = async () => {
+  // Geforceerde / Automatische Offline Sync
+  const triggerOfflineSync = async (isManualClick = false) => {
     const savedQueue = JSON.parse(localStorage.getItem('pos_offline_orders') || '[]');
     if (savedQueue.length === 0) {
       setPendingOfflineCount(0);
+      if (isManualClick) alert('Er staan geen offline bestellingen in de wachtrij.');
       return;
     }
 
-    console.log(`[OFFLINE SYNC] Poging tot synchroniseren van ${savedQueue.length} offline bestelling(en)...`);
     setIsSyncing(true);
     let successCount = 0;
     const remainingQueue = [];
@@ -108,11 +108,20 @@ export default function POSHome() {
 
     for (const order of savedQueue) {
       try {
-        const res = await fetch('/api/woocommerce/offline-order', {
+        let res = await fetch('/api/woocommerce/offline-order', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(order)
         });
+
+        // Fallback naar manual-order als offline-order nog niet bestaat (404)
+        if (res.status === 404) {
+          res = await fetch('/api/woocommerce/manual-order', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(order)
+          });
+        }
 
         const data = await res.json();
 
@@ -134,17 +143,26 @@ export default function POSHome() {
 
     if (successCount > 0 && remainingQueue.length === 0) {
       alert(`✅ Alle ${successCount} offline bestelling(en) succesvol gesynchroniseerd!`);
-    } else if (remainingQueue.length > 0 && lastError) {
-      console.warn('[OFFLINE SYNC ERROR]:', lastError);
+      fetchProducts(); // Ververs voorraad direct na succesvolle sync
+    } else if (remainingQueue.length > 0 && isManualClick) {
+      const wantToClear = confirm(
+        `⚠️ Synchroniseren van ${remainingQueue.length} offline bestelling(en) mislukt.\n\nFoutmelding van server:\n"${lastError}"\n\nWil je deze vastgelopen offline bestelling(en) WISSEN uit de kassa?`
+      );
+      if (wantToClear) {
+        localStorage.removeItem('pos_offline_orders');
+        setPendingOfflineCount(0);
+        alert('Offline bestellingen gewist uit het geheugen.');
+      }
     }
   };
 
   useEffect(() => {
-    window.addEventListener('online', triggerOfflineSync);
-    const interval = setInterval(triggerOfflineSync, 30000);
+    const handleOnlineEvent = () => triggerOfflineSync(false);
+    window.addEventListener('online', handleOnlineEvent);
+    const interval = setInterval(() => triggerOfflineSync(false), 30000);
 
     return () => {
-      window.removeEventListener('online', triggerOfflineSync);
+      window.removeEventListener('online', handleOnlineEvent);
       clearInterval(interval);
     };
   }, []);
@@ -191,7 +209,7 @@ export default function POSHome() {
   const handleSyncData = async () => {
     setIsSyncing(true);
     await Promise.all([fetchProducts(), fetchCustomers(), fetchPickupOrders()]);
-    await triggerOfflineSync();
+    await triggerOfflineSync(false);
     setIsSyncing(false);
   };
 
@@ -225,7 +243,7 @@ export default function POSHome() {
       }
     } catch (err) {
       console.error('Fout bij ophalen afhaalbestellingen:', err);
-    } finally {
+    } fontally {
       setLoadingPickup(false);
     }
   };
@@ -494,7 +512,6 @@ export default function POSHome() {
       throw new Error('Geen geldige SumUp Terminal ID gekoppeld aan dit filiaal.');
     }
 
-    // 1. Probeer eerst via de VPS API
     try {
       const vpsRes = await fetch('/api/sumup/checkout', {
         method: 'POST',
@@ -513,7 +530,6 @@ export default function POSHome() {
       console.warn('[SUMUP] VPS niet bereikbaar/fout, schakelt over naar directe SumUp Cloud API...', vpsError.message);
     }
 
-    // 2. Fallback: Directe Call vanuit de browser naar SumUp Cloud API
     const apiKey = process.env.NEXT_PUBLIC_SUMUP_API_KEY;
     if (!apiKey) {
       throw new Error('Geen directe SumUp API-sleutel (NEXT_PUBLIC_SUMUP_API_KEY) geconfigureerd.');
@@ -565,7 +581,7 @@ export default function POSHome() {
       }
     }
 
-    // STAP 2: Payload opbouwen voor WooCommerce / Offline opslag
+    // STAP 2: Payload opbouwen
     const orderPayload = {
       orderItems: cart,
       paymentMethod: selectedPaymentMethod,
@@ -668,9 +684,9 @@ export default function POSHome() {
 
           {pendingOfflineCount > 0 && (
             <button
-              onClick={triggerOfflineSync}
-              title="Klik om te synchroniseren"
-              className="text-[10px] bg-yellow-500 hover:bg-yellow-400 text-black font-extrabold px-2.5 py-1 rounded-full transition flex items-center space-x-1 shadow animate-pulse"
+              onClick={() => triggerOfflineSync(true)}
+              title="Klik om direct te synchroniseren of te wissen"
+              className="text-[10px] bg-yellow-500 hover:bg-yellow-400 text-black font-extrabold px-2.5 py-1 rounded-full transition flex items-center space-x-1 shadow animate-pulse cursor-pointer"
             >
               <span>⚠️ {pendingOfflineCount} Offline</span>
             </button>
