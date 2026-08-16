@@ -1,26 +1,29 @@
 import WooCommerceRestApi from '@woocommerce/woocommerce-rest-api';
 
-const wcUrl = process.env.WOOCOMMERCE_URL || process.env.NEXT_PUBLIC_WOOCOMMERCE_URL || 'https://www.bendemen.com';
-const consumerKey = process.env.WOOCOMMERCE_CONSUMER_KEY || process.env.WOOCOMMERCE_KEY;
-const consumerSecret = process.env.WOOCOMMERCE_CONSUMER_SECRET || process.env.WOOCOMMERCE_SECRET;
-
-const WooCommerce = new WooCommerceRestApi({
-  url: wcUrl,
-  consumerKey: consumerKey || '',
-  consumerSecret: consumerSecret || '',
-  version: 'wc/v3',
-});
-
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', ['POST']);
-    return res.status(405).end(`Method ${req.method} Not Allowed`);
+    return res.status(405).json({ success: false, error: `Method ${req.method} Not Allowed` });
+  }
+
+  // 1. Haal de omgevingsvariabelen op met fallbacks
+  const wcUrl = process.env.WOOCOMMERCE_URL || process.env.NEXT_PUBLIC_WOOCOMMERCE_URL || 'https://www.bendemen.com';
+  const consumerKey = process.env.WOOCOMMERCE_CONSUMER_KEY || process.env.WOOCOMMERCE_KEY || process.env.WC_CONSUMER_KEY;
+  const consumerSecret = process.env.WOOCOMMERCE_CONSUMER_SECRET || process.env.WOOCOMMERCE_SECRET || process.env.WC_CONSUMER_SECRET;
+
+  // 2. Controleer direct op aanwezigheid van de keys vóór de SDK wordt gestart
+  if (!consumerKey || !consumerSecret) {
+    console.error('[MANUAL ORDER ERROR]: WooCommerce Key of Secret ontbreekt in process.env');
+    return res.status(500).json({
+      success: false,
+      error: 'Serverconfiguratiefout: WooCommerce Consumer Key of Secret is niet geladen.'
+    });
   }
 
   const { orderItems, paymentMethod, storeId, cashierId, customerId, totals, cashDetails, created_at } = req.body;
 
   try {
-    // Transformeer winkelmand items naar het formaat van WooCommerce
+    // 3. Transformeer winkelmand items
     const lineItems = (orderItems || []).map((item) => {
       const isCustomItem = !item.product_id || item.product_id === 0 || String(item.id).startsWith('custom_');
 
@@ -45,10 +48,9 @@ export default async function handler(req, res) {
       return lineItemObj;
     });
 
-    // Enkel opsplitsing tussen Contant en Handmatige Pin
     const paymentTitle = paymentMethod === 'cash' 
       ? 'Contante Betaling (POS)' 
-      : 'Handmatige Pin (POS)';
+      : (paymentMethod === 'manual_pin' ? 'Handmatige Pin (POS)' : 'Kassa Betaling (POS)');
 
     const orderData = {
       payment_method: paymentMethod || 'pos_manual',
@@ -82,14 +84,21 @@ export default async function handler(req, res) {
 
     let responseOrder;
 
-    // 1. Probeer de SDK
+    // 4. Veilige SDK-initialisatie BINNEN de handler
     try {
+      const WooCommerce = new WooCommerceRestApi({
+        url: wcUrl,
+        consumerKey: consumerKey,
+        consumerSecret: consumerSecret,
+        version: 'wc/v3',
+      });
+
       const { data } = await WooCommerce.post('orders', orderData);
       responseOrder = data;
     } catch (sdkError) {
-      console.warn('WooCommerce SDK Call mislukt, probeert directe Fetch API fallback...', sdkError?.message);
+      console.warn('[MANUAL ORDER]: SDK aanroep mislukt, schakelt over naar native fetch fallback...', sdkError?.message);
 
-      // 2. Directe Native Fetch Fallback als de SDK hapert
+      // Fallback: Directe HTTP Request via Native Fetch
       const authHeader = 'Basic ' + Buffer.from(`${consumerKey}:${consumerSecret}`).toString('base64');
       const fetchRes = await fetch(`${wcUrl}/wp-json/wc/v3/orders`, {
         method: 'POST',
@@ -100,20 +109,22 @@ export default async function handler(req, res) {
         body: JSON.stringify(orderData)
       });
 
+      const fetchText = await fetchRes.text();
+
       if (!fetchRes.ok) {
-        const errorText = await fetchRes.text();
-        throw new Error(`Directe WooCommerce API fout: ${errorText}`);
+        throw new Error(`WooCommerce HTTP ${fetchRes.status}: ${fetchText}`);
       }
 
-      responseOrder = await fetchRes.json();
+      responseOrder = JSON.parse(fetchText);
     }
 
     return res.status(200).json({ success: true, order: responseOrder });
+
   } catch (error) {
-    console.error('WooCommerce Manual Order Error:', error?.response?.data || error.message);
+    console.error('[MANUAL ORDER PROCESS ERROR]:', error?.response?.data || error.message);
     return res.status(500).json({
       success: false,
-      error: error?.response?.data?.message || error.message || 'Fout bij verwerken van handmatige bestelling.'
+      error: error?.response?.data?.message || error.message || 'Fout bij verwerken van de bestelling.'
     });
   }
 }
