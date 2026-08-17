@@ -54,7 +54,16 @@ export default function LoginPage() {
   };
 
   if (isChecking) {
-    return <div className="min-h-screen bg-black flex items-center justify-center text-white font-bold text-xs uppercase tracking-widest">Laden...</div>;
+    return (
+      <div className="min-h-screen bg-black flex flex-col items-center justify-center p-4">
+        <div className="text-center space-y-2">
+          <h1 className="text-white font-black text-xl tracking-wider">BDM POS</h1>
+          <div className="text-red-600 font-bold text-xs uppercase tracking-widest animate-pulse">
+            Sessie controleren...
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
