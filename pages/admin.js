@@ -589,6 +589,7 @@ export default function AdminDashboard() {
                               <option value="pending">Pending</option>
                               <option value="processing">Processing</option>
                               <option value="completed">Completed</option>
+                              <option value="cancelled">Cancelled</option>
                             </select>
                           </td>
                           <td className="p-3 font-bold text-red-600">€{parseFloat(o.total || 0).toFixed(2)}</td>
@@ -726,7 +727,7 @@ export default function AdminDashboard() {
             </div>
 
             <div className="flex space-x-2 pt-2">
-              <button type="button" onClick={() => setEditingSumUp(null)} className="w-1/2 bg-gray-200 py-2.5 rounded text-xs font-bold">Annuleren</button>
+              <button type="button" onClick={() => setEditingStore ? setEditingStore(null) : setEditingSumUp(null)} className="w-1/2 bg-gray-200 py-2.5 rounded text-xs font-bold">Annuleren</button>
               <button type="submit" className="w-1/2 bg-red-600 hover:bg-red-700 text-white py-2.5 rounded text-xs font-bold">Opslaan</button>
             </div>
           </form>

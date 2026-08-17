@@ -257,8 +257,7 @@ export default function POSHome() {
       location: store.address || store.location || '',
       address: store.address || store.location || '',
       pickup_id: store.pickup_id || null,
-      terminal_id: store.terminal_id || null,
-      pair_code: store.pair_code || null
+      terminal_id: store.terminal_id || null
     };
 
     setSelectedStore(storeData);
@@ -617,55 +616,18 @@ export default function POSHome() {
     }
   };
 
-  const processSumUpPayment = async (amount, terminalId) => {
-    if (!terminalId) {
-      throw new Error('Geen geldige Terminal ID of Pair Code gekoppeld aan dit filiaal.');
+  const processSumUpPayment = async (amount, storeId) => {
+    const res = await fetch('/api/sumup/checkout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ totalAmount: amount, storeId })
+    });
+
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || 'SumUp weigert de betaling.');
     }
-
-    // 1. Probeer eerst via de eigen VPS backend
-    try {
-      const vpsRes = await fetch('/api/sumup/checkout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ totalAmount: amount, terminalId })
-      });
-
-      const vpsData = await vpsRes.json();
-      if (vpsRes.ok && vpsData.success) {
-        return vpsData;
-      }
-    } catch (vpsError) {
-      console.warn('[SUMUP] VPS niet bereikbaar, schakelt over naar directe SumUp Cloud API fallback...', vpsError.message);
-    }
-
-    // 2. FALLBACK: Als VPS offline is, direct via browser naar de SumUp Cloud API (mits de kassa internet heeft)
-    const apiKey = process.env.NEXT_PUBLIC_SUMUP_API_KEY || process.env.SUMUP_API_KEY;
-    if (!apiKey) {
-      throw new Error('VPS is offline en er is geen SumUp API-sleutel geconfigureerd voor de directe fallback.');
-    }
-
-    try {
-      const sumupCloudRes = await fetch(`https://api.sumup.com/v0.1/terminals/${terminalId}/checkouts`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          amount: parseFloat(amount),
-          currency: 'EUR',
-          checkout_reference: `BDM-POS-${Date.now()}`
-        })
-      });
-
-      const cloudData = await sumupCloudRes.json();
-      if (!sumupCloudRes.ok) {
-        throw new Error(cloudData.message || cloudData.error || 'Directe SumUp Cloud API-call mislukt.');
-      }
-      return cloudData;
-    } catch (cloudErr) {
-      throw new Error(`SumUp PIN mislukt via directe fallback: ${cloudErr.message}`);
-    }
+    return data;
   };
 
   const handleProcessPayment = async () => {
@@ -677,13 +639,14 @@ export default function POSHome() {
     setLoading(true);
     setCheckoutStatus(null);
 
+    // Strikte controle voor SumUp: als dit kiest, wachten we op succesvol antwoord van de API
     if (selectedPaymentMethod === 'sumup') {
       try {
-        const terminalId = selectedStore?.terminal_id || selectedStore?.pair_code || localStorage.getItem('pos_fallback_terminal_id');
-        await processSumUpPayment(finalTotal.toFixed(2), terminalId);
+        const storeId = selectedStore?.id || selectedStore?.store_id || 1;
+        await processSumUpPayment(finalTotal.toFixed(2), storeId);
       } catch (sumupErr) {
         console.error('[SUMUP ERROR]:', sumupErr.message);
-        alert(`❌ SumUp Betaling Mislukt / Geen verbinding:\n\n${sumupErr.message}\n\nDe bestelling is NIET verwerkt. Kies eventueel voor Contant of Handmatige PIN.`);
+        alert(`❌ SumUp Betaling Mislukt / Geen verbinding:\n\n${sumupErr.message}\n\nDe bestelling is NIET verwerkt.`);
         setLoading(false);
         return;
       }
@@ -1196,7 +1159,7 @@ export default function POSHome() {
                 disabled={loading || cart.length === 0}
                 className="w-full bg-red-600 hover:bg-red-700 disabled:bg-gray-300 text-white font-bold py-3 rounded transition text-xs sm:text-sm uppercase tracking-wider"
               >
-                Afrekenen (€{finalTotal.toFixed(2)})
+                {loading ? '⏳ Bezig met pinnen...' : `Afrekenen (€{finalTotal.toFixed(2)})`}
               </button>
             </div>
           </div>
@@ -1348,7 +1311,7 @@ export default function POSHome() {
             )}
             <div className="flex space-x-2">
               <button onClick={() => setShowPaymentModal(false)} className="w-1/3 bg-gray-200 py-3 rounded text-xs font-bold">Annuleren</button>
-              <button onClick={handleProcessPayment} disabled={loading} className="w-2/3 bg-red-600 text-white py-3 rounded text-xs font-bold">Voltooien</button>
+              <button onClick={handleProcessPayment} disabled={loading} className="w-2/3 bg-red-600 text-white py-3 rounded text-xs font-bold">{loading ? '⏳ Even wachten...' : 'Voltooien'}</button>
             </div>
           </div>
         </div>
