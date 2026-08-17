@@ -5,60 +5,47 @@ export default async function handler(req, res) {
     return res.status(405).json({ success: false, error: 'Method not allowed' });
   }
 
-  const { storeId, pairingCode, terminalId: manualTerminalId } = req.body;
+  const { storeId, pairingCode } = req.body;
 
-  if (!storeId || (!pairingCode && !manualTerminalId)) {
-    return res.status(400).json({ success: false, error: 'Filiaal ID en een Pair Code of Terminal ID zijn verplicht.' });
+  if (!storeId || !pairingCode) {
+    return res.status(400).json({ success: false, error: 'Filiaal ID en Pair Code zijn verplicht.' });
+  }
+
+  const merchantCode = process.env.SUMUP_MERCHANT_CODE;
+  const apiKey = process.env.SUMUP_API_KEY;
+
+  if (!apiKey || !merchantCode) {
+    return res.status(500).json({ success: false, error: 'SUMUP_API_KEY of SUMUP_MERCHANT_CODE ontbreekt in de .env omgeving.' });
   }
 
   try {
-    let terminalId = manualTerminalId;
+    // SumUp API vereist het aanmaken/koppelen van een reader via de merchant code
+    const pairRes = await fetch(`https://api.sumup.com/v0.1/merchants/${merchantCode}/readers`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        pairing_code: pairingCode.trim(),
+        name: `Kassa - ${storeId}`
+      })
+    });
 
-    // Als er een pairing code is ingevoerd, probeer via API te koppelen
-    if (pairingCode && !manualTerminalId) {
-      const clientId = process.env.SUMUP_CLIENT_ID;
-      const clientSecret = process.env.SUMUP_CLIENT_SECRET;
-      const apiKey = process.env.SUMUP_API_KEY;
+    const pairData = await pairRes.json();
 
-      let accessToken = apiKey;
-      if (!accessToken && clientId && clientSecret) {
-        const tokenParams = new URLSearchParams();
-        tokenParams.append('grant_type', 'client_credentials');
-        tokenParams.append('client_id', clientId);
-        tokenParams.append('client_secret', clientSecret);
-
-        const tokenRes = await fetch('https://api.sumup.com/token', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: tokenParams.toString()
-        });
-        const tokenData = await tokenRes.json();
-        if (tokenRes.ok && tokenData.access_token) {
-          accessToken = tokenData.access_token;
-        }
-      }
-
-      const pairRes = await fetch('https://api.sumup.com/v0.1/terminals/pair', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ pairing_code: pairingCode.trim() })
-      });
-
-      const pairData = await pairRes.json();
-      if (!pairRes.ok) {
-        throw new Error(pairData.message || pairData.detail || 'SumUp weigert de koppelcode.');
-      }
-      terminalId = pairData.id || pairData.terminal_id;
+    if (!pairRes.ok) {
+      console.error('[SUMUP READER PAIR ERROR]:', pairData);
+      throw new Error(pairData.message || pairData.detail || 'SumUp weigert de koppelcode.');
     }
+
+    const terminalId = pairData.id; // Dit is de unieke reader/terminal ID (bijv. rdr_...)
 
     if (!terminalId) {
-      throw new Error('Geen geldige Terminal ID gevonden.');
+      throw new Error('Geen Terminal ID ontvangen van SumUp.');
     }
 
-    // Sla de Terminal ID direct op in de database
+    // Sla de Terminal ID op in de database en zet pair_code op "Verbonden"
     await db.query(
       'UPDATE stores SET terminal_id = ?, pair_code = "Verbonden" WHERE id = ? OR store_id = ?',
       [terminalId, storeId, storeId]
@@ -67,7 +54,7 @@ export default async function handler(req, res) {
     return res.status(200).json({
       success: true,
       terminalId,
-      message: 'Terminal ID succesvol opgeslagen!'
+      message: 'Terminal succesvol gekoppeld met koppelcode!'
     });
 
   } catch (error) {
