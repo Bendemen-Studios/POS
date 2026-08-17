@@ -13,14 +13,9 @@ export default async function handler(req, res) {
     return res.status(400).json({ success: false, error: 'Ongeldig of ontbrekend bedrag.' });
   }
 
-  // Netjes inlezen uit de .env omgeving
-  const sumupApiKey = process.env.SUMUP_API_KEY;
-  const merchantCode = process.env.SUMUP_MERCHANT_CODE;
-
-  if (!sumupApiKey || !merchantCode) {
-    console.error('[ENV ERROR] SUMUP_API_KEY of SUMUP_MERCHANT_CODE ontbreekt in process.env');
-    return res.status(500).json({ success: false, error: 'SumUp configuratie ontbreekt op de server.' });
-  }
+  // Direct hardcoded gekoppeld aan de werkende sleutel van je curl-test
+  const sumupApiKey = 'sup_sk_XkqNSwhnmLs7DJTI7aZrcsYR13yermmXN';
+  const merchantCode = 'MM669XL6';
 
   try {
     let terminalId = req.body.terminalId;
