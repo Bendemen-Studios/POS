@@ -645,7 +645,7 @@ export default function POSHome() {
         await processSumUpPayment(finalTotal.toFixed(2), storeId);
       } catch (sumupErr) {
         console.error('[SUMUP ERROR]:', sumupErr.message);
-        alert(`❌ SumUp Betaling Mislukt / Geen verbinding:\n\n${sumupErr.message}\n\nDe bestelling is NIET verwerkt.`);
+        alert(`❌ SumUp Betaling Mislukt:\n\n${sumupErr.message}\n\nDe bestelling is GEANNULEERD en niet aangemaakt.`);
         setLoading(false);
         return;
       }
