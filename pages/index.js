@@ -257,7 +257,8 @@ export default function POSHome() {
       location: store.address || store.location || '',
       address: store.address || store.location || '',
       pickup_id: store.pickup_id || null,
-      terminal_id: store.terminal_id || null
+      terminal_id: store.terminal_id || null,
+      pair_code: store.pair_code || null
     };
 
     setSelectedStore(storeData);
@@ -617,8 +618,8 @@ export default function POSHome() {
   };
 
   const processSumUpPayment = async (amount, terminalId) => {
-    if (!terminalId || terminalId === 'SOLO_READER_1') {
-      throw new Error('Geen geldige SumUp Terminal ID gekoppeld aan dit filiaal.');
+    if (!terminalId) {
+      throw new Error('Geen geldige SumUp Terminal ID of Pair Code gekoppeld aan dit filiaal.');
     }
 
     try {
@@ -679,7 +680,8 @@ export default function POSHome() {
 
     if (selectedPaymentMethod === 'sumup') {
       try {
-        const terminalId = selectedStore?.terminal_id || localStorage.getItem('pos_fallback_terminal_id');
+        // Fallback pakt nu zowel terminal_id als pair_code
+        const terminalId = selectedStore?.terminal_id || selectedStore?.pair_code || localStorage.getItem('pos_fallback_terminal_id');
         await processSumUpPayment(finalTotal.toFixed(2), terminalId);
       } catch (sumupErr) {
         console.error('[SUMUP ERROR]:', sumupErr.message);
@@ -1203,7 +1205,7 @@ export default function POSHome() {
         </div>
       )}
 
-      {/* Modals met hogere z-index (z-50 t/m z-60) zodat ze altijd netjes over de achtergrond en de pagina heen vallen */}
+      {/* Modals met hogere z-index */}
       {openAmountProduct && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg shadow-xl max-w-sm w-full p-6">
