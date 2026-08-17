@@ -8,11 +8,33 @@ export default function POSHome() {
   const [currentUser, setCurrentUser] = useState(null);
   const [selectedStore, setSelectedStore] = useState(null);
   const [allStores, setAllStores] = useState([]);
-  const [activeTab, setActiveTab] = useState('pos');
+  
+  const [activeTab, setActiveTab] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('pos_active_tab') || 'pos';
+    }
+    return 'pos';
+  });
+  
   const [isChecking, setIsChecking] = useState(true);
 
-  const [products, setProducts] = useState([]);
-  const [cart, setCart] = useState([]);
+  // Producten cachen in localStorage zodat ze nooit verdwijnen bij paginawissels
+  const [products, setProducts] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('pos_cached_products');
+      return saved ? JSON.parse(saved) : [];
+    }
+    return [];
+  });
+
+  const [cart, setCart] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('pos_cart');
+      return saved ? JSON.parse(saved) : [];
+    }
+    return [];
+  });
+
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('ALL');
 
@@ -27,7 +49,15 @@ export default function POSHome() {
   const [stockWarningModal, setStockWarningModal] = useState({ show: false, product: null, variation: null, price: 0 });
 
   const [customers, setCustomers] = useState([]);
-  const [selectedCustomer, setSelectedCustomer] = useState(null);
+  
+  const [selectedCustomer, setSelectedCustomer] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('pos_selected_customer');
+      return saved ? JSON.parse(saved) : null;
+    }
+    return null;
+  });
+
   const [customerSearch, setCustomerSearch] = useState('');
   const [pointsToRedeem, setPointsToRedeem] = useState(0);
   const [redeemedDiscount, setRedeemedDiscount] = useState(0);
@@ -46,6 +76,35 @@ export default function POSHome() {
 
   const [pickupOrders, setPickupOrders] = useState([]);
   const [loadingPickup, setLoadingPickup] = useState(false);
+
+  // Automatisch producten cachen zodra ze worden opgehaald
+  useEffect(() => {
+    if (typeof window !== 'undefined' && products.length > 0) {
+      localStorage.setItem('pos_cached_products', JSON.stringify(products));
+    }
+  }, [products]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('pos_cart', JSON.stringify(cart));
+    }
+  }, [cart]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      if (selectedCustomer) {
+        localStorage.setItem('pos_selected_customer', JSON.stringify(selectedCustomer));
+      } else {
+        localStorage.removeItem('pos_selected_customer');
+      }
+    }
+  }, [selectedCustomer]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('pos_active_tab', activeTab);
+    }
+  }, [activeTab]);
 
   const formatAttributes = (attributes) => {
     if (!attributes || !Array.isArray(attributes) || attributes.length === 0) return '';
@@ -208,7 +267,10 @@ export default function POSHome() {
     try {
       const res = await fetch('/api/woocommerce/products');
       const data = await res.json();
-      if (data.success) setProducts(data.products || []);
+      if (data.success && data.products) {
+        setProducts(data.products);
+        localStorage.setItem('pos_cached_products', JSON.stringify(data.products));
+      }
     } catch (err) {
       console.error('Fout bij ophalen producten:', err);
     }
@@ -262,6 +324,8 @@ export default function POSHome() {
   const handleLogout = () => {
     localStorage.removeItem('pos_user');
     localStorage.removeItem('pos_token');
+    localStorage.removeItem('pos_cart');
+    localStorage.removeItem('pos_selected_customer');
     router.replace('/login');
   };
 
@@ -654,6 +718,9 @@ export default function POSHome() {
 
       setCart([]);
       setSelectedCustomer(null);
+      localStorage.removeItem('pos_cart');
+      localStorage.removeItem('pos_selected_customer');
+
       setPointsToRedeem(0);
       setRedeemedDiscount(0);
       setDiscountType('none');
@@ -845,7 +912,7 @@ export default function POSHome() {
         </div>
       ) : (
         <div className="flex-1 flex flex-col lg:flex-row p-3 sm:p-4 gap-4 overflow-hidden">
-          {/* Producten & Zoeken (Links op Desktop/Tablet, Boven op Mobiel) */}
+          {/* Producten & Zoeken */}
           <div className="w-full lg:w-3/5 flex flex-col bg-white rounded-lg shadow p-3 sm:p-4">
             <div className="flex space-x-2 mb-3">
               <input
@@ -863,7 +930,6 @@ export default function POSHome() {
               </button>
             </div>
 
-            {/* Categorieën scrollbare balk */}
             <div className="flex space-x-2 overflow-x-auto pb-3 mb-3 border-b no-scrollbar">
               <button
                 onClick={() => setSelectedCategory('ALL')}
@@ -893,7 +959,6 @@ export default function POSHome() {
               })}
             </div>
 
-            {/* Product Grid (Responsive: 2 cols op mobiel, 3 op tablet/desktop) */}
             <div className="flex-1 overflow-y-auto grid grid-cols-2 sm:grid-cols-3 gap-2.5 sm:gap-3 max-h-[calc(100vh-280px)]">
               {filteredProducts.map((product) => {
                 const imageUrl = product.images && product.images.length > 0 ? product.images[0].src : null;
@@ -950,7 +1015,7 @@ export default function POSHome() {
             </div>
           </div>
 
-          {/* Winkelmand / Kassa (Rechts op Desktop/Tablet, Onder op Mobiel) */}
+          {/* Winkelmand / Kassa */}
           <div className="w-full lg:w-2/5 flex flex-col bg-white rounded-lg shadow p-3 sm:p-4 justify-between">
             <div>
               <h2 className="text-base sm:text-lg font-bold mb-3 border-b pb-2">Huidige Bestelling</h2>
@@ -988,7 +1053,6 @@ export default function POSHome() {
                 )}
               </div>
 
-              {/* Winkelmand items */}
               <div className="overflow-y-auto max-h-36 sm:max-h-44 mb-3 divide-y">
                 {cart.length === 0 ? (
                   <p className="text-gray-400 text-sm text-center py-4">Geen artikelen in winkelmand</p>
@@ -1055,7 +1119,6 @@ export default function POSHome() {
               </div>
             </div>
 
-            {/* Totalen en Afrekenknop */}
             <div className="border-t pt-3 mt-2">
               <div className="flex justify-between text-xs sm:text-sm mb-1">
                 <span>Subtotaal:</span>
