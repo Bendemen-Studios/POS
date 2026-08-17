@@ -1253,4 +1253,4 @@ export default function POSHome() {
       )}
     </div>
   );
-}}
+}
