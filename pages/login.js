@@ -7,16 +7,19 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [isChecking, setIsChecking] = useState(true);
 
   useEffect(() => {
     const user = localStorage.getItem('pos_user');
     if (user) {
       const selectedStore = localStorage.getItem('selectedStore');
       if (selectedStore) {
-        router.push('/');
+        router.replace('/');
       } else {
-        router.push('/select-store');
+        router.replace('/select-store');
       }
+    } else {
+      setIsChecking(false);
     }
   }, [router]);
 
@@ -38,8 +41,7 @@ export default function LoginPage() {
         localStorage.setItem('pos_user', JSON.stringify(data.user));
         if (data.token) localStorage.setItem('pos_token', data.token);
         
-        // Stuur direct door naar vestiging selectie
-        router.push('/select-store');
+        router.replace('/select-store');
       } else {
         setError(data.message || 'Inloggen mislukt.');
       }
@@ -50,6 +52,10 @@ export default function LoginPage() {
       setLoading(false);
     }
   };
+
+  if (isChecking) {
+    return <div className="min-h-screen bg-black flex items-center justify-center text-white font-bold text-xs uppercase tracking-widest">Laden...</div>;
+  }
 
   return (
     <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">

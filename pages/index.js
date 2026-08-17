@@ -10,6 +10,7 @@ export default function POSHome() {
   const [selectedStore, setSelectedStore] = useState(null);
   const [allStores, setAllStores] = useState([]);
   const [activeTab, setActiveTab] = useState('pos');
+  const [isChecking, setIsChecking] = useState(true); // Voorkomt flikkeren bij laden
 
   // Producten, Cart & Categorieën
   const [products, setProducts] = useState([]);
@@ -25,7 +26,7 @@ export default function POSHome() {
   const [customItem, setCustomItem] = useState({ name: '', price: '' });
   const [showStoreModal, setShowStoreModal] = useState(false);
 
-  // Bon Keuze Modal State (Optie 1)
+  // Bon Keuze Modal State
   const [completedOrderForReceipt, setCompletedOrderForReceipt] = useState(null);
 
   // Negatieve voorraad / waarschuwingspopup state
@@ -72,13 +73,13 @@ export default function POSHome() {
   useEffect(() => {
     const userStr = localStorage.getItem('pos_user');
     if (!userStr) {
-      router.push('/login');
+      router.replace('/login');
       return;
     }
     try {
       setCurrentUser(JSON.parse(userStr));
     } catch (e) {
-      router.push('/login');
+      router.replace('/login');
       return;
     }
 
@@ -93,9 +94,9 @@ export default function POSHome() {
     handleSyncData();
     fetchPickupOrders();
     checkOfflineQueue();
-  }, []);
+    setIsChecking(false);
+  }, [router]);
 
-  // Geforceerde / Automatische Offline Sync
   const triggerOfflineSync = async (isManualClick = false) => {
     const savedQueue = JSON.parse(localStorage.getItem('pos_offline_orders') || '[]');
     if (savedQueue.length === 0) {
@@ -273,7 +274,7 @@ export default function POSHome() {
   const handleLogout = () => {
     localStorage.removeItem('pos_user');
     localStorage.removeItem('pos_token');
-    router.push('/login');
+    router.replace('/login');
   };
 
   const EXCLUDED_CATEGORIES = ['Ophaal Geschikt', 'Externe Productie', 'Kids'];
@@ -508,7 +509,6 @@ export default function POSHome() {
     setShowPaymentModal(true);
   };
 
-  // Functie om de kassabon print-endpoint aan te roepen
   const triggerPrintReceipt = async (orderData) => {
     try {
       const response = await fetch('/api/pos/print-receipt', {
@@ -528,7 +528,6 @@ export default function POSHome() {
     }
   };
 
-  // SumUp Betalingsafhandeling met VPS -> Cloud API Fallback
   const processSumUpPayment = async (amount, terminalId) => {
     if (!terminalId || terminalId === 'SOLO_READER_1') {
       throw new Error('Geen geldige SumUp Terminal ID gekoppeld aan dit filiaal.');
@@ -590,7 +589,6 @@ export default function POSHome() {
     setLoading(true);
     setCheckoutStatus(null);
 
-    // STAP 1: SumUp Transactie Verwerken (indien geselecteerd)
     if (selectedPaymentMethod === 'sumup') {
       try {
         const terminalId = selectedStore?.terminal_id || localStorage.getItem('pos_fallback_terminal_id');
@@ -603,7 +601,6 @@ export default function POSHome() {
       }
     }
 
-    // STAP 2: Payload opbouwen
     const orderPayload = {
       orderItems: cart,
       paymentMethod: selectedPaymentMethod,
@@ -624,7 +621,6 @@ export default function POSHome() {
       created_at: new Date().toISOString()
     };
 
-    // STAP 3: Eerst direct proberen te versturen via /api/woocommerce/checkout
     try {
       const res = await fetch('/api/woocommerce/checkout', {
         method: 'POST',
@@ -644,7 +640,6 @@ export default function POSHome() {
     } catch (err) {
       console.warn('[POS OFFLINE FALLBACK] Directe checkout mislukt, opslaan in offline opslag:', err.message);
 
-      // STAP 4: Als online verwerking faalt, pas offline lokaal opslaan (Corrected bracket error)
       const offlineQueue = JSON.parse(localStorage.getItem('pos_offline_orders') || '[]');
       offlineQueue.push(orderPayload);
       localStorage.setItem('pos_offline_orders', JSON.stringify(offlineQueue));
@@ -658,7 +653,6 @@ export default function POSHome() {
     } finally {
       setShowPaymentModal(false);
 
-      // Sla op voor de Bon Keuze Popup (Optie 1)
       setCompletedOrderForReceipt({
         order: orderPayload,
         store: selectedStore,
@@ -699,7 +693,9 @@ export default function POSHome() {
     `${c.first_name || ''} ${c.last_name || ''} ${c.email || ''}`.toLowerCase().includes(customerSearch.toLowerCase())
   );
 
-  if (!currentUser) return <div className="p-8 text-center font-bold">Laden...</div>;
+  if (isChecking || !currentUser) {
+    return <div className="min-h-screen bg-black flex items-center justify-center text-white font-bold text-xs uppercase tracking-widest">Laden...</div>;
+  }
 
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col">
@@ -1098,7 +1094,6 @@ export default function POSHome() {
         </div>
       )}
 
-      {/* MODAL 1: OPEN BEDRAG */}
       {openAmountProduct && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg shadow-xl max-w-sm w-full p-6">
@@ -1136,7 +1131,6 @@ export default function POSHome() {
         </div>
       )}
 
-      {/* MODAL 2: CUSTOM ARTIKEL */}
       {showCustomModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg shadow-xl max-w-sm w-full p-6">
@@ -1173,7 +1167,6 @@ export default function POSHome() {
         </div>
       )}
 
-      {/* MODAL 3: VARIATIES */}
       {selectedProductForVariations && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
@@ -1214,7 +1207,6 @@ export default function POSHome() {
         </div>
       )}
 
-      {/* MODAL 3B: NEGATIEVE VOORRAAD WAARSCHUWING */}
       {stockWarningModal.show && (
         <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-55">
           <div className="bg-white rounded-lg shadow-2xl max-w-sm w-full p-6 space-y-4 text-center">
@@ -1244,7 +1236,6 @@ export default function POSHome() {
         </div>
       )}
 
-      {/* MODAL 4: FILIAAL SELECTIE */}
       {showStoreModal && (
         <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg p-6 max-w-md w-full space-y-4 shadow-2xl">
@@ -1285,7 +1276,6 @@ export default function POSHome() {
         </div>
       )}
 
-      {/* MODAL 5: BETAALMETHODE & WISSELGELD */}
       {showPaymentModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
@@ -1370,7 +1360,6 @@ export default function POSHome() {
         </div>
       )}
 
-      {/* MODAL 6: KASSABON KEUZE (OPTIE 1) */}
       {completedOrderForReceipt && (
         <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg shadow-2xl max-w-sm w-full p-6 text-center space-y-4">
@@ -1403,4 +1392,4 @@ export default function POSHome() {
 
     </div>
   );
-}
+}}

@@ -10,9 +10,17 @@ export default function AdminDashboard() {
   // Data states
   const [users, setUsers] = useState([]);
   const [stores, setStores] = useState([]);
-  const [products, setProducts] = useState([]);
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(false);
+
+  // Producten inladen vanuit localStorage om her-syncen te voorkomen
+  const [products, setProducts] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('admin_products');
+      return saved ? JSON.parse(saved) : [];
+    }
+    return [];
+  });
 
   // Form states voor nieuwe gebruiker
   const [newUser, setNewUser] = useState({ username: '', password: '', role: 'cashier', store_id: '', email: '' });
@@ -29,6 +37,13 @@ export default function AdminDashboard() {
   const [currentPage, setCurrentPage] = useState(1);
   const ordersPerPage = 10;
 
+  // Sla producten automatisch op in localStorage bij wijzigingen
+  useEffect(() => {
+    if (products.length > 0) {
+      localStorage.setItem('admin_products', JSON.stringify(products));
+    }
+  }, [products]);
+
   // HELPER: Format Attribute Text
   const formatAttributes = (attributes) => {
     if (!attributes || !Array.isArray(attributes) || attributes.length === 0) return '';
@@ -44,33 +59,39 @@ export default function AdminDashboard() {
   useEffect(() => {
     const userStr = localStorage.getItem('pos_user');
     if (!userStr) {
-      router.push('/login');
+      router.replace('/login');
       return;
     }
     try {
       const parsed = JSON.parse(userStr);
       if (parsed.role !== 'admin' && parsed.role !== 'super_admin') {
         alert('Geen toegang tot het admin-gedeelte.');
-        router.push('/');
+        router.replace('/');
         return;
       }
       setCurrentUser(parsed);
     } catch (e) {
-      router.push('/login');
+      router.replace('/login');
       return;
     }
 
     fetchAllData();
-  }, []);
+  }, [router]);
 
   const fetchAllData = async () => {
     setLoading(true);
     await Promise.all([
       fetchUsers(),
       fetchStores(),
-      fetchProducts(),
       fetchOrders()
     ]);
+    
+    // Alleen ophalen als localStorage leeg is
+    const savedProducts = localStorage.getItem('admin_products');
+    if (!savedProducts || JSON.parse(savedProducts).length === 0) {
+      await fetchProductsSilently();
+    }
+    
     setLoading(false);
   };
 
@@ -96,15 +117,37 @@ export default function AdminDashboard() {
     }
   };
 
-  const fetchProducts = async () => {
+  const fetchProductsSilently = async () => {
     try {
       const res = await fetch('/api/woocommerce/products');
       const data = await res.json();
       if (data.success) {
         setProducts(data.products || []);
+        localStorage.setItem('admin_products', JSON.stringify(data.products || []));
       }
     } catch (err) {
       console.error('Fout bij ophalen producten:', err);
+    }
+  };
+
+  // Handmatige Sync Knop Functie
+  const handleManualSyncProducts = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/woocommerce/products');
+      const data = await res.json();
+      if (data.success) {
+        setProducts(data.products || []);
+        localStorage.setItem('admin_products', JSON.stringify(data.products || []));
+        alert('Producten succesvol gesynchroniseerd met WooCommerce!');
+      } else {
+        alert('Fout bij synchroniseren van producten.');
+      }
+    } catch (err) {
+      console.error('Fout:', err);
+      alert('Kan geen verbinding maken met WooCommerce.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -137,7 +180,6 @@ export default function AdminDashboard() {
     }
   };
 
-  // --- GEBRUIKER ACTIES ---
   const handleCreateUser = async (e) => {
     e.preventDefault();
     try {
@@ -218,7 +260,6 @@ export default function AdminDashboard() {
     }
   };
 
-  // --- WINKEL ACTIES ---
   const handleCreateStore = async (e) => {
     e.preventDefault();
     try {
@@ -305,13 +346,14 @@ export default function AdminDashboard() {
     }
   };
 
-  // --- PAGINERING LOGICA ---
   const indexOfLastOrder = currentPage * ordersPerPage;
   const indexOfFirstOrder = indexOfLastOrder - ordersPerPage;
   const currentOrders = orders.slice(indexOfFirstOrder, indexOfLastOrder);
   const totalPages = Math.ceil(orders.length / ordersPerPage);
 
-  if (!currentUser) return <div className="p-8 text-center font-bold">Laden...</div>;
+  if (!currentUser) {
+    return <div className="min-h-screen bg-black flex items-center justify-center text-white font-bold text-xs uppercase tracking-widest">Laden...</div>;
+  }
 
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col">
@@ -362,11 +404,10 @@ export default function AdminDashboard() {
       </div>
 
       <div className="flex-1 p-6 max-w-7xl mx-auto w-full">
-        {loading ? (
+        {loading && activeTab !== 'inventory' ? (
           <div className="text-center py-12 font-bold text-gray-500">Gegevens laden...</div>
         ) : (
           <>
-            {/* 1. USERS TAB */}
             {activeTab === 'users' && (
               <div className="space-y-6">
                 <div className="bg-white rounded-lg shadow p-6">
@@ -469,7 +510,6 @@ export default function AdminDashboard() {
               </div>
             )}
 
-            {/* 2. STORES TAB (Verplichte KvK en BTW) */}
             {activeTab === 'stores' && (
               <div className="space-y-6">
                 <div className="bg-white rounded-lg shadow p-6">
@@ -552,7 +592,6 @@ export default function AdminDashboard() {
               </div>
             )}
 
-            {/* 3. SUMUP TAB */}
             {activeTab === 'sumup' && (
               <div className="bg-white rounded-lg shadow p-6">
                 <h3 className="text-md font-bold mb-2">💳 SumUp Terminal Koppelingen per Locatie</h3>
@@ -584,7 +623,6 @@ export default function AdminDashboard() {
               </div>
             )}
 
-            {/* 4. ORDERS TAB */}
             {activeTab === 'orders' && (
               <div className="bg-white rounded-lg shadow p-6">
                 <h3 className="text-md font-bold mb-4">📦 Live Webshop Bestellingen ({orders.length})</h3>
@@ -645,10 +683,19 @@ export default function AdminDashboard() {
               </div>
             )}
 
-            {/* 5. INVENTORY TAB */}
             {activeTab === 'inventory' && (
               <div className="bg-white rounded-lg shadow p-6">
-                <h3 className="text-md font-bold mb-4">📦 Producten & Voorraad ({products.length})</h3>
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-md font-bold">📦 Producten & Voorraad ({products.length})</h3>
+                  <button 
+                    onClick={handleManualSyncProducts}
+                    disabled={loading}
+                    className="bg-black text-white px-3 py-1.5 rounded text-xs font-bold hover:bg-gray-800 transition disabled:opacity-50"
+                  >
+                    {loading ? 'Bezig...' : '🔄 Handmatig Synchroniseren'}
+                  </button>
+                </div>
+
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs divide-y">
                     <thead>
@@ -715,7 +762,6 @@ export default function AdminDashboard() {
         )}
       </div>
 
-      {/* MODAL: GEBRUIKER BEWERKEN */}
       {editingUser && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <form onSubmit={handleUpdateUser} className="bg-white rounded-lg p-6 max-w-sm w-full space-y-3 shadow-2xl">
@@ -781,7 +827,6 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {/* MODAL: WINKEL BEWERKEN (Inclusief KvK en BTW) */}
       {editingStore && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <form onSubmit={handleUpdateStore} className="bg-white rounded-lg p-6 max-w-sm w-full space-y-3 shadow-2xl">
@@ -843,7 +888,6 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {/* MODAL: SUMUP READER KOPPELEN / BEWERKEN */}
       {editingSumUp && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <form onSubmit={handleUpdateSumUp} className="bg-white rounded-lg p-6 max-w-sm w-full space-y-3 shadow-2xl">
