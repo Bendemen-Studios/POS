@@ -796,8 +796,28 @@ export default function AdminDashboard() {
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <form onSubmit={handleUpdateStore} className="bg-white rounded-lg p-6 max-w-sm w-full space-y-3 shadow-xl">
             <h3 className="text-md font-bold">Filiaal Bewerken</h3>
-            <input type="text" value={editingStore.store_name || editingStore.name || ''} onChange={(e) => setEditingStore({...editingStore, store_name: e.target.value})} className="w-full p-2.5 border rounded text-xs" required />
-            <input type="text" value={editingStore.address || ''} onChange={(e) => setEditingStore({...editingStore, address: e.target.value})} className="w-full p-2.5 border rounded text-xs" required />
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-bold text-gray-600 block mb-1">Naam Filiaal</label>
+                <input type="text" value={editingStore.store_name || editingStore.name || ''} onChange={(e) => setEditingStore({...editingStore, store_name: e.target.value})} className="w-full p-2.5 border rounded text-xs" required />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-gray-600 block mb-1">Adres</label>
+                <input type="text" value={editingStore.address || ''} onChange={(e) => setEditingStore({...editingStore, address: e.target.value})} className="w-full p-2.5 border rounded text-xs" required />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-gray-600 block mb-1">KvK Nummer</label>
+                <input type="text" value={editingStore.kvk || ''} onChange={(e) => setEditingStore({...editingStore, kvk: e.target.value})} className="w-full p-2.5 border rounded text-xs" />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-gray-600 block mb-1">BTW Nummer</label>
+                <input type="text" value={editingStore.btw || ''} onChange={(e) => setEditingStore({...editingStore, btw: e.target.value})} className="w-full p-2.5 border rounded text-xs" />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-gray-600 block mb-1">Pickup ID</label>
+                <input type="text" value={editingStore.pickup_id || ''} onChange={(e) => setEditingStore({...editingStore, pickup_id: e.target.value})} className="w-full p-2.5 border rounded text-xs" />
+              </div>
+            </div>
             <div className="flex space-x-2 pt-2">
               <button type="button" onClick={() => setEditingStore(null)} className="w-1/2 bg-gray-200 py-2.5 rounded text-xs font-bold">Annuleren</button>
               <button type="submit" className="w-1/2 bg-red-600 text-white py-2.5 rounded text-xs font-bold">Opslaan</button>
