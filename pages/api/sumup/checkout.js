@@ -14,8 +14,8 @@ export default async function handler(req, res) {
   }
 
   // Direct hardcoded gekoppeld aan de werkende sleutel van je curl-test
-  const sumupApiKey = 'sup_sk_XkqNSwhnmLs7DJTI7aZrcsYR13yermmXN';
-  const merchantCode = 'MM669XL6';
+  const sumupApiKey = '####';
+  const merchantCode = '####';
 
   try {
     let terminalId = req.body.terminalId;
