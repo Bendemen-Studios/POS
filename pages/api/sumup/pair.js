@@ -1,4 +1,3 @@
-import axios from 'axios';
 import db from '../../../lib/db';
 
 export default async function handler(req, res) {
@@ -6,62 +5,79 @@ export default async function handler(req, res) {
     return res.status(405).json({ success: false, error: 'Method not allowed' });
   }
 
-  const { storeId, pairingCode, readerName } = req.body;
+  const { storeId, pairingCode } = req.body;
 
-  if (!pairingCode) {
-    return res.status(400).json({ success: false, error: 'Vul de pairing code in die op de SumUp staat.' });
+  if (!storeId || !pairingCode) {
+    return res.status(400).json({ success: false, error: 'Filiaal ID en Pair Code zijn verplicht.' });
   }
 
+  const clientId = process.env.SUMUP_CLIENT_ID;
+  const clientSecret = process.env.SUMUP_CLIENT_SECRET;
+  const apiKey = process.env.SUMUP_API_KEY;
+
   try {
-    const sumupApiKey = process.env.SUMUP_API_KEY || process.env.SUMUP_SECRET_KEY;
-    const merchantCode = process.env.SUMUP_MERCHANT_CODE;
+    // 1. Token ophalen om te koppelen
+    let accessToken = apiKey;
+    if (!accessToken && clientId && clientSecret) {
+      const tokenParams = new URLSearchParams();
+      tokenParams.append('grant_type', 'client_credentials');
+      tokenParams.append('client_id', clientId);
+      tokenParams.append('client_secret', clientSecret);
 
-    let readerData = null;
-    let realTerminalId = null;
-    const cleanPairingCode = pairingCode.trim();
-
-    // Als de SumUp sleutels in de .env staan, koppelen we direct via de SumUp Cloud API
-    if (sumupApiKey && merchantCode) {
-      const response = await axios.post(
-        `https://api.sumup.com/v0.1/merchants/${merchantCode}/readers`,
-        {
-          pairing_code: cleanPairingCode,
-          name: readerName || `Kassa Store ${storeId || 1}`
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${sumupApiKey}`,
-            'Content-Type': 'application/json'
-          }
-        }
-      );
-      readerData = response.data;
-      
-      // Haal de echte unieke reader/terminal ID op uit de response
-      if (readerData && (readerData.id || readerData.device_id)) {
-        realTerminalId = readerData.id || readerData.device_id;
+      const tokenRes = await fetch('https://api.sumup.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: tokenParams.toString()
+      });
+      const tokenData = await tokenRes.json();
+      if (tokenRes.ok && tokenData.access_token) {
+        accessToken = tokenData.access_token;
       }
     }
 
-    // Sla de echte terminal_id en de pair_code apart op in de database bij het juiste filiaal
-    if (storeId) {
-      await db.query(
-        'UPDATE stores SET terminal_id = ?, pair_code = ? WHERE id = ? OR store_id = ?',
-        [realTerminalId, cleanPairingCode, storeId, storeId]
-      );
+    if (!accessToken) {
+      return res.status(500).json({ success: false, error: 'Geen geldige SumUp API-sleutel of credentials gevonden.' });
     }
 
-    return res.status(200).json({ 
-      success: true, 
-      message: 'SumUp terminal succesvol gekoppeld en opgeslagen!',
-      reader: readerData || { id: realTerminalId, pairingCode: cleanPairingCode, name: readerName }
+    // 2. Koppelingsverzoek sturen naar SumUp
+    const pairRes = await fetch('https://api.sumup.com/v0.1/terminals/pair', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ pairing_code: pairingCode })
+    });
+
+    const pairData = await pairRes.json();
+
+    if (!pairRes.ok) {
+      throw new Error(pairData.message || pairData.error || 'SumUp weigert de koppelcode (mogelijk verlopen of ongeldig).');
+    }
+
+    const terminalId = pairData.id || pairData.terminal_id;
+
+    if (!terminalId) {
+      throw new Error('Geen Terminal ID ontvangen van SumUp.');
+    }
+
+    // 3. Sla de Terminal ID op en zet bij pair_code de tekst "Verbonden"
+    await db.query(
+      'UPDATE stores SET terminal_id = ?, pair_code = "Verbonden" WHERE id = ? OR store_id = ?',
+      [terminalId, storeId, storeId]
+    );
+
+    return res.status(200).json({
+      success: true,
+      terminalId,
+      message: 'Terminal succesvol gekoppeld!'
     });
 
   } catch (error) {
-    console.error('SumUp pairing fout:', error.response?.data || error.message);
-    return res.status(500).json({ 
-      success: false, 
-      error: error.response?.data?.message || 'Fout bij koppelen met SumUp. Controleer de koppelcode.' 
+    console.error('SumUp pairing fout:', error.message);
+    return res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 }
