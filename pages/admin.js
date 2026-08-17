@@ -7,13 +7,11 @@ export default function AdminDashboard() {
   const [currentUser, setCurrentUser] = useState(null);
   const [activeTab, setActiveTab] = useState('users');
 
-  // Data states
   const [users, setUsers] = useState([]);
   const [stores, setStores] = useState([]);
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  // Producten inladen vanuit localStorage om her-syncen te voorkomen
   const [products, setProducts] = useState(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('admin_products');
@@ -22,29 +20,22 @@ export default function AdminDashboard() {
     return [];
   });
 
-  // Form states voor nieuwe gebruiker
   const [newUser, setNewUser] = useState({ username: '', password: '', role: 'cashier', store_id: '', email: '' });
-  
-  // Form states voor nieuwe winkel (Inclusief verplichte KVK en BTW)
   const [newStore, setNewStore] = useState({ store_name: '', address: '', kvk: '', btw: '', pickup_id: '' });
 
-  // Bewerk states (Modalen)
   const [editingUser, setEditingUser] = useState(null);
   const [editingStore, setEditingStore] = useState(null);
   const [editingSumUp, setEditingSumUp] = useState(null);
 
-  // Paginering Orders
   const [currentPage, setCurrentPage] = useState(1);
   const ordersPerPage = 10;
 
-  // Sla producten automatisch op in localStorage bij wijzigingen
   useEffect(() => {
     if (products.length > 0) {
       localStorage.setItem('admin_products', JSON.stringify(products));
     }
   }, [products]);
 
-  // HELPER: Format Attribute Text
   const formatAttributes = (attributes) => {
     if (!attributes || !Array.isArray(attributes) || attributes.length === 0) return '';
     return attributes
@@ -86,7 +77,6 @@ export default function AdminDashboard() {
       fetchOrders()
     ]);
     
-    // Alleen ophalen als localStorage leeg is
     const savedProducts = localStorage.getItem('admin_products');
     if (!savedProducts || JSON.parse(savedProducts).length === 0) {
       await fetchProductsSilently();
@@ -130,7 +120,6 @@ export default function AdminDashboard() {
     }
   };
 
-  // Handmatige Sync Knop Functie
   const handleManualSyncProducts = async () => {
     setLoading(true);
     try {
@@ -144,7 +133,6 @@ export default function AdminDashboard() {
         alert('Fout bij synchroniseren van producten.');
       }
     } catch (err) {
-      console.error('Fout:', err);
       alert('Kan geen verbinding maken met WooCommerce.');
     } finally {
       setLoading(false);
@@ -173,7 +161,7 @@ export default function AdminDashboard() {
         alert('Status bijgewerkt!');
         fetchOrders();
       } else {
-        alert('Fout bij updaten status: ' + (data.error || 'Onbekende fout'));
+        alert('Fout bij updaten status.');
       }
     } catch (err) {
       alert('Fout bij updaten status.');
@@ -216,11 +204,7 @@ export default function AdminDashboard() {
       const rawStoreId = editingUser.store_id;
       const storeIdStr = rawStoreId !== '' && rawStoreId !== null && rawStoreId !== 'null' && rawStoreId !== undefined ? String(rawStoreId) : null;
       
-      const payload = {
-        ...editingUser,
-        store_id: storeIdStr
-      };
-      
+      const payload = { ...editingUser, store_id: storeIdStr };
       const res = await fetch('/api/admin/users', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -228,14 +212,13 @@ export default function AdminDashboard() {
       });
       const data = await res.json();
       if (data.success) {
-        alert('Medewerker succesvol bijgewerkt!');
+        alert('Medewerker bijgewerkt!');
         setEditingUser(null);
         fetchUsers();
       } else {
         alert('Fout: ' + (data.error || data.message));
       }
     } catch (err) {
-      console.error('Fout bij bijwerken gebruiker:', err);
       alert('Fout bij bijwerken medewerker.');
     }
   };
@@ -250,11 +233,7 @@ export default function AdminDashboard() {
     try {
       const res = await fetch(`/api/admin/users?id=${id}`, { method: 'DELETE' });
       const data = await res.json();
-      if (data.success) {
-        fetchUsers();
-      } else {
-        alert('Fout: ' + data.error);
-      }
+      if (data.success) fetchUsers();
     } catch (err) {
       alert('Fout bij verwijderen gebruiker.');
     }
@@ -270,7 +249,7 @@ export default function AdminDashboard() {
       });
       const data = await res.json();
       if (data.success) {
-        alert('Filiaal succesvol toegevoegd!');
+        alert('Filiaal toegevoegd!');
         setNewStore({ store_name: '', address: '', kvk: '', btw: '', pickup_id: '' });
         fetchStores();
       } else {
@@ -291,11 +270,9 @@ export default function AdminDashboard() {
       });
       const data = await res.json();
       if (data.success) {
-        alert('Filiaal succesvol bijgewerkt!');
+        alert('Filiaal bijgewerkt!');
         setEditingStore(null);
         fetchStores();
-      } else {
-        alert('Fout: ' + data.error);
       }
     } catch (err) {
       alert('Fout bij bijwerken filiaal.');
@@ -304,24 +281,20 @@ export default function AdminDashboard() {
 
   const handleDeleteStore = async (storeId, storeName) => {
     if (stores.length <= 1) {
-      alert('Er moet minimaal 1 actief filiaal aanwezig blijven in het systeem.');
+      alert('Er moet minimaal 1 actief filiaal aanwezig blijven.');
       return;
     }
-
-    if (!confirm(`Weet je zeker dat je filiaal "${storeName}" wilt verwijderen?`)) return;
+    if (!confirm(`Filiaal "${storeName}" verwijderen?`)) return;
 
     try {
       const res = await fetch(`/api/admin/store?id=${storeId}`, { method: 'DELETE' });
       const data = await res.json();
       if (data.success) {
-        alert('Filiaal succesvol verwijderd!');
         fetchStores();
         fetchUsers();
-      } else {
-        alert('Fout bij verwijderen: ' + (data.error || 'Onbekende fout'));
       }
     } catch (err) {
-      alert('Fout bij verwijderen filiaal.');
+      alert('Fout bij verwijderen.');
     }
   };
 
@@ -335,14 +308,12 @@ export default function AdminDashboard() {
       });
       const data = await res.json();
       if (data.success) {
-        alert('SumUp Reader succesvol gekoppeld/bijgewerkt!');
+        alert('SumUp bijgewerkt!');
         setEditingSumUp(null);
         fetchStores();
-      } else {
-        alert('Fout: ' + data.error);
       }
     } catch (err) {
-      alert('Fout bij bijwerken SumUp lezer.');
+      alert('Fout bij bijwerken SumUp.');
     }
   };
 
@@ -352,7 +323,16 @@ export default function AdminDashboard() {
   const totalPages = Math.ceil(orders.length / ordersPerPage);
 
   if (!currentUser) {
-    return <div className="min-h-screen bg-black flex items-center justify-center text-white font-bold text-xs uppercase tracking-widest">Laden...</div>;
+    return (
+      <div className="min-h-screen bg-black flex flex-col items-center justify-center p-4">
+        <div className="text-center space-y-2">
+          <h1 className="text-white font-black text-xl tracking-wider">BDM ADMIN</h1>
+          <div className="text-red-600 font-bold text-xs uppercase tracking-widest animate-pulse">
+            Sessie controleren...
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -371,132 +351,61 @@ export default function AdminDashboard() {
       </header>
 
       <div className="bg-white border-b px-6 py-2 flex space-x-4 shadow-sm overflow-x-auto">
-        <button
-          onClick={() => setActiveTab('users')}
-          className={`px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'users' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
-        >
-          👥 Medewerkers & Toegang
-        </button>
-        <button
-          onClick={() => setActiveTab('stores')}
-          className={`px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'stores' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
-        >
-          📍 Filialen Beheren
-        </button>
-        <button
-          onClick={() => setActiveTab('sumup')}
-          className={`px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'sumup' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
-        >
-          💳 SumUp per Locatie
-        </button>
-        <button
-          onClick={() => setActiveTab('orders')}
-          className={`px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'orders' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
-        >
-          📦 Bestellingen Live
-        </button>
-        <button
-          onClick={() => setActiveTab('inventory')}
-          className={`px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'inventory' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
-        >
-          📦 Voorraad & Variaties
-        </button>
+        <button onClick={() => setActiveTab('users')} className={`px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'users' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'}`}>👥 Medewerkers</button>
+        <button onClick={() => setActiveTab('stores')} className={`px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'stores' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'}`}>📍 Filialen</button>
+        <button onClick={() => setActiveTab('sumup')} className={`px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'sumup' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'}`}>💳 SumUp</button>
+        <button onClick={() => setActiveTab('orders')} className={`px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'orders' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'}`}>📦 Bestellingen</button>
+        <button onClick={() => setActiveTab('inventory')} className={`px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'inventory' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'}`}>📦 Voorraad</button>
       </div>
 
       <div className="flex-1 p-6 max-w-7xl mx-auto w-full">
         {loading && activeTab !== 'inventory' ? (
-          <div className="text-center py-12 font-bold text-gray-500">Gegevens laden...</div>
+          <div className="bg-white rounded-lg shadow p-12 text-center space-y-2">
+            <div className="text-red-600 font-black text-lg tracking-wider animate-pulse">ADMIN // GEGEVENS LADEN</div>
+            <p className="text-xs text-gray-400 uppercase font-semibold">Even geduld, gegevens worden opgehaald...</p>
+          </div>
         ) : (
           <>
             {activeTab === 'users' && (
               <div className="space-y-6">
                 <div className="bg-white rounded-lg shadow p-6">
-                  <h3 className="text-md font-bold mb-4">Nieuwe Medewerker Aanmaken</h3>
+                  <h3 className="text-md font-bold mb-4">Nieuwe Medewerker</h3>
                   <form onSubmit={handleCreateUser} className="grid grid-cols-1 md:grid-cols-5 gap-3">
-                    <input
-                      type="text"
-                      placeholder="Gebruikersnaam"
-                      value={newUser.username}
-                      onChange={(e) => setNewUser({...newUser, username: e.target.value})}
-                      className="p-2 border rounded text-xs"
-                      required
-                    />
-                    <input
-                      type="password"
-                      placeholder="Wachtwoord"
-                      value={newUser.password}
-                      onChange={(e) => setNewUser({...newUser, password: e.target.value})}
-                      className="p-2 border rounded text-xs"
-                      required
-                    />
-                    <select
-                      value={newUser.role}
-                      onChange={(e) => setNewUser({...newUser, role: e.target.value})}
-                      className="p-2 border rounded text-xs"
-                    >
+                    <input type="text" placeholder="Gebruikersnaam" value={newUser.username} onChange={(e) => setNewUser({...newUser, username: e.target.value})} className="p-2 border rounded text-xs" required />
+                    <input type="password" placeholder="Wachtwoord" value={newUser.password} onChange={(e) => setNewUser({...newUser, password: e.target.value})} className="p-2 border rounded text-xs" required />
+                    <select value={newUser.role} onChange={(e) => setNewUser({...newUser, role: e.target.value})} className="p-2 border rounded text-xs">
                       <option value="cashier">Cashier</option>
                       <option value="admin">Admin</option>
                       <option value="super_admin">Super Admin</option>
                     </select>
-                    <select
-                      value={newUser.store_id || ''}
-                      onChange={(e) => setNewUser({...newUser, store_id: e.target.value})}
-                      className="p-2 border rounded text-xs"
-                    >
-                      <option value="">Kies Filiaal (Optioneel)</option>
-                      {stores.map(s => {
-                        const sId = String(s.id || s.store_id);
-                        return (
-                          <option key={sId} value={sId}>{s.store_name || s.name || `Filiaal #${sId}`}</option>
-                        );
-                      })}
+                    <select value={newUser.store_id || ''} onChange={(e) => setNewUser({...newUser, store_id: e.target.value})} className="p-2 border rounded text-xs">
+                      <option value="">Kies Filiaal</option>
+                      {stores.map(s => <option key={s.id || s.store_id} value={s.id || s.store_id}>{s.store_name || s.name}</option>)}
                     </select>
-                    <button type="submit" className="bg-red-600 hover:bg-red-700 text-white font-bold p-2 rounded text-xs uppercase">
-                      Aanmaken
-                    </button>
+                    <button type="submit" className="bg-red-600 hover:bg-red-700 text-white font-bold p-2 rounded text-xs uppercase">Aanmaken</button>
                   </form>
                 </div>
 
                 <div className="bg-white rounded-lg shadow p-6">
-                  <h3 className="text-md font-bold mb-4">Bestaande Medewerkers ({users.length})</h3>
+                  <h3 className="text-md font-bold mb-4">Medewerkers ({users.length})</h3>
                   <div className="overflow-x-auto">
                     <table className="w-full text-left text-xs divide-y">
-                      <thead>
-                        <tr className="bg-gray-50">
-                          <th className="p-3">ID</th>
-                          <th className="p-3">Gebruikersnaam</th>
-                          <th className="p-3">Rol</th>
-                          <th className="p-3">Gekoppeld Filiaal</th>
-                          <th className="p-3 text-right">Acties</th>
-                        </tr>
-                      </thead>
+                      <thead><tr className="bg-gray-50"><th className="p-3">ID</th><th className="p-3">Naam</th><th className="p-3">Rol</th><th className="p-3">Filiaal</th><th className="p-3 text-right">Acties</th></tr></thead>
                       <tbody className="divide-y">
                         {users.map(u => {
                           const matchedStore = stores.find(s => String(s.id || s.store_id) === String(u.store_id));
                           const isBendemen = u.username.toLowerCase() === 'bendemen';
-                          const storeNameDisplay = u.store_name && u.store_name !== 'Geen' 
-                            ? u.store_name 
-                            : (matchedStore ? (matchedStore.store_name || matchedStore.name) : (u.store_id ? `ID: ${u.store_id}` : 'Geen'));
-
                           return (
                             <tr key={u.id} className="hover:bg-gray-50">
                               <td className="p-3">#{u.id}</td>
                               <td className="p-3 font-bold">{u.username}</td>
                               <td className="p-3"><span className="bg-gray-200 px-2 py-0.5 rounded uppercase font-semibold text-[10px]">{u.role}</span></td>
-                              <td className="p-3 font-semibold text-gray-700">
-                                {storeNameDisplay}
-                              </td>
+                              <td className="p-3 font-semibold text-gray-700">{matchedStore ? (matchedStore.store_name || matchedStore.name) : 'Geen'}</td>
                               <td className="p-3 text-right space-x-2">
-                                {isBendemen ? (
-                                  <span className="text-gray-400 font-semibold italic text-[11px]">Beveiligd</span>
-                                ) : (
+                                {!isBendemen && (
                                   <>
-                                    <button onClick={() => setEditingUser(u)} className="text-blue-600 font-bold hover:underline">
-                                      Bewerken
-                                    </button>
-                                    <button onClick={() => handleDeleteUser(u.id, u.username)} className="text-red-600 font-bold hover:underline">
-                                      Verwijderen
-                                    </button>
+                                    <button onClick={() => setEditingUser(u)} className="text-blue-600 font-bold hover:underline">Bewerken</button>
+                                    <button onClick={() => handleDeleteUser(u.id, u.username)} className="text-red-600 font-bold hover:underline">Verwijderen</button>
                                   </>
                                 )}
                               </td>
@@ -513,80 +422,33 @@ export default function AdminDashboard() {
             {activeTab === 'stores' && (
               <div className="space-y-6">
                 <div className="bg-white rounded-lg shadow p-6">
-                  <h3 className="text-md font-bold mb-4">Nieuw Filiaal Toevoegen (KvK & BTW Verplicht)</h3>
+                  <h3 className="text-md font-bold mb-4">Nieuw Filiaal</h3>
                   <form onSubmit={handleCreateStore} className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <input
-                      type="text"
-                      placeholder="Naam Filiaal"
-                      value={newStore.store_name}
-                      onChange={(e) => setNewStore({...newStore, store_name: e.target.value})}
-                      className="p-2 border rounded text-xs"
-                      required
-                    />
-                    <input
-                      type="text"
-                      placeholder="Adres"
-                      value={newStore.address}
-                      onChange={(e) => setNewStore({...newStore, address: e.target.value})}
-                      className="p-2 border rounded text-xs"
-                      required
-                    />
-                    <input
-                      type="text"
-                      placeholder="KvK Nummer (Verplicht)"
-                      value={newStore.kvk}
-                      onChange={(e) => setNewStore({...newStore, kvk: e.target.value})}
-                      className="p-2 border rounded text-xs"
-                      required
-                    />
-                    <input
-                      type="text"
-                      placeholder="BTW Nummer (Verplicht)"
-                      value={newStore.btw}
-                      onChange={(e) => setNewStore({...newStore, btw: e.target.value})}
-                      className="p-2 border rounded text-xs"
-                      required
-                    />
-                    <input
-                      type="text"
-                      placeholder="Local Pickup Plus ID"
-                      value={newStore.pickup_id}
-                      onChange={(e) => setNewStore({...newStore, pickup_id: e.target.value})}
-                      className="p-2 border rounded text-xs md:col-span-2"
-                    />
-                    <button type="submit" className="bg-red-600 hover:bg-red-700 text-white font-bold p-2 rounded text-xs uppercase md:col-span-2">
-                      Filiaal Aanmaken
-                    </button>
+                    <input type="text" placeholder="Naam Filiaal" value={newStore.store_name} onChange={(e) => setNewStore({...newStore, store_name: e.target.value})} className="p-2 border rounded text-xs" required />
+                    <input type="text" placeholder="Adres" value={newStore.address} onChange={(e) => setNewStore({...newStore, address: e.target.value})} className="p-2 border rounded text-xs" required />
+                    <input type="text" placeholder="KvK Nummer" value={newStore.kvk} onChange={(e) => setNewStore({...newStore, kvk: e.target.value})} className="p-2 border rounded text-xs" required />
+                    <input type="text" placeholder="BTW Nummer" value={newStore.btw} onChange={(e) => setNewStore({...newStore, btw: e.target.value})} className="p-2 border rounded text-xs" required />
+                    <input type="text" placeholder="Pickup ID" value={newStore.pickup_id} onChange={(e) => setNewStore({...newStore, pickup_id: e.target.value})} className="p-2 border rounded text-xs md:col-span-2" />
+                    <button type="submit" className="bg-red-600 text-white font-bold p-2 rounded text-xs uppercase md:col-span-2">Aanmaken</button>
                   </form>
                 </div>
 
                 <div className="bg-white rounded-lg shadow p-6">
-                  <h3 className="text-md font-bold mb-4">Actieve Filialen ({stores.length})</h3>
+                  <h3 className="text-md font-bold mb-4">Filialen ({stores.length})</h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {stores.map(s => {
-                      const sId = s.id || s.store_id;
-                      const sName = s.store_name || s.name;
-
-                      return (
-                        <div key={sId} className="border p-4 rounded-lg bg-gray-50 flex flex-col justify-between">
-                          <div>
-                            <div className="font-bold text-sm text-red-600">{sName}</div>
-                            <div className="text-xs text-gray-500 mt-1">📍 {s.address || 'Geen adres'}</div>
-                            <div className="text-xs text-gray-600 mt-1">KvK: <span className="font-bold">{s.kvk || '-'}</span></div>
-                            <div className="text-xs text-gray-600 mt-0.5">BTW: <span className="font-bold">{s.btw || '-'}</span></div>
-                            <div className="text-xs text-gray-400 mt-0.5">ID: #{sId}</div>
-                          </div>
-                          <div className="mt-3 text-right space-x-2">
-                            <button onClick={() => setEditingStore(s)} className="text-xs bg-black text-white px-3 py-1 rounded font-bold hover:bg-gray-800">
-                              Bewerken
-                            </button>
-                            <button onClick={() => handleDeleteStore(sId, sName)} className="text-xs bg-red-600 text-white px-3 py-1 rounded font-bold hover:bg-red-700">
-                              Verwijderen
-                            </button>
-                          </div>
+                    {stores.map(s => (
+                      <div key={s.id || s.store_id} className="border p-4 rounded-lg bg-gray-50 flex flex-col justify-between">
+                        <div>
+                          <div className="font-bold text-sm text-red-600">{s.store_name || s.name}</div>
+                          <div className="text-xs text-gray-500 mt-1">📍 {s.address}</div>
+                          <div className="text-xs text-gray-600 mt-1">KvK: {s.kvk} | BTW: {s.btw}</div>
                         </div>
-                      );
-                    })}
+                        <div className="mt-3 text-right space-x-2">
+                          <button onClick={() => setEditingStore(s)} className="text-xs bg-black text-white px-3 py-1 rounded font-bold">Bewerken</button>
+                          <button onClick={() => handleDeleteStore(s.id || s.store_id, s.store_name || s.name)} className="text-xs bg-red-600 text-white px-3 py-1 rounded font-bold">Verwijderen</button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               </div>
@@ -594,231 +456,82 @@ export default function AdminDashboard() {
 
             {activeTab === 'sumup' && (
               <div className="bg-white rounded-lg shadow p-6">
-                <h3 className="text-md font-bold mb-2">💳 SumUp Terminal Koppelingen per Locatie</h3>
-                <p className="text-xs text-gray-500 mb-4">Beheer hier per filiaal de gekoppelde SumUp Terminal ID / Pair Code.</p>
+                <h3 className="text-md font-bold mb-4">💳 SumUp Terminal Koppelingen</h3>
                 <div className="space-y-3">
-                  {stores.length === 0 ? (
-                    <div className="text-xs text-gray-400 p-4 border rounded bg-gray-50 text-center">Geen filialen gevonden.</div>
-                  ) : (
-                    stores.map(s => (
-                      <div key={s.id || s.store_id} className="border p-3 rounded flex justify-between items-center bg-gray-50">
-                        <div>
-                          <span className="font-bold text-sm">{s.store_name || s.name}</span>
-                          <div className="text-xs text-gray-600 mt-0.5">
-                            Terminal ID / Code: <span className="font-mono font-bold text-black">{s.terminal_id ? s.terminal_id : 'Nog niet gekoppeld'}</span>
-                          </div>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <span className={`text-xs px-2 py-1 rounded font-bold ${s.terminal_id ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
-                            {s.terminal_id ? 'Gekoppeld' : 'Geen Reader'}
-                          </span>
-                          <button onClick={() => setEditingSumUp(s)} className="text-xs bg-black text-white px-3 py-1 rounded font-bold hover:bg-gray-800">
-                            {s.terminal_id ? 'Wijzigen' : 'Koppelen'}
-                          </button>
-                        </div>
+                  {stores.map(s => (
+                    <div key={s.id || s.store_id} className="border p-3 rounded flex justify-between items-center bg-gray-50">
+                      <div>
+                        <span className="font-bold text-sm">{s.store_name || s.name}</span>
+                        <div className="text-xs text-gray-600">Terminal: <span className="font-mono font-bold">{s.terminal_id || 'Geen'}</span></div>
                       </div>
-                    ))
-                  )}
+                      <button onClick={() => setEditingSumUp(s)} className="text-xs bg-black text-white px-3 py-1 rounded font-bold">Koppelen</button>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
 
             {activeTab === 'orders' && (
               <div className="bg-white rounded-lg shadow p-6">
-                <h3 className="text-md font-bold mb-4">📦 Live Webshop Bestellingen ({orders.length})</h3>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs divide-y mb-4">
-                    <thead>
-                      <tr className="bg-gray-50">
-                        <th className="p-3">Order #</th>
-                        <th className="p-3">Klant</th>
-                        <th className="p-3">Status</th>
-                        <th className="p-3">Totaal</th>
+                <h3 className="text-md font-bold mb-4">📦 Live Bestellingen</h3>
+                <table className="w-full text-left text-xs divide-y mb-4">
+                  <thead><tr className="bg-gray-50"><th className="p-3">Order</th><th className="p-3">Klant</th><th className="p-3">Status</th><th className="p-3">Totaal</th></tr></thead>
+                  <tbody className="divide-y">
+                    {currentOrders.map(o => (
+                      <tr key={o.id} className="hover:bg-gray-50">
+                        <td className="p-3 font-bold">#{o.number || o.id}</td>
+                        <td className="p-3">{o.billing?.first_name} {o.billing?.last_name}</td>
+                        <td className="p-3">
+                          <select value={o.status} onChange={(e) => handleUpdateOrderStatus(o.id, e.target.value)} className="border rounded p-1 text-xs font-bold">
+                            <option value="pending">Pending</option>
+                            <option value="processing">Processing</option>
+                            <option value="completed">Completed</option>
+                          </select>
+                        </td>
+                        <td className="p-3 font-bold text-red-600">€{parseFloat(o.total || 0).toFixed(2)}</td>
                       </tr>
-                    </thead>
-                    <tbody className="divide-y">
-                      {currentOrders.length === 0 ? (
-                        <tr><td colSpan="4" className="p-6 text-center text-gray-400">Geen bestellingen gevonden.</td></tr>
-                      ) : (
-                        currentOrders.map(o => (
-                          <tr key={o.id} className="hover:bg-gray-50">
-                            <td className="p-3 font-bold">#{o.number || o.id}</td>
-                            <td className="p-3">{o.billing?.first_name} {o.billing?.last_name}</td>
-                            <td className="p-3">
-                              <select 
-                                value={o.status} 
-                                onChange={(e) => handleUpdateOrderStatus(o.id, e.target.value)}
-                                className="border rounded p-1 text-xs font-bold bg-white"
-                              >
-                                <option value="pending">Pending</option>
-                                <option value="processing">Processing</option>
-                                <option value="on-hold">On Hold</option>
-                                <option value="completed">Completed</option>
-                                <option value="cancelled">Cancelled</option>
-                                <option value="refunded">Refunded</option>
-                                <option value="failed">Failed</option>
-                              </select>
-                            </td>
-                            <td className="p-3 font-bold text-red-600">€{parseFloat(o.total || 0).toFixed(2)}</td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-
-                  {totalPages > 1 && (
-                    <div className="flex justify-center space-x-1 pt-2">
-                      {[...Array(totalPages).keys()].map(num => (
-                        <button
-                          key={num}
-                          onClick={() => setCurrentPage(num + 1)}
-                          className={`px-3 py-1 text-xs font-bold border rounded ${currentPage === num + 1 ? 'bg-black text-white' : 'bg-white text-black hover:bg-gray-100'}`}
-                        >
-                          {num + 1}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
 
             {activeTab === 'inventory' && (
               <div className="bg-white rounded-lg shadow p-6">
                 <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-md font-bold">📦 Producten & Voorraad ({products.length})</h3>
-                  <button 
-                    onClick={handleManualSyncProducts}
-                    disabled={loading}
-                    className="bg-black text-white px-3 py-1.5 rounded text-xs font-bold hover:bg-gray-800 transition disabled:opacity-50"
-                  >
-                    {loading ? 'Bezig...' : '🔄 Handmatig Synchroniseren'}
-                  </button>
+                  <h3 className="text-md font-bold">📦 Producten ({products.length})</h3>
+                  <button onClick={handleManualSyncProducts} disabled={loading} className="bg-black text-white px-3 py-1.5 rounded text-xs font-bold">🔄 Sync</button>
                 </div>
-
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs divide-y">
-                    <thead>
-                      <tr className="bg-gray-50">
-                        <th className="p-3">ID</th>
-                        <th className="p-3">Naam</th>
-                        <th className="p-3">Prijs</th>
-                        <th className="p-3">Voorraad</th>
+                <table className="w-full text-left text-xs divide-y">
+                  <thead><tr className="bg-gray-50"><th className="p-3">ID</th><th className="p-3">Naam</th><th className="p-3">Prijs</th><th className="p-3">Voorraad</th></tr></thead>
+                  <tbody className="divide-y">
+                    {products.map(p => (
+                      <tr key={p.id} className="hover:bg-gray-50">
+                        <td className="p-3">#{p.id}</td>
+                        <td className="p-3 font-bold">{p.name}</td>
+                        <td className="p-3 text-red-600">€{parseFloat(p.price || 0).toFixed(2)}</td>
+                        <td className="p-3">{p.stock_quantity ?? 'N.v.t.'}</td>
                       </tr>
-                    </thead>
-                    <tbody className="divide-y">
-                      {products.map(product => {
-                        const productVariations = Array.isArray(product.variations_data) && product.variations_data.length > 0 
-                          ? product.variations_data 
-                          : (Array.isArray(product.variations) && typeof product.variations[0] === 'object' ? product.variations : []);
-
-                        return (
-                          <>
-                            <tr key={product.id} className="hover:bg-gray-50 font-semibold">
-                              <td className="p-3">#{product.id}</td>
-                              <td className="p-3">
-                                {product.name} 
-                                {product.type === 'variable' && (
-                                  <span className="text-[10px] bg-black text-white px-1.5 py-0.5 rounded ml-2 uppercase">Variabel</span>
-                                )}
-                              </td>
-                              <td className="p-3 text-red-600">
-                                {product.price ? `€${parseFloat(product.price).toFixed(2)}` : 'Vanaf prijs'}
-                              </td>
-                              <td className="p-3">
-                                {product.stock_quantity !== null && product.stock_quantity !== undefined 
-                                  ? <span className={`px-2 py-0.5 rounded text-white font-bold ${product.stock_quantity <= 0 ? 'bg-red-600' : 'bg-green-600'}`}>{product.stock_quantity}</span>
-                                  : 'N.v.t.'}
-                              </td>
-                            </tr>
-                            
-                            {product.type === 'variable' && productVariations.map(v => {
-                              const attrText = formatAttributes(v.attributes) || `Variatie #${v.id}`;
-
-                              return (
-                                <tr key={`var_${v.id}`} className="bg-gray-50 text-gray-600">
-                                  <td className="p-3 pl-6 font-mono text-[11px]">↳ #{v.id}</td>
-                                  <td className="p-3 italic">
-                                    &nbsp;&nbsp;└ {attrText}
-                                  </td>
-                                  <td className="p-3">€{parseFloat(v.price || product.price || 0).toFixed(2)}</td>
-                                  <td className="p-3">
-                                    {v.stock_quantity !== null && v.stock_quantity !== undefined 
-                                      ? <span className={`px-2 py-0.5 rounded text-white font-bold text-[10px] ${v.stock_quantity <= 0 ? 'bg-red-500' : 'bg-green-500'}`}>{v.stock_quantity}</span>
-                                      : 'N.v.t.'}
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </>
         )}
       </div>
 
+      {/* Modals voor bewerken */}
       {editingUser && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-          <form onSubmit={handleUpdateUser} className="bg-white rounded-lg p-6 max-w-sm w-full space-y-3 shadow-2xl">
-            <h3 className="text-md font-bold mb-2">Medewerker Bewerken: {editingUser.username}</h3>
-            
-            <div>
-              <label className="text-xs font-bold text-gray-600 block mb-1">Gebruikersnaam</label>
-              <input 
-                type="text" 
-                value={editingUser.username} 
-                onChange={(e) => setEditingUser({...editingUser, username: e.target.value})}
-                className="w-full p-2 border rounded text-xs"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="text-xs font-bold text-gray-600 block mb-1">Nieuw Wachtwoord (optioneel)</label>
-              <input 
-                type="password" 
-                placeholder="Nieuw wachtwoord"
-                value={editingUser.password || ''}
-                onChange={(e) => setEditingUser({...editingUser, password: e.target.value})}
-                className="w-full p-2 border rounded text-xs"
-              />
-            </div>
-
-            <div>
-              <label className="text-xs font-bold text-gray-600 block mb-1">Rol</label>
-              <select
-                value={editingUser.role}
-                onChange={(e) => setEditingUser({...editingUser, role: e.target.value})}
-                className="w-full p-2 border rounded text-xs"
-              >
-                <option value="cashier">Cashier</option>
-                <option value="admin">Admin</option>
-                <option value="super_admin">Super Admin</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="text-xs font-bold text-gray-600 block mb-1">Koppel Filiaal</label>
-              <select
-                value={editingUser.store_id !== null && editingUser.store_id !== undefined && editingUser.store_id !== 'null' ? String(editingUser.store_id) : ''}
-                onChange={(e) => setEditingUser({...editingUser, store_id: e.target.value})}
-                className="w-full p-2 border rounded text-xs"
-              >
-                <option value="">Geen Filiaal</option>
-                {stores.map(s => {
-                  const sId = String(s.id || s.store_id);
-                  return (
-                    <option key={sId} value={sId}>{s.store_name || s.name || `Filiaal #${sId}`}</option>
-                  );
-                })}
-              </select>
-            </div>
-
+          <form onSubmit={handleUpdateUser} className="bg-white rounded-lg p-6 max-w-sm w-full space-y-3">
+            <h3 className="text-md font-bold">Medewerker Bewerken</h3>
+            <input type="text" value={editingUser.username} onChange={(e) => setEditingUser({...editingUser, username: e.target.value})} className="w-full p-2 border rounded text-xs" required />
+            <select value={editingUser.role} onChange={(e) => setEditingUser({...editingUser, role: e.target.value})} className="w-full p-2 border rounded text-xs">
+              <option value="cashier">Cashier</option>
+              <option value="admin">Admin</option>
+              <option value="super_admin">Super Admin</option>
+            </select>
             <div className="flex space-x-2 pt-2">
               <button type="button" onClick={() => setEditingUser(null)} className="w-1/2 bg-gray-200 p-2 rounded text-xs font-bold">Annuleren</button>
               <button type="submit" className="w-1/2 bg-red-600 text-white p-2 rounded text-xs font-bold">Opslaan</button>
@@ -829,57 +542,10 @@ export default function AdminDashboard() {
 
       {editingStore && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-          <form onSubmit={handleUpdateStore} className="bg-white rounded-lg p-6 max-w-sm w-full space-y-3 shadow-2xl">
-            <h3 className="text-md font-bold mb-2">Filiaal Bewerken</h3>
-            <div>
-              <label className="text-xs font-bold text-gray-600 block mb-1">Naam Filiaal</label>
-              <input
-                type="text"
-                value={editingStore.store_name || editingStore.name || ''}
-                onChange={(e) => setEditingStore({...editingStore, store_name: e.target.value, name: e.target.value})}
-                className="w-full p-2 border rounded text-xs"
-                required
-              />
-            </div>
-            <div>
-              <label className="text-xs font-bold text-gray-600 block mb-1">Adres</label>
-              <input
-                type="text"
-                value={editingStore.address || ''}
-                onChange={(e) => setEditingStore({...editingStore, address: e.target.value})}
-                className="w-full p-2 border rounded text-xs"
-                required
-              />
-            </div>
-            <div>
-              <label className="text-xs font-bold text-gray-600 block mb-1">KvK Nummer</label>
-              <input
-                type="text"
-                value={editingStore.kvk || ''}
-                onChange={(e) => setEditingStore({...editingStore, kvk: e.target.value})}
-                className="w-full p-2 border rounded text-xs"
-                required
-              />
-            </div>
-            <div>
-              <label className="text-xs font-bold text-gray-600 block mb-1">BTW Nummer</label>
-              <input
-                type="text"
-                value={editingStore.btw || ''}
-                onChange={(e) => setEditingStore({...editingStore, btw: e.target.value})}
-                className="w-full p-2 border rounded text-xs"
-                required
-              />
-            </div>
-            <div>
-              <label className="text-xs font-bold text-gray-600 block mb-1">Local Pickup Plus ID</label>
-              <input
-                type="text"
-                value={editingStore.pickup_id || ''}
-                onChange={(e) => setEditingStore({...editingStore, pickup_id: e.target.value})}
-                className="w-full p-2 border rounded text-xs"
-              />
-            </div>
+          <form onSubmit={handleUpdateStore} className="bg-white rounded-lg p-6 max-w-sm w-full space-y-3">
+            <h3 className="text-md font-bold">Filiaal Bewerken</h3>
+            <input type="text" value={editingStore.store_name || editingStore.name || ''} onChange={(e) => setEditingStore({...editingStore, store_name: e.target.value})} className="w-full p-2 border rounded text-xs" required />
+            <input type="text" value={editingStore.address || ''} onChange={(e) => setEditingStore({...editingStore, address: e.target.value})} className="w-full p-2 border rounded text-xs" required />
             <div className="flex space-x-2 pt-2">
               <button type="button" onClick={() => setEditingStore(null)} className="w-1/2 bg-gray-200 p-2 rounded text-xs font-bold">Annuleren</button>
               <button type="submit" className="w-1/2 bg-red-600 text-white p-2 rounded text-xs font-bold">Opslaan</button>
@@ -890,19 +556,9 @@ export default function AdminDashboard() {
 
       {editingSumUp && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-          <form onSubmit={handleUpdateSumUp} className="bg-white rounded-lg p-6 max-w-sm w-full space-y-3 shadow-2xl">
-            <h3 className="text-md font-bold mb-2">SumUp Reader Koppelen: {editingSumUp.store_name || editingSumUp.name}</h3>
-            <div>
-              <label className="text-xs font-bold text-gray-600 block mb-1">Terminal ID / Pair Code</label>
-              <input
-                type="text"
-                placeholder="Voer SumUp Pair Code in"
-                value={editingSumUp.terminal_id || ''}
-                onChange={(e) => setEditingSumUp({...editingSumUp, terminal_id: e.target.value})}
-                className="w-full p-2 border rounded text-xs font-bold"
-              />
-              <p className="text-[10px] text-gray-400 mt-1">Laat dit leeg als je de reader wilt ontkoppelen.</p>
-            </div>
+          <form onSubmit={handleUpdateSumUp} className="bg-white rounded-lg p-6 max-w-sm w-full space-y-3">
+            <h3 className="text-md font-bold">SumUp Koppelen</h3>
+            <input type="text" placeholder="Terminal ID" value={editingSumUp.terminal_id || ''} onChange={(e) => setEditingSumUp({...editingSumUp, terminal_id: e.target.value})} className="w-full p-2 border rounded text-xs font-bold" />
             <div className="flex space-x-2 pt-2">
               <button type="button" onClick={() => setEditingSumUp(null)} className="w-1/2 bg-gray-200 p-2 rounded text-xs font-bold">Annuleren</button>
               <button type="submit" className="w-1/2 bg-red-600 text-white p-2 rounded text-xs font-bold">Opslaan</button>
@@ -910,7 +566,60 @@ export default function AdminDashboard() {
           </form>
         </div>
       )}
+    </div>
+  );
+}
+```[cite: 5]
 
+---
+
+### 5. `pages/pickup.js` (Afhaalbalie dashboard)
+```javascript
+import { useState, useEffect } from 'react';
+import axios from 'axios';
+
+export default function PickupDashboard() {
+  const [orders, setOrders] = useState([]);
+  const [selectedStore, setSelectedStore] = useState(null);
+
+  useEffect(() => {
+    const store = JSON.parse(localStorage.getItem('selectedStore') || '{}');
+    setSelectedStore(store);
+    fetchPickupOrders();
+  }, []);
+
+  const fetchPickupOrders = async () => {
+    const res = await axios.get('/api/woocommerce/pickup-orders');
+    setOrders(res.data.orders || []);
+  };
+
+  const handleMarkAsPickedUp = async (orderId) => {
+    await axios.post('/api/woocommerce/update-order-status', { orderId, status: 'completed' });
+    fetchPickupOrders();
+  };
+
+  const filteredOrders = orders.filter(o => {
+    if (!selectedStore?.pickup_id) return true;
+    return o.shipping_lines?.some(s => s.meta_data?.some(m => m.key === 'pickup_location_id' && m.value === selectedStore.pickup_id));
+  });
+
+  return (
+    <div className="p-6 bg-gray-100 min-h-screen">
+      <h1 className="text-xl font-bold mb-4">📦 Afhaalbalie: {selectedStore?.store_name || 'Alle'}</h1>
+      <table className="w-full bg-white rounded shadow text-xs">
+        <thead><tr className="bg-gray-50 text-left"><th className="p-3">Order</th><th className="p-3">Klant</th><th className="p-3 text-right">Actie</th></tr></thead>
+        <tbody>
+          {filteredOrders.map(o => (
+            <tr key={o.id} className="border-t">
+              <td className="p-3 font-bold">#{o.id}</td>
+              <td className="p-3">{o.billing?.first_name} {o.billing?.last_name}</td>
+              <td className="p-3 text-right">
+                <button onClick={() => handleMarkAsPickedUp(o.id)} className="bg-green-600 text-white px-3 py-1 rounded font-bold">✓ Opgehaald</button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

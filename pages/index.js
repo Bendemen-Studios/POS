@@ -5,20 +5,17 @@ import Link from 'next/link';
 export default function POSHome() {
   const router = useRouter();
 
-  // Auth & Sessie
   const [currentUser, setCurrentUser] = useState(null);
   const [selectedStore, setSelectedStore] = useState(null);
   const [allStores, setAllStores] = useState([]);
   const [activeTab, setActiveTab] = useState('pos');
-  const [isChecking, setIsChecking] = useState(true); // Voorkomt flikkeren bij laden
+  const [isChecking, setIsChecking] = useState(true);
 
-  // Producten, Cart & Categorieën
   const [products, setProducts] = useState([]);
   const [cart, setCart] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('ALL');
 
-  // Modal States
   const [selectedProductForVariations, setSelectedProductForVariations] = useState(null);
   const [openAmountProduct, setOpenAmountProduct] = useState(null);
   const [customPriceInput, setCustomPriceInput] = useState('');
@@ -26,39 +23,30 @@ export default function POSHome() {
   const [customItem, setCustomItem] = useState({ name: '', price: '' });
   const [showStoreModal, setShowStoreModal] = useState(false);
 
-  // Bon Keuze Modal State
   const [completedOrderForReceipt, setCompletedOrderForReceipt] = useState(null);
-
-  // Negatieve voorraad / waarschuwingspopup state
   const [stockWarningModal, setStockWarningModal] = useState({ show: false, product: null, variation: null, price: 0 });
 
-  // Klanten & Punten
   const [customers, setCustomers] = useState([]);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [customerSearch, setCustomerSearch] = useState('');
   const [pointsToRedeem, setPointsToRedeem] = useState(0);
   const [redeemedDiscount, setRedeemedDiscount] = useState(0);
 
-  // Kortingen
   const [discountType, setDiscountType] = useState('none');
   const [discountValue, setDiscountValue] = useState(0);
 
-  // Status & Sync
   const [loading, setLoading] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [checkoutStatus, setCheckoutStatus] = useState(null);
   const [pendingOfflineCount, setPendingOfflineCount] = useState(0);
 
-  // Betaling & Wisselgeld Modal State
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState('sumup');
   const [cashGiven, setCashGiven] = useState('');
 
-  // Pickup Orders State
   const [pickupOrders, setPickupOrders] = useState([]);
   const [loadingPickup, setLoadingPickup] = useState(false);
 
-  // HELPER: Format Attribute Text
   const formatAttributes = (attributes) => {
     if (!attributes || !Array.isArray(attributes) || attributes.length === 0) return '';
     return attributes
@@ -694,7 +682,16 @@ export default function POSHome() {
   );
 
   if (isChecking || !currentUser) {
-    return <div className="min-h-screen bg-black flex items-center justify-center text-white font-bold text-xs uppercase tracking-widest">Laden...</div>;
+    return (
+      <div className="min-h-screen bg-black flex flex-col items-center justify-center p-4">
+        <div className="text-center space-y-2">
+          <h1 className="text-white font-black text-xl tracking-wider">BDM POS</h1>
+          <div className="text-red-600 font-bold text-xs uppercase tracking-widest animate-pulse">
+            Sessie controleren...
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -847,9 +844,7 @@ export default function POSHome() {
         </div>
       ) : (
         <div className="flex-1 flex flex-col md:flex-row p-4 gap-4 overflow-hidden">
-          
           <div className="w-full md:w-3/5 flex flex-col bg-white rounded-lg shadow p-4">
-            
             <div className="flex space-x-2 mb-3">
               <input
                 type="text"
@@ -1094,12 +1089,12 @@ export default function POSHome() {
         </div>
       )}
 
+      {/* Modals en popups */}
       {openAmountProduct && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg shadow-xl max-w-sm w-full p-6">
             <h3 className="text-lg font-bold mb-2">Invoeren Open Bedrag</h3>
             <p className="text-xs text-gray-600 mb-4">{openAmountProduct.name}</p>
-            
             <div className="mb-4">
               <label className="text-xs font-bold text-gray-600 block mb-1">Prijs (€):</label>
               <input
@@ -1112,20 +1107,9 @@ export default function POSHome() {
                 autoFocus
               />
             </div>
-
             <div className="flex space-x-2">
-              <button
-                onClick={() => setOpenAmountProduct(null)}
-                className="w-1/2 bg-gray-200 text-black font-bold py-2 rounded text-xs"
-              >
-                Annuleren
-              </button>
-              <button
-                onClick={handleConfirmOpenAmount}
-                className="w-1/2 bg-red-600 text-white font-bold py-2 rounded text-xs"
-              >
-                Toevoegen
-              </button>
+              <button onClick={() => setOpenAmountProduct(null)} className="w-1/2 bg-gray-200 text-black font-bold py-2 rounded text-xs">Annuleren</button>
+              <button onClick={handleConfirmOpenAmount} className="w-1/2 bg-red-600 text-white font-bold py-2 rounded text-xs">Toevoegen</button>
             </div>
           </div>
         </div>
@@ -1172,37 +1156,25 @@ export default function POSHome() {
           <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
             <h3 className="text-lg font-bold mb-1">Kies Variatie</h3>
             <p className="text-xs text-gray-600 mb-4">{selectedProductForVariations.name}</p>
-
             <div className="space-y-2 max-h-60 overflow-y-auto mb-4">
-              {(selectedProductForVariations.variations_data || []).length > 0 ? (
-                selectedProductForVariations.variations_data.map((v) => {
-                  const attrText = formatAttributes(v.attributes) || `Variatie #${v.id}`;
-
-                  return (
-                    <button
-                      key={v.id}
-                      onClick={() => handleSelectVariation(v)}
-                      className="w-full text-left p-3 border rounded hover:border-black flex justify-between items-center bg-gray-50 font-semibold text-xs"
-                    >
-                      <div>
-                        <div>{attrText}</div>
-                        <div className="text-[10px] text-gray-500">Voorraad: {v.stock_quantity ?? 'N.v.t.'}</div>
-                      </div>
-                      <span className="text-red-600 font-bold">€{parseFloat(v.price || selectedProductForVariations.price || 0).toFixed(2)}</span>
-                    </button>
-                  );
-                })
-              ) : (
-                <p className="text-xs text-gray-500 py-2">Geen gedetailleerde variaties geladen.</p>
-              )}
+              {(selectedProductForVariations.variations_data || []).map((v) => {
+                const attrText = formatAttributes(v.attributes) || `Variatie #${v.id}`;
+                return (
+                  <button
+                    key={v.id}
+                    onClick={() => handleSelectVariation(v)}
+                    className="w-full text-left p-3 border rounded hover:border-black flex justify-between items-center bg-gray-50 font-semibold text-xs"
+                  >
+                    <div>
+                      <div>{attrText}</div>
+                      <div className="text-[10px] text-gray-500">Voorraad: {v.stock_quantity ?? 'N.v.t.'}</div>
+                    </div>
+                    <span className="text-red-600 font-bold">€{parseFloat(v.price || selectedProductForVariations.price || 0).toFixed(2)}</span>
+                  </button>
+                );
+              })}
             </div>
-
-            <button
-              onClick={() => setSelectedProductForVariations(null)}
-              className="w-full bg-gray-200 text-black font-bold py-2 rounded text-xs"
-            >
-              Sluiten
-            </button>
+            <button onClick={() => setSelectedProductForVariations(null)} className="w-full bg-gray-200 text-black font-bold py-2 rounded text-xs">Sluiten</button>
           </div>
         </div>
       )}
@@ -1212,25 +1184,10 @@ export default function POSHome() {
           <div className="bg-white rounded-lg shadow-2xl max-w-sm w-full p-6 space-y-4 text-center">
             <div className="text-red-600 text-4xl">⚠️</div>
             <h3 className="text-lg font-bold">Voorraad Waarschuwing</h3>
-            <p className="text-xs text-gray-600">
-              Dit product ({stockWarningModal.variation ? `${stockWarningModal.product.name} - ${formatAttributes(stockWarningModal.variation.attributes)}` : stockWarningModal.product.name}) heeft een voorraad van <strong>{stockWarningModal.variation ? stockWarningModal.variation.stock_quantity : stockWarningModal.product.stock_quantity}</strong>.
-            </p>
-            <p className="text-xs font-bold text-gray-800 bg-yellow-50 p-2 rounded border border-yellow-200">
-              Weet je zeker dat je dit product hebt en wilt afrekenen?
-            </p>
+            <p className="text-xs text-gray-600">Dit product heeft een lage/negatieve voorraad.</p>
             <div className="flex space-x-2 pt-2">
-              <button
-                onClick={() => setStockWarningModal({ show: false, product: null, variation: null, price: 0 })}
-                className="w-1/2 bg-gray-200 text-black font-bold py-2 rounded text-xs"
-              >
-                Nee, Annuleren
-              </button>
-              <button
-                onClick={handleConfirmStockWarning}
-                className="w-1/2 bg-red-600 text-white font-bold py-2 rounded text-xs"
-              >
-                Ja, Toevoegen
-              </button>
+              <button onClick={() => setStockWarningModal({ show: false, product: null, variation: null, price: 0 })} className="w-1/2 bg-gray-200 text-black font-bold py-2 rounded text-xs">Nee</button>
+              <button onClick={handleConfirmStockWarning} className="w-1/2 bg-red-600 text-white font-bold py-2 rounded text-xs">Ja, Toevoegen</button>
             </div>
           </div>
         </div>
@@ -1240,37 +1197,18 @@ export default function POSHome() {
         <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg p-6 max-w-md w-full space-y-4 shadow-2xl">
             <h3 className="text-lg font-bold">📍 Koppel Kassasysteem aan Filiaal</h3>
-            <p className="text-xs text-gray-600">
-              Selecteer de winkel/locatie waarop deze kassa actief is voor voorraad en afhaalbestellingen.
-            </p>
             <div className="space-y-2 max-h-60 overflow-y-auto">
-              {allStores.length === 0 ? (
-                <div className="p-4 text-center text-xs text-gray-500">Geen locaties gevonden in database.</div>
-              ) : (
-                allStores.map(store => (
-                  <button
-                    key={store.id || store.store_id}
-                    onClick={() => handleSelectStore(store)}
-                    className="w-full p-3 border rounded text-left hover:bg-gray-100 transition flex justify-between items-center"
-                  >
-                    <div>
-                      <div className="font-bold text-sm">{store.store_name || store.name}</div>
-                      <div className="text-xs text-gray-500">{store.address || 'Geen adres ingevoerd'}</div>
-                    </div>
-                    {selectedStore?.id === (store.id || store.store_id) && (
-                      <span className="text-xs bg-red-600 text-white px-2 py-0.5 rounded font-bold">Actief</span>
-                    )}
-                  </button>
-                ))
-              )}
-            </div>
-            <div className="pt-2">
-              <button
-                onClick={() => setShowStoreModal(false)}
-                className="w-full bg-gray-200 p-2 rounded text-xs font-bold"
-              >
-                Sluiten
-              </button>
+              {allStores.map(store => (
+                <button
+                  key={store.id || store.store_id}
+                  onClick={() => handleSelectStore(store)}
+                  className="w-full p-3 border rounded text-left hover:bg-gray-100 transition flex justify-between items-center"
+                >
+                  <div>
+                    <div className="font-bold text-sm">{store.store_name || store.name}</div>
+                  </div>
+                </button>
+              ))}
             </div>
           </div>
         </div>
@@ -1280,81 +1218,23 @@ export default function POSHome() {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
             <h3 className="text-lg font-bold mb-4 border-b pb-2">Kies Betaalmethode</h3>
-
             <div className="grid grid-cols-3 gap-2 mb-4">
-              <button
-                onClick={() => setSelectedPaymentMethod('sumup')}
-                className={`p-3 text-xs font-bold border rounded transition ${selectedPaymentMethod === 'sumup' ? 'bg-black text-white' : 'bg-gray-100 text-black'}`}
-              >
-                💳 SumUp
-              </button>
-              <button
-                onClick={() => setSelectedPaymentMethod('manual_pin')}
-                className={`p-3 text-xs font-bold border rounded transition ${selectedPaymentMethod === 'manual_pin' ? 'bg-black text-white' : 'bg-gray-100 text-black'}`}
-              >
-                📌 Handmatige Pin
-              </button>
-              <button
-                onClick={() => setSelectedPaymentMethod('cash')}
-                className={`p-3 text-xs font-bold border rounded transition ${selectedPaymentMethod === 'cash' ? 'bg-black text-white' : 'bg-gray-100 text-black'}`}
-              >
-                💵 Contant
-              </button>
+              <button onClick={() => setSelectedPaymentMethod('sumup')} className={`p-3 text-xs font-bold border rounded ${selectedPaymentMethod === 'sumup' ? 'bg-black text-white' : 'bg-gray-100'}`}>💳 SumUp</button>
+              <button onClick={() => setSelectedPaymentMethod('manual_pin')} className={`p-3 text-xs font-bold border rounded ${selectedPaymentMethod === 'manual_pin' ? 'bg-black text-white' : 'bg-gray-100'}`}>📌 Pin</button>
+              <button onClick={() => setSelectedPaymentMethod('cash')} className={`p-3 text-xs font-bold border rounded ${selectedPaymentMethod === 'cash' ? 'bg-black text-white' : 'bg-gray-100'}`}>💵 Contant</button>
             </div>
-
             {selectedPaymentMethod === 'cash' && (
               <div className="bg-gray-50 p-4 rounded border mb-4 space-y-3">
-                <div className="flex justify-between items-center text-sm font-bold">
-                  <span>Te Betalen:</span>
-                  <span className="text-red-600 font-extrabold text-base">€{finalTotal.toFixed(2)}</span>
-                </div>
-
-                <div>
-                  <label className="text-xs font-bold text-gray-600 block mb-1">Ontvangen Bedrag (€):</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={cashGiven}
-                    onChange={(e) => setCashGiven(e.target.value)}
-                    className="w-full p-2 border border-black rounded text-lg font-bold"
-                  />
-                </div>
-
-                <div className="grid grid-cols-4 gap-1">
-                  {[finalTotal, 5, 10, 20, 50, 100].map((amt, idx) => (
-                    amt >= finalTotal && (
-                      <button
-                        key={idx}
-                        onClick={() => setCashGiven(amt.toFixed(2))}
-                        className="bg-white border hover:bg-gray-100 text-xs font-bold py-1.5 rounded"
-                      >
-                        €{amt.toFixed(2)}
-                      </button>
-                    )
-                  ))}
-                </div>
-
-                <div className="bg-black text-white p-3 rounded flex justify-between items-center mt-2">
-                  <span className="text-xs font-bold uppercase">Teruggeven Wisselgeld:</span>
-                  <span className="text-xl font-black text-green-400">€{changeDue.toFixed(2)}</span>
+                <input type="number" step="0.01" value={cashGiven} onChange={(e) => setCashGiven(e.target.value)} className="w-full p-2 border rounded font-bold text-lg" placeholder="Ontvangen bedrag" />
+                <div className="bg-black text-white p-2 rounded flex justify-between">
+                  <span>Wisselgeld:</span>
+                  <span className="text-green-400 font-bold">€{changeDue.toFixed(2)}</span>
                 </div>
               </div>
             )}
-
             <div className="flex space-x-2">
-              <button
-                onClick={() => setShowPaymentModal(false)}
-                className="w-1/3 bg-gray-200 hover:bg-gray-300 text-black font-bold py-3 rounded text-xs uppercase"
-              >
-                Annuleren
-              </button>
-              <button
-                onClick={handleProcessPayment}
-                disabled={loading}
-                className="w-2/3 bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded text-xs uppercase transition tracking-wider"
-              >
-                {loading ? 'Verwerken...' : 'Betaling Voltooien'}
-              </button>
+              <button onClick={() => setShowPaymentModal(false)} className="w-1/3 bg-gray-200 py-3 rounded text-xs font-bold">Annuleren</button>
+              <button onClick={handleProcessPayment} disabled={loading} className="w-2/3 bg-red-600 text-white py-3 rounded text-xs font-bold">Voltooien</button>
             </div>
           </div>
         </div>
@@ -1363,33 +1243,14 @@ export default function POSHome() {
       {completedOrderForReceipt && (
         <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg shadow-2xl max-w-sm w-full p-6 text-center space-y-4">
-            <div className="text-3xl">🧾</div>
             <h3 className="text-lg font-bold">Kassabon Afdrukken?</h3>
-            <p className="text-xs text-gray-600">
-              Bestelling succesvol verwerkt! Wilt de klant een papieren kassabon mee?
-            </p>
-
             <div className="flex space-x-2 pt-2">
-              <button
-                onClick={() => setCompletedOrderForReceipt(null)}
-                className="w-1/2 bg-gray-200 hover:bg-gray-300 text-black font-bold py-3 rounded text-xs uppercase"
-              >
-                Nee, Sluiten
-              </button>
-              <button
-                onClick={() => {
-                  triggerPrintReceipt(completedOrderForReceipt);
-                  setCompletedOrderForReceipt(null);
-                }}
-                className="w-1/2 bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded text-xs uppercase transition shadow"
-              >
-                🖨️ Ja, Print Bon
-              </button>
+              <button onClick={() => setCompletedOrderForReceipt(null)} className="w-1/2 bg-gray-200 py-3 rounded text-xs font-bold">Sluiten</button>
+              <button onClick={() => { triggerPrintReceipt(completedOrderForReceipt); setCompletedOrderForReceipt(null); }} className="w-1/2 bg-red-600 text-white py-3 rounded text-xs font-bold">🖨️ Print</button>
             </div>
           </div>
         </div>
       )}
-
     </div>
   );
-}
+}}

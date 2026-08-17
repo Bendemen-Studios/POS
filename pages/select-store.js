@@ -76,8 +76,6 @@ export default function SelectStore() {
   return (
     <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
       <div className="bg-white rounded-lg shadow-xl p-8 max-w-md w-full border border-gray-200">
-        
-        {/* HEADER */}
         <div className="text-center mb-8">
           <h1 className="text-2xl font-black text-black tracking-wider uppercase">Kies je Vestiging</h1>
           <p className="text-xs text-gray-500 font-semibold mt-1">
@@ -85,10 +83,9 @@ export default function SelectStore() {
           </p>
         </div>
 
-        {/* LOADING & ERROR STATES */}
         {loading && (
-          <div className="text-center py-8 text-xs font-bold text-gray-500">
-            Filialen ophalen...
+          <div className="text-center py-8 space-y-2">
+            <div className="text-red-600 font-black text-xs tracking-widest uppercase animate-pulse">Filialen ophalen...</div>
           </div>
         )}
 
@@ -98,7 +95,6 @@ export default function SelectStore() {
           </div>
         )}
 
-        {/* WINKEL SELECTIE LIJST */}
         {!loading && stores.length === 0 && !error && (
           <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 p-4 rounded text-center text-xs font-bold">
             Geen actieve filialen gekoppeld aan jouw account.
@@ -132,7 +128,6 @@ export default function SelectStore() {
           </div>
         )}
 
-        {/* UITLOGGEN KNOP */}
         <button
           onClick={handleLogout}
           type="button"
