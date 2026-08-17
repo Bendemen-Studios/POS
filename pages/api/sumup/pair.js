@@ -16,9 +16,10 @@ export default async function handler(req, res) {
   const apiKey = process.env.SUMUP_API_KEY;
 
   try {
-    // 1. Token ophalen om te koppelen
-    let accessToken = apiKey;
-    if (!accessToken && clientId && clientSecret) {
+    let accessToken = null;
+
+    // 1. Probeer eerst OAuth client_credentials als ze bestaan
+    if (clientId && clientSecret) {
       const tokenParams = new URLSearchParams();
       tokenParams.append('grant_type', 'client_credentials');
       tokenParams.append('client_id', clientId);
@@ -35,33 +36,39 @@ export default async function handler(req, res) {
       }
     }
 
-    if (!accessToken) {
-      return res.status(500).json({ success: false, error: 'Geen geldige SumUp API-sleutel of credentials gevonden.' });
+    // 2. Als OAuth geen token geeft, probeer de SUMUP_API_KEY rechtstreeks te gebruiken
+    if (!accessToken && apiKey) {
+      accessToken = apiKey;
     }
 
-    // 2. Koppelingsverzoek sturen naar SumUp
+    if (!accessToken) {
+      return res.status(500).json({ success: false, error: 'Geen geldige SumUp Client ID/Secret of API Key geconfigureerd in .env.' });
+    }
+
+    // 3. Verstuur het koppelverzoek naar SumUp
     const pairRes = await fetch('https://api.sumup.com/v0.1/terminals/pair', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ pairing_code: pairingCode })
+      body: JSON.stringify({ pairing_code: pairingCode.trim() })
     });
 
     const pairData = await pairRes.json();
 
     if (!pairRes.ok) {
-      throw new Error(pairData.message || pairData.error || 'SumUp weigert de koppelcode (mogelijk verlopen of ongeldig).');
+      console.error('[SUMUP PAIR WEIGERING]:', pairData);
+      throw new Error(pairData.message || pairData.error || pairData.detail || 'SumUp weigert de koppelcode.');
     }
 
     const terminalId = pairData.id || pairData.terminal_id;
 
     if (!terminalId) {
-      throw new Error('Geen Terminal ID ontvangen van SumUp.');
+      throw new Error('Geen Terminal ID ontvangen van SumUp in de response.');
     }
 
-    // 3. Sla de Terminal ID op en zet bij pair_code de tekst "Verbonden"
+    // 4. Opslaan in database en pair_code op "Verbonden" zetten
     await db.query(
       'UPDATE stores SET terminal_id = ?, pair_code = "Verbonden" WHERE id = ? OR store_id = ?',
       [terminalId, storeId, storeId]
