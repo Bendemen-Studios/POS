@@ -617,7 +617,7 @@ export default function POSHome() {
   };
 
   const processSumUpPayment = async (amount, storeId) => {
-    const res = await fetch('/api/sumup/checkout', {
+    const res = await fetch('/api/sumup/terminal', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ totalAmount: amount, storeId })
