@@ -36,6 +36,17 @@ export default function AdminDashboard() {
     }
   }, [products]);
 
+  const formatAttributes = (attributes) => {
+    if (!attributes || !Array.isArray(attributes) || attributes.length === 0) return '';
+    return attributes
+      .map((a) => {
+        const key = a.name || a.slug || 'Optie';
+        const val = a.option || 'Standaard';
+        return `${key}: ${val}`;
+      })
+      .join(' | ');
+  };
+
   useEffect(() => {
     const userStr = localStorage.getItem('pos_user');
     if (!userStr) {
@@ -286,7 +297,6 @@ export default function AdminDashboard() {
     }
   };
 
-  // SumUp Pair API aanroep vanuit Admin
   const handlePairSumUp = async (e) => {
     e.preventDefault();
     try {
@@ -350,7 +360,7 @@ export default function AdminDashboard() {
         <button onClick={() => setActiveTab('stores')} className={`px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'stores' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'}`}>📍 Filialen</button>
         <button onClick={() => setActiveTab('sumup')} className={`px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'sumup' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'}`}>💳 SumUp</button>
         <button onClick={() => setActiveTab('orders')} className={`px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'orders' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'}`}>📦 Bestellingen</button>
-        <button onClick={() => setActiveTab('inventory')} className={`px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'inventory' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'}`}>📦 Voorraad</button>
+        <button onClick={() => setActiveTab('inventory')} className={`px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'inventory' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'}`}>📦 Voorraad & Variaties</button>
       </div>
 
       <div className="flex-1 p-6 max-w-7xl mx-auto w-full">
@@ -502,22 +512,70 @@ export default function AdminDashboard() {
             {activeTab === 'inventory' && (
               <div className="bg-white rounded-lg shadow p-6">
                 <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-md font-bold">📦 Producten ({products.length})</h3>
+                  <h3 className="text-md font-bold">📦 Producten & Variaties Voorraad ({products.length})</h3>
                   <button onClick={handleManualSyncProducts} disabled={loading} className="bg-black text-white px-3 py-1.5 rounded text-xs font-bold">🔄 Sync</button>
                 </div>
-                <table className="w-full text-left text-xs divide-y">
-                  <thead><tr className="bg-gray-50"><th className="p-3">ID</th><th className="p-3">Naam</th><th className="p-3">Prijs</th><th className="p-3">Voorraad</th></tr></thead>
-                  <tbody className="divide-y">
-                    {products.map(p => (
-                      <tr key={p.id} className="hover:bg-gray-50">
-                        <td className="p-3">#{p.id}</td>
-                        <td className="p-3 font-bold">{p.name}</td>
-                        <td className="p-3 text-red-600">€{parseFloat(p.price || 0).toFixed(2)}</td>
-                        <td className="p-3">{p.stock_quantity ?? 'N.v.t.'}</td>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs divide-y">
+                    <thead>
+                      <tr className="bg-gray-50">
+                        <th className="p-3">ID</th>
+                        <th className="p-3">Naam</th>
+                        <th className="p-3">Prijs</th>
+                        <th className="p-3">Voorraad</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="divide-y">
+                      {products.map(product => {
+                        const productVariations = Array.isArray(product.variations_data) && product.variations_data.length > 0 
+                          ? product.variations_data 
+                          : (Array.isArray(product.variations) && typeof product.variations[0] === 'object' ? product.variations : []);
+
+                        return (
+                          <React.Fragment key={product.id}>
+                            <tr className="hover:bg-gray-50 font-semibold">
+                              <td className="p-3">#{product.id}</td>
+                              <td className="p-3">
+                                {product.name} 
+                                {product.type === 'variable' && (
+                                  <span className="text-[10px] bg-black text-white px-1.5 py-0.5 rounded ml-2 uppercase">Variabel</span>
+                                )}
+                              </td>
+                              <td className="p-3 text-red-600">
+                                {product.price ? `€${parseFloat(product.price).toFixed(2)}` : 'Vanaf prijs'}
+                              </td>
+                              <td className="p-3">
+                                {product.stock_quantity !== null && product.stock_quantity !== undefined 
+                                  ? <span className={`px-2 py-0.5 rounded text-white font-bold ${product.stock_quantity <= 0 ? 'bg-red-600' : 'bg-green-600'}`}>{product.stock_quantity}</span>
+                                  : 'N.v.t.'}
+                              </td>
+                            </tr>
+                            
+                            {product.type === 'variable' && productVariations.map(v => {
+                              const attrText = formatAttributes(v.attributes) || `Variatie #${v.id}`;
+
+                              return (
+                                <tr key={`var_${v.id}`} className="bg-gray-50 text-gray-600">
+                                  <td className="p-3 pl-6 font-mono text-[11px]">↳ #{v.id}</td>
+                                  <td className="p-3 italic">
+                                    &nbsp;&nbsp;└ {attrText}
+                                  </td>
+                                  <td className="p-3">€{parseFloat(v.price || product.price || 0).toFixed(2)}</td>
+                                  <td className="p-3">
+                                    {v.stock_quantity !== null && v.stock_quantity !== undefined 
+                                      ? <span className={`px-2 py-0.5 rounded text-white font-bold text-[10px] ${v.stock_quantity <= 0 ? 'bg-red-500' : 'bg-green-500'}`}>{v.stock_quantity}</span>
+                                      : 'N.v.t.'}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </React.Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
           </>
