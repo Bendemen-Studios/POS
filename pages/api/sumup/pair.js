@@ -17,14 +17,15 @@ export default async function handler(req, res) {
     const merchantCode = process.env.SUMUP_MERCHANT_CODE;
 
     let readerData = null;
-    let readerId = pairingCode.trim();
+    let realTerminalId = null;
+    const cleanPairingCode = pairingCode.trim();
 
-    // Als de SumUp sleutels in de .env staan, koppelen we direct via de SumUp Cloud API[cite: 6]
+    // Als de SumUp sleutels in de .env staan, koppelen we direct via de SumUp Cloud API
     if (sumupApiKey && merchantCode) {
       const response = await axios.post(
         `https://api.sumup.com/v0.1/merchants/${merchantCode}/readers`,
         {
-          pairing_code: pairingCode.trim(),
+          pairing_code: cleanPairingCode,
           name: readerName || `Kassa Store ${storeId || 1}`
         },
         {
@@ -35,23 +36,25 @@ export default async function handler(req, res) {
         }
       );
       readerData = response.data;
-      if (readerData && readerData.id) {
-        readerId = readerData.id;
+      
+      // Haal de echte unieke reader/terminal ID op uit de response
+      if (readerData && (readerData.id || readerData.device_id)) {
+        realTerminalId = readerData.id || readerData.device_id;
       }
     }
 
-    // Sla de terminal_id en pair_code direct op in de database bij het juiste filiaal
+    // Sla de echte terminal_id en de pair_code apart op in de database bij het juiste filiaal
     if (storeId) {
       await db.query(
         'UPDATE stores SET terminal_id = ?, pair_code = ? WHERE id = ? OR store_id = ?',
-        [readerId, pairingCode.trim(), storeId, storeId]
+        [realTerminalId, cleanPairingCode, storeId, storeId]
       );
     }
 
     return res.status(200).json({ 
       success: true, 
       message: 'SumUp terminal succesvol gekoppeld en opgeslagen!',
-      reader: readerData || { id: readerId, pairingCode: pairingCode.trim(), name: readerName }
+      reader: readerData || { id: realTerminalId, pairingCode: cleanPairingCode, name: readerName }
     });
 
   } catch (error) {
