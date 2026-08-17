@@ -298,28 +298,28 @@ export default function POSHome() {
     }
   };
 
-  // Haal admins/medewerkers op en voeg ze toe als klantenoptie
+  // Haal alle WP / admin / systeem gebruikers op en voeg ze toe als klantopties
   const fetchUsersAsCustomers = async () => {
     try {
       const res = await fetch('/api/admin/users');
       const data = await res.json();
       if (data.success && data.users) {
         const staffAsCustomers = data.users.map(u => ({
-          id: `staff_${u.id}`,
-          first_name: u.username,
-          last_name: '(Medewerker / Admin)',
+          id: `user_${u.id}`,
+          first_name: u.username || '',
+          last_name: u.role ? `(${u.role})` : '(Gebruiker)',
           email: u.email || `${u.username}@bendemen.local`
         }));
         
         setCustomers(prev => {
-          const existingIds = new Set(prev.map(c => c.id));
-          const merged = [...prev, ...staffAsCustomers.filter(s => !existingIds.has(s.id))];
+          const existingIds = new Set(prev.map(c => String(c.id)));
+          const merged = [...prev, ...staffAsCustomers.filter(s => !existingIds.has(String(s.id)))];
           localStorage.setItem('pos_cached_customers', JSON.stringify(merged));
           return merged;
         });
       }
     } catch (err) {
-      console.error('Fout bij ophalen medewerkers:', err);
+      console.error('Fout bij ophalen gebruikers:', err);
     }
   };
 
@@ -1057,13 +1057,15 @@ export default function POSHome() {
             <div>
               <h2 className="text-base sm:text-lg font-bold mb-3 border-b pb-2">Huidige Bestelling</h2>
 
-              {/* Gekoppelde Klant (Met Naam en E-mail weergave) */}
+              {/* Gekoppelde Klant */}
               <div className="mb-3 bg-gray-50 p-2 rounded border">
                 <label className="text-xs font-bold text-gray-600 block mb-1">Gekoppelde Klant:</label>
                 {selectedCustomer ? (
                   <div className="flex justify-between items-center text-sm">
                     <div>
-                      <span className="font-semibold text-black block">{selectedCustomer.first_name} {selectedCustomer.last_name}</span>
+                      <span className="font-semibold text-black block">
+                        {selectedCustomer.first_name} {selectedCustomer.last_name || ''}
+                      </span>
                       <span className="text-[11px] text-gray-500 block">{selectedCustomer.email}</span>
                     </div>
                     <button onClick={() => { setSelectedCustomer(null); setPointsToRedeem(0); setRedeemedDiscount(0); }} className="text-red-500 text-xs underline">Ontkoppel</button>
@@ -1085,7 +1087,7 @@ export default function POSHome() {
                             onClick={() => { setSelectedCustomer(c); setCustomerSearch(''); }}
                             className="p-1.5 text-xs hover:bg-gray-100 cursor-pointer border-b last:border-b-0"
                           >
-                            <div className="font-bold">{c.first_name} {c.last_name}</div>
+                            <div className="font-bold">{c.first_name} {c.last_name || ''}</div>
                             <div className="text-[10px] text-gray-500">{c.email}</div>
                           </div>
                         ))}
@@ -1179,7 +1181,7 @@ export default function POSHome() {
 
               {selectedCustomer && (
                 <div className="text-[11px] text-green-600 mb-2 font-medium">
-                  ✨ Deze bestelling levert {Math.floor(finalTotal)} punten op voor {selectedCustomer.first_name}.
+                  ✨ Deze bestelling levert {Math.floor(finalTotal)} punten op voor {selectedCustomer.first_name || selectedCustomer.username}.
                 </div>
               )}
 
