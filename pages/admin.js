@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
+import React from 'react';
 
 export default function AdminDashboard() {
   const router = useRouter();
@@ -325,7 +326,6 @@ export default function AdminDashboard() {
   const indexOfLastOrder = currentPage * ordersPerPage;
   const indexOfFirstOrder = indexOfLastOrder - ordersPerPage;
   const currentOrders = orders.slice(indexOfFirstOrder, indexOfLastOrder);
-  const totalPages = Math.ceil(orders.length / ordersPerPage);
 
   if (!currentUser) {
     return (
@@ -342,59 +342,63 @@ export default function AdminDashboard() {
 
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col">
-      <header className="bg-black text-white p-4 flex justify-between items-center shadow-md">
+      {/* Header */}
+      <header className="bg-black text-white p-4 flex flex-col sm:flex-row justify-between items-center gap-3 shadow-md">
         <div className="flex items-center space-x-3">
-          <span className="font-bold text-xl tracking-wider">BDM POS // Admin Dashboard</span>
+          <span className="font-bold text-lg sm:text-xl tracking-wider text-center sm:text-left">BDM POS // Admin Dashboard</span>
         </div>
         <div className="flex items-center space-x-2">
           <Link href="/">
-            <button className="bg-gray-800 hover:bg-gray-700 text-white px-3 py-1.5 rounded text-xs font-semibold transition">
+            <button className="bg-gray-800 hover:bg-gray-700 text-white px-3 py-2 rounded text-xs font-semibold transition w-full sm:w-auto">
               🛒 Terug naar Kassa
             </button>
           </Link>
         </div>
       </header>
 
-      <div className="bg-white border-b px-6 py-2 flex space-x-4 shadow-sm overflow-x-auto">
-        <button onClick={() => setActiveTab('users')} className={`px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'users' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'}`}>👥 Medewerkers</button>
-        <button onClick={() => setActiveTab('stores')} className={`px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'stores' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'}`}>📍 Filialen</button>
-        <button onClick={() => setActiveTab('sumup')} className={`px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'sumup' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'}`}>💳 SumUp</button>
-        <button onClick={() => setActiveTab('orders')} className={`px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'orders' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'}`}>📦 Bestellingen</button>
-        <button onClick={() => setActiveTab('inventory')} className={`px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'inventory' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'}`}>📦 Voorraad & Variaties</button>
+      {/* Tabs / Navigatie (Horizontaal scrollbaar op mobiel/tablet) */}
+      <div className="bg-white border-b px-4 sm:px-6 py-2 flex space-x-2 sm:space-x-4 shadow-sm overflow-x-auto no-scrollbar">
+        <button onClick={() => setActiveTab('users')} className={`px-3 sm:px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'users' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'}`}>👥 Medewerkers</button>
+        <button onClick={() => setActiveTab('stores')} className={`px-3 sm:px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'stores' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'}`}>📍 Filialen</button>
+        <button onClick={() => setActiveTab('sumup')} className={`px-3 sm:px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'sumup' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'}`}>💳 SumUp</button>
+        <button onClick={() => setActiveTab('orders')} className={`px-3 sm:px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'orders' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'}`}>📦 Bestellingen</button>
+        <button onClick={() => setActiveTab('inventory')} className={`px-3 sm:px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'inventory' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'}`}>📦 Voorraad & Variaties</button>
       </div>
 
-      <div className="flex-1 p-6 max-w-7xl mx-auto w-full">
+      {/* Main Content Container */}
+      <div className="flex-1 p-3 sm:p-6 max-w-7xl mx-auto w-full">
         {loading && activeTab !== 'inventory' ? (
-          <div className="bg-white rounded-lg shadow p-12 text-center space-y-2">
-            <div className="text-red-600 font-black text-lg tracking-wider animate-pulse">ADMIN // GEGEVENS LADEN</div>
+          <div className="bg-white rounded-lg shadow p-8 sm:p-12 text-center space-y-2">
+            <div className="text-red-600 font-black text-base sm:text-lg tracking-wider animate-pulse">ADMIN // GEGEVENS LADEN</div>
             <p className="text-xs text-gray-400 uppercase font-semibold">Even geduld, gegevens worden opgehaald...</p>
           </div>
         ) : (
           <>
+            {/* Medewerkers Tab */}
             {activeTab === 'users' && (
               <div className="space-y-6">
-                <div className="bg-white rounded-lg shadow p-6">
-                  <h3 className="text-md font-bold mb-4">Nieuwe Medewerker</h3>
-                  <form onSubmit={handleCreateUser} className="grid grid-cols-1 md:grid-cols-5 gap-3">
-                    <input type="text" placeholder="Gebruikersnaam" value={newUser.username} onChange={(e) => setNewUser({...newUser, username: e.target.value})} className="p-2 border rounded text-xs" required />
-                    <input type="password" placeholder="Wachtwoord" value={newUser.password} onChange={(e) => setNewUser({...newUser, password: e.target.value})} className="p-2 border rounded text-xs" required />
-                    <select value={newUser.role} onChange={(e) => setNewUser({...newUser, role: e.target.value})} className="p-2 border rounded text-xs">
+                <div className="bg-white rounded-lg shadow p-4 sm:p-6">
+                  <h3 className="text-sm sm:text-md font-bold mb-4">Nieuwe Medewerker</h3>
+                  <form onSubmit={handleCreateUser} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                    <input type="text" placeholder="Gebruikersnaam" value={newUser.username} onChange={(e) => setNewUser({...newUser, username: e.target.value})} className="p-2.5 sm:p-2 border rounded text-xs" required />
+                    <input type="password" placeholder="Wachtwoord" value={newUser.password} onChange={(e) => setNewUser({...newUser, password: e.target.value})} className="p-2.5 sm:p-2 border rounded text-xs" required />
+                    <select value={newUser.role} onChange={(e) => setNewUser({...newUser, role: e.target.value})} className="p-2.5 sm:p-2 border rounded text-xs">
                       <option value="cashier">Cashier</option>
                       <option value="admin">Admin</option>
                       <option value="super_admin">Super Admin</option>
                     </select>
-                    <select value={newUser.store_id || ''} onChange={(e) => setNewUser({...newUser, store_id: e.target.value})} className="p-2 border rounded text-xs">
+                    <select value={newUser.store_id || ''} onChange={(e) => setNewUser({...newUser, store_id: e.target.value})} className="p-2.5 sm:p-2 border rounded text-xs">
                       <option value="">Kies Filiaal</option>
                       {stores.map(s => <option key={s.id || s.store_id} value={s.id || s.store_id}>{s.store_name || s.name}</option>)}
                     </select>
-                    <button type="submit" className="bg-red-600 hover:bg-red-700 text-white font-bold p-2 rounded text-xs uppercase">Aanmaken</button>
+                    <button type="submit" className="bg-red-600 hover:bg-red-700 text-white font-bold p-2.5 sm:p-2 rounded text-xs uppercase sm:col-span-2 lg:col-span-1">Aanmaken</button>
                   </form>
                 </div>
 
-                <div className="bg-white rounded-lg shadow p-6">
-                  <h3 className="text-md font-bold mb-4">Medewerkers ({users.length})</h3>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs divide-y">
+                <div className="bg-white rounded-lg shadow p-4 sm:p-6">
+                  <h3 className="text-sm sm:text-md font-bold mb-4">Medewerkers ({users.length})</h3>
+                  <div className="overflow-x-auto -mx-4 sm:mx-0">
+                    <table className="w-full text-left text-xs divide-min min-w-[500px]">
                       <thead><tr className="bg-gray-50"><th className="p-3">ID</th><th className="p-3">Naam</th><th className="p-3">Rol</th><th className="p-3">Filiaal</th><th className="p-3 text-right">Acties</th></tr></thead>
                       <tbody className="divide-y">
                         {users.map(u => {
@@ -409,8 +413,8 @@ export default function AdminDashboard() {
                               <td className="p-3 text-right space-x-2">
                                 {!isBendemen && (
                                   <>
-                                    <button onClick={() => setEditingUser(u)} className="text-blue-600 font-bold hover:underline">Bewerken</button>
-                                    <button onClick={() => handleDeleteUser(u.id, u.username)} className="text-red-600 font-bold hover:underline">Verwijderen</button>
+                                    <button onClick={() => setEditingUser(u)} className="text-blue-600 font-bold hover:underline p-1">Bewerken</button>
+                                    <button onClick={() => handleDeleteUser(u.id, u.username)} className="text-red-600 font-bold hover:underline p-1">Verwijderen</button>
                                   </>
                                 )}
                               </td>
@@ -424,33 +428,34 @@ export default function AdminDashboard() {
               </div>
             )}
 
+            {/* Filialen Tab */}
             {activeTab === 'stores' && (
               <div className="space-y-6">
-                <div className="bg-white rounded-lg shadow p-6">
-                  <h3 className="text-md font-bold mb-4">Nieuw Filiaal</h3>
-                  <form onSubmit={handleCreateStore} className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <input type="text" placeholder="Naam Filiaal" value={newStore.store_name} onChange={(e) => setNewStore({...newStore, store_name: e.target.value})} className="p-2 border rounded text-xs" required />
-                    <input type="text" placeholder="Adres" value={newStore.address} onChange={(e) => setNewStore({...newStore, address: e.target.value})} className="p-2 border rounded text-xs" required />
-                    <input type="text" placeholder="KvK Nummer" value={newStore.kvk} onChange={(e) => setNewStore({...newStore, kvk: e.target.value})} className="p-2 border rounded text-xs" required />
-                    <input type="text" placeholder="BTW Nummer" value={newStore.btw} onChange={(e) => setNewStore({...newStore, btw: e.target.value})} className="p-2 border rounded text-xs" required />
-                    <input type="text" placeholder="Pickup ID" value={newStore.pickup_id} onChange={(e) => setNewStore({...newStore, pickup_id: e.target.value})} className="p-2 border rounded text-xs md:col-span-2" />
-                    <button type="submit" className="bg-red-600 text-white font-bold p-2 rounded text-xs uppercase md:col-span-2">Aanmaken</button>
+                <div className="bg-white rounded-lg shadow p-4 sm:p-6">
+                  <h3 className="text-sm sm:text-md font-bold mb-4">Nieuw Filiaal</h3>
+                  <form onSubmit={handleCreateStore} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <input type="text" placeholder="Naam Filiaal" value={newStore.store_name} onChange={(e) => setNewStore({...newStore, store_name: e.target.value})} className="p-2.5 sm:p-2 border rounded text-xs" required />
+                    <input type="text" placeholder="Adres" value={newStore.address} onChange={(e) => setNewStore({...newStore, address: e.target.value})} className="p-2.5 sm:p-2 border rounded text-xs" required />
+                    <input type="text" placeholder="KvK Nummer" value={newStore.kvk} onChange={(e) => setNewStore({...newStore, kvk: e.target.value})} className="p-2.5 sm:p-2 border rounded text-xs" required />
+                    <input type="text" placeholder="BTW Nummer" value={newStore.btw} onChange={(e) => setNewStore({...newStore, btw: e.target.value})} className="p-2.5 sm:p-2 border rounded text-xs" required />
+                    <input type="text" placeholder="Pickup ID" value={newStore.pickup_id} onChange={(e) => setNewStore({...newStore, pickup_id: e.target.value})} className="p-2.5 sm:p-2 border rounded text-xs sm:col-span-2" />
+                    <button type="submit" className="bg-red-600 text-white font-bold p-2.5 sm:p-2 rounded text-xs uppercase sm:col-span-2">Aanmaken</button>
                   </form>
                 </div>
 
-                <div className="bg-white rounded-lg shadow p-6">
-                  <h3 className="text-md font-bold mb-4">Filialen ({stores.length})</h3>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="bg-white rounded-lg shadow p-4 sm:p-6">
+                  <h3 className="text-sm sm:text-md font-bold mb-4">Filialen ({stores.length})</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {stores.map(s => (
-                      <div key={s.id || s.store_id} className="border p-4 rounded-lg bg-gray-50 flex flex-col justify-between">
+                      <div key={s.id || s.store_id} className="border p-4 rounded-lg bg-gray-50 flex flex-col justify-between space-y-3">
                         <div>
                           <div className="font-bold text-sm text-red-600">{s.store_name || s.name}</div>
                           <div className="text-xs text-gray-500 mt-1">📍 {s.address}</div>
                           <div className="text-xs text-gray-600 mt-1">KvK: {s.kvk} | BTW: {s.btw}</div>
                         </div>
-                        <div className="mt-3 text-right space-x-2">
-                          <button onClick={() => setEditingStore(s)} className="text-xs bg-black text-white px-3 py-1 rounded font-bold">Bewerken</button>
-                          <button onClick={() => handleDeleteStore(s.id || s.store_id, s.store_name || s.name)} className="text-xs bg-red-600 text-white px-3 py-1 rounded font-bold">Verwijderen</button>
+                        <div className="text-right space-x-2 pt-2 border-t">
+                          <button onClick={() => setEditingStore(s)} className="text-xs bg-black text-white px-3 py-1.5 rounded font-bold">Bewerken</button>
+                          <button onClick={() => handleDeleteStore(s.id || s.store_id, s.store_name || s.name)} className="text-xs bg-red-600 text-white px-3 py-1.5 rounded font-bold">Verwijderen</button>
                         </div>
                       </div>
                     ))}
@@ -459,13 +464,14 @@ export default function AdminDashboard() {
               </div>
             )}
 
+            {/* SumUp Tab */}
             {activeTab === 'sumup' && (
-              <div className="bg-white rounded-lg shadow p-6">
-                <h3 className="text-md font-bold mb-2">💳 SumUp Terminal & Pair Code Koppeling</h3>
+              <div className="bg-white rounded-lg shadow p-4 sm:p-6">
+                <h3 className="text-sm sm:text-md font-bold mb-2">💳 SumUp Terminal & Pair Code Koppeling</h3>
                 <p className="text-xs text-gray-500 mb-4">Beheer hier per filiaal de SumUp Terminal ID en Pair Code.</p>
                 <div className="space-y-3">
                   {stores.map(s => (
-                    <div key={s.id || s.store_id} className="border p-4 rounded flex justify-between items-center bg-gray-50">
+                    <div key={s.id || s.store_id} className="border p-4 rounded flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-gray-50">
                       <div>
                         <span className="font-bold text-sm">{s.store_name || s.name}</span>
                         <div className="text-xs text-gray-600 mt-1">
@@ -475,7 +481,7 @@ export default function AdminDashboard() {
                           Pair Code: <span className="font-mono font-bold text-red-600">{s.pair_code || 'Geen'}</span>
                         </div>
                       </div>
-                      <button onClick={() => setEditingSumUp(s)} className="text-xs bg-black text-white px-3 py-2 rounded font-bold hover:bg-gray-800">
+                      <button onClick={() => setEditingSumUp(s)} className="text-xs bg-black text-white px-3 py-2 rounded font-bold hover:bg-gray-800 w-full sm:w-auto text-center">
                         Koppelen / Wijzigen
                       </button>
                     </div>
@@ -484,40 +490,44 @@ export default function AdminDashboard() {
               </div>
             )}
 
+            {/* Bestellingen Tab */}
             {activeTab === 'orders' && (
-              <div className="bg-white rounded-lg shadow p-6">
-                <h3 className="text-md font-bold mb-4">📦 Live Bestellingen</h3>
-                <table className="w-full text-left text-xs divide-y mb-4">
-                  <thead><tr className="bg-gray-50"><th className="p-3">Order</th><th className="p-3">Klant</th><th className="p-3">Status</th><th className="p-3">Totaal</th></tr></thead>
-                  <tbody className="divide-y">
-                    {currentOrders.map(o => (
-                      <tr key={o.id} className="hover:bg-gray-50">
-                        <td className="p-3 font-bold">#{o.number || o.id}</td>
-                        <td className="p-3">{o.billing?.first_name} {o.billing?.last_name}</td>
-                        <td className="p-3">
-                          <select value={o.status} onChange={(e) => handleUpdateOrderStatus(o.id, e.target.value)} className="border rounded p-1 text-xs font-bold">
-                            <option value="pending">Pending</option>
-                            <option value="processing">Processing</option>
-                            <option value="completed">Completed</option>
-                          </select>
-                        </td>
-                        <td className="p-3 font-bold text-red-600">€{parseFloat(o.total || 0).toFixed(2)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="bg-white rounded-lg shadow p-4 sm:p-6">
+                <h3 className="text-sm sm:text-md font-bold mb-4">📦 Live Bestellingen</h3>
+                <div className="overflow-x-auto -mx-4 sm:mx-0">
+                  <table className="w-full text-left text-xs divide-y mb-4 min-w-[500px]">
+                    <thead><tr className="bg-gray-50"><th className="p-3">Order</th><th className="p-3">Klant</th><th className="p-3">Status</th><th className="p-3">Totaal</th></tr></thead>
+                    <tbody className="divide-y">
+                      {currentOrders.map(o => (
+                        <tr key={o.id} className="hover:bg-gray-50">
+                          <td className="p-3 font-bold">#{o.number || o.id}</td>
+                          <td className="p-3">{o.billing?.first_name} {o.billing?.last_name}</td>
+                          <td className="p-3">
+                            <select value={o.status} onChange={(e) => handleUpdateOrderStatus(o.id, e.target.value)} className="border rounded p-1.5 text-xs font-bold">
+                              <option value="pending">Pending</option>
+                              <option value="processing">Processing</option>
+                              <option value="completed">Completed</option>
+                            </select>
+                          </td>
+                          <td className="p-3 font-bold text-red-600">€{parseFloat(o.total || 0).toFixed(2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
 
+            {/* Voorraad Tab */}
             {activeTab === 'inventory' && (
-              <div className="bg-white rounded-lg shadow p-6">
-                <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-md font-bold">📦 Producten & Variaties Voorraad ({products.length})</h3>
-                  <button onClick={handleManualSyncProducts} disabled={loading} className="bg-black text-white px-3 py-1.5 rounded text-xs font-bold">🔄 Sync</button>
+              <div className="bg-white rounded-lg shadow p-4 sm:p-6">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
+                  <h3 className="text-sm sm:text-md font-bold">📦 Producten & Variaties Voorraad ({products.length})</h3>
+                  <button onClick={handleManualSyncProducts} disabled={loading} className="bg-black text-white px-3 py-2 rounded text-xs font-bold w-full sm:w-auto">🔄 Sync</button>
                 </div>
 
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs divide-y">
+                <div className="overflow-x-auto -mx-4 sm:mx-0">
+                  <table className="w-full text-left text-xs divide-y min-w-[600px]">
                     <thead>
                       <tr className="bg-gray-50">
                         <th className="p-3">ID</th>
@@ -582,19 +592,20 @@ export default function AdminDashboard() {
         )}
       </div>
 
+      {/* Modals (Responsive breedte gecentreerd op mobiel en tablet) */}
       {editingUser && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-          <form onSubmit={handleUpdateUser} className="bg-white rounded-lg p-6 max-w-sm w-full space-y-3">
+          <form onSubmit={handleUpdateUser} className="bg-white rounded-lg p-6 max-w-sm w-full space-y-3 shadow-xl">
             <h3 className="text-md font-bold">Medewerker Bewerken</h3>
-            <input type="text" value={editingUser.username} onChange={(e) => setEditingUser({...editingUser, username: e.target.value})} className="w-full p-2 border rounded text-xs" required />
-            <select value={editingUser.role} onChange={(e) => setEditingUser({...editingUser, role: e.target.value})} className="w-full p-2 border rounded text-xs">
+            <input type="text" value={editingUser.username} onChange={(e) => setEditingUser({...editingUser, username: e.target.value})} className="w-full p-2.5 border rounded text-xs" required />
+            <select value={editingUser.role} onChange={(e) => setEditingUser({...editingUser, role: e.target.value})} className="w-full p-2.5 border rounded text-xs">
               <option value="cashier">Cashier</option>
               <option value="admin">Admin</option>
               <option value="super_admin">Super Admin</option>
             </select>
             <div className="flex space-x-2 pt-2">
-              <button type="button" onClick={() => setEditingUser(null)} className="w-1/2 bg-gray-200 p-2 rounded text-xs font-bold">Annuleren</button>
-              <button type="submit" className="w-1/2 bg-red-600 text-white p-2 rounded text-xs font-bold">Opslaan</button>
+              <button type="button" onClick={() => setEditingUser(null)} className="w-1/2 bg-gray-200 py-2.5 rounded text-xs font-bold">Annuleren</button>
+              <button type="submit" className="w-1/2 bg-red-600 text-white py-2.5 rounded text-xs font-bold">Opslaan</button>
             </div>
           </form>
         </div>
@@ -602,13 +613,13 @@ export default function AdminDashboard() {
 
       {editingStore && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-          <form onSubmit={handleUpdateStore} className="bg-white rounded-lg p-6 max-w-sm w-full space-y-3">
+          <form onSubmit={handleUpdateStore} className="bg-white rounded-lg p-6 max-w-sm w-full space-y-3 shadow-xl">
             <h3 className="text-md font-bold">Filiaal Bewerken</h3>
-            <input type="text" value={editingStore.store_name || editingStore.name || ''} onChange={(e) => setEditingStore({...editingStore, store_name: e.target.value})} className="w-full p-2 border rounded text-xs" required />
-            <input type="text" value={editingStore.address || ''} onChange={(e) => setEditingStore({...editingStore, address: e.target.value})} className="w-full p-2 border rounded text-xs" required />
+            <input type="text" value={editingStore.store_name || editingStore.name || ''} onChange={(e) => setEditingStore({...editingStore, store_name: e.target.value})} className="w-full p-2.5 border rounded text-xs" required />
+            <input type="text" value={editingStore.address || ''} onChange={(e) => setEditingStore({...editingStore, address: e.target.value})} className="w-full p-2.5 border rounded text-xs" required />
             <div className="flex space-x-2 pt-2">
-              <button type="button" onClick={() => setEditingStore(null)} className="w-1/2 bg-gray-200 p-2 rounded text-xs font-bold">Annuleren</button>
-              <button type="submit" className="w-1/2 bg-red-600 text-white p-2 rounded text-xs font-bold">Opslaan</button>
+              <button type="button" onClick={() => setEditingStore(null)} className="w-1/2 bg-gray-200 py-2.5 rounded text-xs font-bold">Annuleren</button>
+              <button type="submit" className="w-1/2 bg-red-600 text-white py-2.5 rounded text-xs font-bold">Opslaan</button>
             </div>
           </form>
         </div>
@@ -616,7 +627,7 @@ export default function AdminDashboard() {
 
       {editingSumUp && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-          <form onSubmit={handlePairSumUp} className="bg-white rounded-lg p-6 max-w-md w-full space-y-4">
+          <form onSubmit={handlePairSumUp} className="bg-white rounded-lg p-6 max-w-md w-full space-y-4 shadow-xl">
             <h3 className="text-md font-bold border-b pb-2">SumUp Koppelen: {editingSumUp.store_name || editingSumUp.name}</h3>
             
             <div>
@@ -626,7 +637,7 @@ export default function AdminDashboard() {
                 placeholder="Bijv. terminal_123" 
                 value={editingSumUp.terminal_id || ''} 
                 onChange={(e) => setEditingSumUp({...editingSumUp, terminal_id: e.target.value})} 
-                className="w-full p-2 border rounded text-xs font-bold font-mono" 
+                className="w-full p-2.5 border rounded text-xs font-bold font-mono" 
               />
             </div>
 
@@ -637,7 +648,7 @@ export default function AdminDashboard() {
                 placeholder="Bijv. ABC123XYZ" 
                 value={editingSumUp.pair_code || ''} 
                 onChange={(e) => setEditingSumUp({...editingSumUp, pair_code: e.target.value})} 
-                className="w-full p-2 border rounded text-xs font-bold font-mono text-red-600" 
+                className="w-full p-2.5 border rounded text-xs font-bold font-mono text-red-600" 
               />
               <p className="text-[10px] text-gray-400 mt-1">Voer de actieve koppelcode in om direct te koppelen via de SumUp API.</p>
             </div>

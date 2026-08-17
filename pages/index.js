@@ -696,20 +696,21 @@ export default function POSHome() {
 
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col">
-      <header className="bg-black text-white p-4 flex justify-between items-center shadow-md">
-        <div className="flex items-center space-x-3">
-          <span className="font-bold text-xl tracking-wider">BDM POS</span>
+      {/* Header */}
+      <header className="bg-black text-white p-3 sm:p-4 flex flex-col md:flex-row justify-between items-center gap-3 shadow-md">
+        <div className="flex flex-wrap items-center gap-2 justify-center md:justify-start w-full md:w-auto">
+          <span className="font-bold text-lg sm:text-xl tracking-wider">BDM POS</span>
           
           <button
             onClick={() => setShowStoreModal(true)}
             className="text-xs bg-red-600 hover:bg-red-700 text-white px-2.5 py-1 rounded font-bold uppercase flex items-center space-x-1 shadow-sm transition"
           >
             <span>📍</span>
-            <span>{storeDisplayName}</span>
+            <span className="truncate max-w-[120px] sm:max-w-none">{storeDisplayName}</span>
           </button>
 
           {currentUser && (
-            <span className="text-xs bg-gray-800 text-gray-300 px-2.5 py-1 rounded">
+            <span className="text-[11px] sm:text-xs bg-gray-800 text-gray-300 px-2 py-1 rounded">
               {currentUser.username} ({currentUser.role})
             </span>
           )}
@@ -725,7 +726,7 @@ export default function POSHome() {
           )}
         </div>
         
-        <div className="flex items-center space-x-2">
+        <div className="flex flex-wrap items-center gap-2 justify-center md:justify-end w-full md:w-auto">
           <button
             onClick={() => setActiveTab('pos')}
             className={`px-3 py-1.5 rounded text-xs font-bold transition ${activeTab === 'pos' ? 'bg-red-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
@@ -771,26 +772,26 @@ export default function POSHome() {
       </header>
 
       {activeTab === 'pickup' ? (
-        <div className="flex-1 p-6 max-w-6xl mx-auto w-full">
-          <div className="bg-white rounded-lg shadow p-6 space-y-4">
-            <div className="flex justify-between items-center pb-4 border-b">
+        <div className="flex-1 p-3 sm:p-6 max-w-6xl mx-auto w-full">
+          <div className="bg-white rounded-lg shadow p-4 sm:p-6 space-y-4">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-4 border-b">
               <div>
-                <h2 className="text-lg font-bold">📦 Lokale Afhaalbestellingen (Local Pickup Plus)</h2>
+                <h2 className="text-base sm:text-lg font-bold">📦 Lokale Afhaalbestellingen</h2>
                 <p className="text-xs text-gray-500">
-                  Overzicht van webshopbestellingen gekoppeld aan: <span className="font-bold text-red-600">{storeDisplayName}</span>
+                  Overzicht gekoppeld aan: <span className="font-bold text-red-600">{storeDisplayName}</span>
                 </p>
               </div>
               <button
                 onClick={fetchPickupOrders}
                 disabled={loadingPickup}
-                className="bg-black hover:bg-gray-800 text-white text-xs font-bold px-4 py-2 rounded transition"
+                className="bg-black hover:bg-gray-800 text-white text-xs font-bold px-4 py-2 rounded transition w-full sm:w-auto"
               >
                 {loadingPickup ? '⏳ Laden...' : '🔄 Verversen'}
               </button>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs divide-y">
+            <div className="overflow-x-auto -mx-4 sm:mx-0">
+              <table className="w-full text-left text-xs divide-y min-w-[600px]">
                 <thead>
                   <tr className="bg-gray-50">
                     <th className="p-3">Order ID</th>
@@ -830,7 +831,7 @@ export default function POSHome() {
                               onClick={() => handleMarkAsPickedUp(order.id)}
                               className="bg-green-600 hover:bg-green-700 text-white font-bold px-3 py-2 rounded text-xs uppercase shadow-sm"
                             >
-                              ✓ Als opgehaald markeren
+                              ✓ Als opgehaald
                             </button>
                           </td>
                         </tr>
@@ -843,34 +844,36 @@ export default function POSHome() {
           </div>
         </div>
       ) : (
-        <div className="flex-1 flex flex-col md:flex-row p-4 gap-4 overflow-hidden">
-          <div className="w-full md:w-3/5 flex flex-col bg-white rounded-lg shadow p-4">
+        <div className="flex-1 flex flex-col lg:flex-row p-3 sm:p-4 gap-4 overflow-hidden">
+          {/* Producten & Zoeken (Links op Desktop/Tablet, Boven op Mobiel) */}
+          <div className="w-full lg:w-3/5 flex flex-col bg-white rounded-lg shadow p-3 sm:p-4">
             <div className="flex space-x-2 mb-3">
               <input
                 type="text"
                 placeholder="Zoek producten op naam..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="flex-1 p-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-black text-sm"
+                className="flex-1 p-2.5 sm:p-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-black text-sm"
               />
               <button
                 onClick={() => setShowCustomModal(true)}
                 className="bg-black hover:bg-gray-800 text-white font-bold px-3 py-2 rounded text-xs whitespace-nowrap transition"
               >
-                + Custom Artikel
+                + Custom
               </button>
             </div>
 
-            <div className="flex space-x-2 overflow-x-auto pb-3 mb-3 border-b">
+            {/* Categorieën scrollbare balk */}
+            <div className="flex space-x-2 overflow-x-auto pb-3 mb-3 border-b no-scrollbar">
               <button
                 onClick={() => setSelectedCategory('ALL')}
-                className={`px-4 py-2 rounded text-xs font-bold whitespace-nowrap transition ${
+                className={`px-3 sm:px-4 py-2 rounded text-xs font-bold whitespace-nowrap transition ${
                   selectedCategory === 'ALL'
                     ? 'bg-black text-white'
                     : 'bg-gray-100 text-gray-800 hover:bg-gray-200'
                 }`}
               >
-                📦 Alle Producten ({activeProducts.length})
+                📦 Alles ({activeProducts.length})
               </button>
               {categoriesList.map((cat) => {
                 const count = activeProducts.filter((p) => getProductCategory(p) === cat).length;
@@ -878,7 +881,7 @@ export default function POSHome() {
                   <button
                     key={cat}
                     onClick={() => setSelectedCategory(cat)}
-                    className={`px-4 py-2 rounded text-xs font-bold whitespace-nowrap transition ${
+                    className={`px-3 sm:px-4 py-2 rounded text-xs font-bold whitespace-nowrap transition ${
                       selectedCategory === cat
                         ? 'bg-red-600 text-white'
                         : 'bg-gray-100 text-gray-800 hover:bg-gray-200'
@@ -890,7 +893,8 @@ export default function POSHome() {
               })}
             </div>
 
-            <div className="flex-1 overflow-y-auto grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[calc(100vh-280px)]">
+            {/* Product Grid (Responsive: 2 cols op mobiel, 3 op tablet/desktop) */}
+            <div className="flex-1 overflow-y-auto grid grid-cols-2 sm:grid-cols-3 gap-2.5 sm:gap-3 max-h-[calc(100vh-280px)]">
               {filteredProducts.map((product) => {
                 const imageUrl = product.images && product.images.length > 0 ? product.images[0].src : null;
                 const productVariations = Array.isArray(product.variations_data) && product.variations_data.length > 0
@@ -925,7 +929,7 @@ export default function POSHome() {
                         )}
                         {stockQty !== null && (
                           <span className={`absolute bottom-1 right-1 text-[10px] px-1.5 py-0.5 rounded font-bold ${stockQty <= 0 ? 'bg-red-600 text-white' : 'bg-black text-white'}`}>
-                            Voorraad: {stockQty}
+                            {stockQty}
                           </span>
                         )}
                       </div>
@@ -933,11 +937,11 @@ export default function POSHome() {
                     </div>
 
                     <div className="mt-2 flex justify-between items-center">
-                      <span className="text-[10px] text-gray-500 font-bold uppercase truncate max-w-[80px]">
+                      <span className="text-[10px] text-gray-500 font-bold uppercase truncate max-w-[70px]">
                         {getProductCategory(product)}
                       </span>
-                      <span className="font-bold text-sm text-red-600">
-                        {isPriceZero ? '€0.00 / Open' : `€${parseFloat(product.price || 0).toFixed(2)}`}
+                      <span className="font-bold text-xs sm:text-sm text-red-600">
+                        {isPriceZero ? 'Open' : `€${parseFloat(product.price || 0).toFixed(2)}`}
                       </span>
                     </div>
                   </div>
@@ -946,9 +950,10 @@ export default function POSHome() {
             </div>
           </div>
 
-          <div className="w-full md:w-2/5 flex flex-col bg-white rounded-lg shadow p-4 justify-between">
+          {/* Winkelmand / Kassa (Rechts op Desktop/Tablet, Onder op Mobiel) */}
+          <div className="w-full lg:w-2/5 flex flex-col bg-white rounded-lg shadow p-3 sm:p-4 justify-between">
             <div>
-              <h2 className="text-lg font-bold mb-3 border-b pb-2">Huidige Bestelling</h2>
+              <h2 className="text-base sm:text-lg font-bold mb-3 border-b pb-2">Huidige Bestelling</h2>
 
               <div className="mb-3 bg-gray-50 p-2 rounded border">
                 <label className="text-xs font-bold text-gray-600 block mb-1">Gekoppelde Klant:</label>
@@ -964,7 +969,7 @@ export default function POSHome() {
                       placeholder="Zoek klant op naam/email..."
                       value={customerSearch}
                       onChange={(e) => setCustomerSearch(e.target.value)}
-                      className="w-full p-1 text-sm border rounded mb-1"
+                      className="w-full p-1.5 text-xs border rounded mb-1"
                     />
                     {customerSearch && (
                       <div className="max-h-24 overflow-y-auto bg-white border rounded">
@@ -972,7 +977,7 @@ export default function POSHome() {
                           <div
                             key={c.id}
                             onClick={() => { setSelectedCustomer(c); setCustomerSearch(''); }}
-                            className="p-1 text-xs hover:bg-gray-100 cursor-pointer"
+                            className="p-1.5 text-xs hover:bg-gray-100 cursor-pointer"
                           >
                             {c.first_name} {c.last_name} ({c.email})
                           </div>
@@ -983,20 +988,21 @@ export default function POSHome() {
                 )}
               </div>
 
-              <div className="overflow-y-auto max-h-40 mb-3 divide-y">
+              {/* Winkelmand items */}
+              <div className="overflow-y-auto max-h-36 sm:max-h-44 mb-3 divide-y">
                 {cart.length === 0 ? (
                   <p className="text-gray-400 text-sm text-center py-4">Geen artikelen in winkelmand</p>
                 ) : (
                   cart.map((item) => (
-                    <div key={item.id} className="py-2 flex justify-between items-center text-sm">
-                      <div>
+                    <div key={item.id} className="py-2 flex justify-between items-center text-xs sm:text-sm">
+                      <div className="pr-2">
                         <div className="font-medium">{item.name}</div>
-                        <div className="text-xs text-gray-500">€{parseFloat(item.price).toFixed(2)} x {item.quantity}</div>
+                        <div className="text-[11px] text-gray-500">€{parseFloat(item.price).toFixed(2)} x {item.quantity}</div>
                       </div>
-                      <div className="flex items-center space-x-2">
-                        <button onClick={() => updateQuantity(item.id, -1)} className="px-2 bg-gray-200 rounded font-bold">-</button>
-                        <span>{item.quantity}</span>
-                        <button onClick={() => updateQuantity(item.id, 1)} className="px-2 bg-gray-200 rounded font-bold">+</button>
+                      <div className="flex items-center space-x-1.5 shrink-0">
+                        <button onClick={() => updateQuantity(item.id, -1)} className="w-6 h-6 bg-gray-200 rounded font-bold flex items-center justify-center">-</button>
+                        <span className="w-5 text-center">{item.quantity}</span>
+                        <button onClick={() => updateQuantity(item.id, 1)} className="w-6 h-6 bg-gray-200 rounded font-bold flex items-center justify-center">+</button>
                       </div>
                     </div>
                   ))
@@ -1009,7 +1015,7 @@ export default function POSHome() {
                   <select
                     value={discountType}
                     onChange={(e) => setDiscountType(e.target.value)}
-                    className="border p-1 rounded"
+                    className="border p-1 rounded text-xs"
                   >
                     <option value="none">Geen</option>
                     <option value="percentage">Percentage (%)</option>
@@ -1023,7 +1029,7 @@ export default function POSHome() {
                     placeholder={discountType === 'percentage' ? 'Voer % in' : 'Voer bedrag in'}
                     value={discountValue}
                     onChange={(e) => setDiscountValue(e.target.value)}
-                    className="w-full p-1 border rounded"
+                    className="w-full p-1.5 border rounded text-xs"
                   />
                 )}
 
@@ -1033,14 +1039,14 @@ export default function POSHome() {
                     <input
                       type="number"
                       min="0"
-                      placeholder="Aantal punten"
+                      placeholder="Punten"
                       value={pointsToRedeem}
                       onChange={(e) => setPointsToRedeem(e.target.value)}
-                      className="flex-1 p-1 border rounded text-xs"
+                      className="flex-1 p-1.5 border rounded text-xs"
                     />
                     <button
                       onClick={handleRedeemPoints}
-                      className="bg-black text-white px-3 py-1 rounded text-xs font-semibold"
+                      className="bg-black text-white px-3 py-1.5 rounded text-xs font-semibold"
                     >
                       Wissel
                     </button>
@@ -1049,24 +1055,25 @@ export default function POSHome() {
               </div>
             </div>
 
+            {/* Totalen en Afrekenknop */}
             <div className="border-t pt-3 mt-2">
-              <div className="flex justify-between text-sm mb-1">
+              <div className="flex justify-between text-xs sm:text-sm mb-1">
                 <span>Subtotaal:</span>
                 <span>€{subtotal.toFixed(2)}</span>
               </div>
               {totalDiscount > 0 && (
-                <div className="flex justify-between text-sm text-red-600 mb-1">
+                <div className="flex justify-between text-xs sm:text-sm text-red-600 mb-1">
                   <span>Korting:</span>
                   <span>-€{totalDiscount.toFixed(2)}</span>
                 </div>
               )}
-              <div className="flex justify-between text-lg font-bold mb-3">
+              <div className="flex justify-between text-base sm:text-lg font-bold mb-3">
                 <span>Totaal:</span>
                 <span>€{finalTotal.toFixed(2)}</span>
               </div>
 
               {selectedCustomer && (
-                <div className="text-xs text-green-600 mb-2 font-medium">
+                <div className="text-[11px] text-green-600 mb-2 font-medium">
                   ✨ Deze bestelling levert {Math.floor(finalTotal)} punten op voor {selectedCustomer.first_name}.
                 </div>
               )}
@@ -1080,7 +1087,7 @@ export default function POSHome() {
               <button
                 onClick={handleOpenPaymentModal}
                 disabled={loading || cart.length === 0}
-                className="w-full bg-red-600 hover:bg-red-700 disabled:bg-gray-300 text-white font-bold py-3 rounded transition text-sm uppercase tracking-wider"
+                className="w-full bg-red-600 hover:bg-red-700 disabled:bg-gray-300 text-white font-bold py-3 rounded transition text-xs sm:text-sm uppercase tracking-wider"
               >
                 Afrekenen (€{finalTotal.toFixed(2)})
               </button>
@@ -1089,11 +1096,11 @@ export default function POSHome() {
         </div>
       )}
 
-      {/* Modals en popups */}
+      {/* Modals */}
       {openAmountProduct && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg shadow-xl max-w-sm w-full p-6">
-            <h3 className="text-lg font-bold mb-2">Invoeren Open Bedrag</h3>
+            <h3 className="text-base sm:text-lg font-bold mb-2">Invoeren Open Bedrag</h3>
             <p className="text-xs text-gray-600 mb-4">{openAmountProduct.name}</p>
             <div className="mb-4">
               <label className="text-xs font-bold text-gray-600 block mb-1">Prijs (€):</label>
@@ -1108,17 +1115,17 @@ export default function POSHome() {
               />
             </div>
             <div className="flex space-x-2">
-              <button onClick={() => setOpenAmountProduct(null)} className="w-1/2 bg-gray-200 text-black font-bold py-2 rounded text-xs">Annuleren</button>
-              <button onClick={handleConfirmOpenAmount} className="w-1/2 bg-red-600 text-white font-bold py-2 rounded text-xs">Toevoegen</button>
+              <button onClick={() => setOpenAmountProduct(null)} className="w-1/2 bg-gray-200 text-black font-bold py-2.5 rounded text-xs">Annuleren</button>
+              <button onClick={handleConfirmOpenAmount} className="w-1/2 bg-red-600 text-white font-bold py-2.5 rounded text-xs">Toevoegen</button>
             </div>
           </div>
         </div>
       )}
 
       {showCustomModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg shadow-xl max-w-sm w-full p-6">
-            <h3 className="text-lg font-bold mb-4">Custom Artikel Toevoegen</h3>
+            <h3 className="text-base sm:text-lg font-bold mb-4">Custom Artikel Toevoegen</h3>
             <div className="space-y-3 mb-4">
               <div>
                 <label className="text-xs font-bold text-gray-600 block mb-1">Artikelnaam</label>
@@ -1127,7 +1134,7 @@ export default function POSHome() {
                   placeholder="Bijv. Handmatige service"
                   value={customItem.name}
                   onChange={(e) => setCustomItem({...customItem, name: e.target.value})}
-                  className="w-full p-2 border rounded text-sm"
+                  className="w-full p-2.5 border rounded text-sm"
                   autoFocus
                 />
               </div>
@@ -1139,22 +1146,22 @@ export default function POSHome() {
                   placeholder="0.00"
                   value={customItem.price}
                   onChange={(e) => setCustomItem({...customItem, price: e.target.value})}
-                  className="w-full p-2 border rounded text-sm"
+                  className="w-full p-2.5 border rounded text-sm"
                 />
               </div>
             </div>
             <div className="flex space-x-2">
-              <button onClick={() => setShowCustomModal(false)} className="w-1/2 bg-gray-200 py-2 rounded text-xs font-bold">Annuleren</button>
-              <button onClick={handleAddCustomItem} className="w-1/2 bg-red-600 text-white py-2 rounded text-xs font-bold">Toevoegen</button>
+              <button onClick={() => setShowCustomModal(false)} className="w-1/2 bg-gray-200 py-2.5 rounded text-xs font-bold">Annuleren</button>
+              <button onClick={handleAddCustomItem} className="w-1/2 bg-red-600 text-white py-2.5 rounded text-xs font-bold">Toevoegen</button>
             </div>
           </div>
         </div>
       )}
 
       {selectedProductForVariations && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
-            <h3 className="text-lg font-bold mb-1">Kies Variatie</h3>
+            <h3 className="text-base sm:text-lg font-bold mb-1">Kies Variatie</h3>
             <p className="text-xs text-gray-600 mb-4">{selectedProductForVariations.name}</p>
             <div className="space-y-2 max-h-60 overflow-y-auto mb-4">
               {(selectedProductForVariations.variations_data || []).map((v) => {
@@ -1174,29 +1181,29 @@ export default function POSHome() {
                 );
               })}
             </div>
-            <button onClick={() => setSelectedProductForVariations(null)} className="w-full bg-gray-200 text-black font-bold py-2 rounded text-xs">Sluiten</button>
+            <button onClick={() => setSelectedProductForVariations(null)} className="w-full bg-gray-200 text-black font-bold py-2.5 rounded text-xs">Sluiten</button>
           </div>
         </div>
       )}
 
       {stockWarningModal.show && (
-        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-55">
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-55">
           <div className="bg-white rounded-lg shadow-2xl max-w-sm w-full p-6 space-y-4 text-center">
             <div className="text-red-600 text-4xl">⚠️</div>
-            <h3 className="text-lg font-bold">Voorraad Waarschuwing</h3>
+            <h3 className="text-base sm:text-lg font-bold">Voorraad Waarschuwing</h3>
             <p className="text-xs text-gray-600">Dit product heeft een lage/negatieve voorraad.</p>
             <div className="flex space-x-2 pt-2">
-              <button onClick={() => setStockWarningModal({ show: false, product: null, variation: null, price: 0 })} className="w-1/2 bg-gray-200 text-black font-bold py-2 rounded text-xs">Nee</button>
-              <button onClick={handleConfirmStockWarning} className="w-1/2 bg-red-600 text-white font-bold py-2 rounded text-xs">Ja, Toevoegen</button>
+              <button onClick={() => setStockWarningModal({ show: false, product: null, variation: null, price: 0 })} className="w-1/2 bg-gray-200 text-black font-bold py-2.5 rounded text-xs">Nee</button>
+              <button onClick={handleConfirmStockWarning} className="w-1/2 bg-red-600 text-white font-bold py-2.5 rounded text-xs">Ja, Toevoegen</button>
             </div>
           </div>
         </div>
       )}
 
       {showStoreModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg p-6 max-w-md w-full space-y-4 shadow-2xl">
-            <h3 className="text-lg font-bold">📍 Koppel Kassasysteem aan Filiaal</h3>
+            <h3 className="text-base sm:text-lg font-bold">📍 Koppel Kassasysteem aan Filiaal</h3>
             <div className="space-y-2 max-h-60 overflow-y-auto">
               {allStores.map(store => (
                 <button
@@ -1215,9 +1222,9 @@ export default function POSHome() {
       )}
 
       {showPaymentModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
-            <h3 className="text-lg font-bold mb-4 border-b pb-2">Kies Betaalmethode</h3>
+            <h3 className="text-base sm:text-lg font-bold mb-4 border-b pb-2">Kies Betaalmethode</h3>
             <div className="grid grid-cols-3 gap-2 mb-4">
               <button onClick={() => setSelectedPaymentMethod('sumup')} className={`p-3 text-xs font-bold border rounded ${selectedPaymentMethod === 'sumup' ? 'bg-black text-white' : 'bg-gray-100'}`}>💳 SumUp</button>
               <button onClick={() => setSelectedPaymentMethod('manual_pin')} className={`p-3 text-xs font-bold border rounded ${selectedPaymentMethod === 'manual_pin' ? 'bg-black text-white' : 'bg-gray-100'}`}>📌 Pin</button>
@@ -1225,8 +1232,8 @@ export default function POSHome() {
             </div>
             {selectedPaymentMethod === 'cash' && (
               <div className="bg-gray-50 p-4 rounded border mb-4 space-y-3">
-                <input type="number" step="0.01" value={cashGiven} onChange={(e) => setCashGiven(e.target.value)} className="w-full p-2 border rounded font-bold text-lg" placeholder="Ontvangen bedrag" />
-                <div className="bg-black text-white p-2 rounded flex justify-between">
+                <input type="number" step="0.01" value={cashGiven} onChange={(e) => setCashGiven(e.target.value)} className="w-full p-2.5 border rounded font-bold text-lg" placeholder="Ontvangen bedrag" />
+                <div className="bg-black text-white p-2.5 rounded flex justify-between">
                   <span>Wisselgeld:</span>
                   <span className="text-green-400 font-bold">€{changeDue.toFixed(2)}</span>
                 </div>
@@ -1241,9 +1248,9 @@ export default function POSHome() {
       )}
 
       {completedOrderForReceipt && (
-        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg shadow-2xl max-w-sm w-full p-6 text-center space-y-4">
-            <h3 className="text-lg font-bold">Kassabon Afdrukken?</h3>
+            <h3 className="text-base sm:text-lg font-bold">Kassabon Afdrukken?</h3>
             <div className="flex space-x-2 pt-2">
               <button onClick={() => setCompletedOrderForReceipt(null)} className="w-1/2 bg-gray-200 py-3 rounded text-xs font-bold">Sluiten</button>
               <button onClick={() => { triggerPrintReceipt(completedOrderForReceipt); setCompletedOrderForReceipt(null); }} className="w-1/2 bg-red-600 text-white py-3 rounded text-xs font-bold">🖨️ Print</button>
