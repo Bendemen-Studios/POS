@@ -597,26 +597,37 @@ export default function POSHome() {
     setShowPaymentModal(true);
   };
 
-  const triggerPrintReceipt = async (orderData) => {
+  // Functie om de bon af te drukken via de SumUp Solo terminal
+  const triggerSoloPrint = async (orderData, readerId) => {
+    if (!readerId) {
+      alert("Geen Terminal ID bekend voor deze transactie.");
+      return;
+    }
+
     try {
-      const response = await fetch('/api/pos/print-receipt', {
+      const response = await fetch('http://localhost:3001/api/terminal/print-solo', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(orderData)
+        body: JSON.stringify({
+          readerId: readerId,
+          order: orderData.order,
+          store: orderData.store
+        })
       });
 
-      const htmlBlob = await response.text();
-      const printWindow = window.open('', '_blank', 'width=400,height=600');
-      if (printWindow) {
-        printWindow.document.write(htmlBlob);
-        printWindow.document.close();
+      const data = await response.json();
+      if (data.success) {
+        alert("🖨️ Bon wordt afgedrukt op de SumUp Solo!");
+      } else {
+        alert("Fout bij printen: " + (data.error || 'Onbekende fout'));
       }
     } catch (err) {
-      console.error('Fout bij afdrukken van bon:', err);
+      console.error('Fout bij aanroepen Solo printer:', err);
+      alert("Kan geen verbinding maken met de SumUp print-service.");
     }
   };
 
-  // Aangepast om direct te communiceren met de zelfstandige SumUp Add-on microservice op poort 3001
+  // Communiceert met de zelfstandige SumUp Add-on microservice op poort 3001
   const processSumUpPayment = async (amount, storeId) => {
     const res = await fetch('http://localhost:3001/api/terminal/pay', {
       method: 'POST',
@@ -628,7 +639,7 @@ export default function POSHome() {
     if (!res.ok || !data.success) {
       throw new Error(data.error || 'SumUp weigert de betaling.');
     }
-    return data;
+    return data; // Geeft o.a. readerId terug
   };
 
   const handleProcessPayment = async () => {
@@ -640,10 +651,13 @@ export default function POSHome() {
     setLoading(true);
     setCheckoutStatus(null);
 
+    let usedReaderId = null;
+
     if (selectedPaymentMethod === 'sumup') {
       try {
         const storeId = selectedStore?.id || selectedStore?.store_id || 1;
-        await processSumUpPayment(finalTotal.toFixed(2), storeId);
+        const sumupResult = await processSumUpPayment(finalTotal.toFixed(2), storeId);
+        usedReaderId = sumupResult.readerId;
       } catch (sumupErr) {
         console.error('[SUMUP ERROR]:', sumupErr.message);
         alert(`❌ SumUp Betaling Mislukt:\n\n${sumupErr.message}\n\nDe bestelling is GEANNULEERD en niet aangemaakt.`);
@@ -704,16 +718,22 @@ export default function POSHome() {
     } finally {
       setShowPaymentModal(false);
 
-      setCompletedOrderForReceipt({
-        order: orderPayload,
-        store: selectedStore,
-        cashier: currentUser,
-        paymentDetails: {
-          method: selectedPaymentMethod,
-          cashGiven: selectedPaymentMethod === 'cash' ? cashGivenFloat : null,
-          changeDue: selectedPaymentMethod === 'cash' ? changeDue : null,
-        }
-      });
+      // Exclusief printen inschakelen als de gekozen methode 'sumup' is
+      if (selectedPaymentMethod === 'sumup') {
+        setCompletedOrderForReceipt({
+          order: orderPayload,
+          store: selectedStore,
+          cashier: currentUser,
+          readerId: usedReaderId || selectedStore?.terminal_id,
+          paymentDetails: {
+            method: selectedPaymentMethod,
+            cashGiven: null,
+            changeDue: null,
+          }
+        });
+      } else {
+        setCompletedOrderForReceipt(null);
+      }
 
       setCart([]);
       setSelectedCustomer(null);
@@ -1317,13 +1337,28 @@ export default function POSHome() {
         </div>
       )}
 
+      {/* Exclusieve SumUp Solo Print Popup */}
       {completedOrderForReceipt && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg shadow-2xl max-w-sm w-full p-6 text-center space-y-4">
-            <h3 className="text-base sm:text-lg font-bold">Kassabon Afdrukken?</h3>
+            <h3 className="text-base sm:text-lg font-bold">🖨️ Kassabon Afdrukken op SumUp Solo?</h3>
+            <p className="text-xs text-gray-500">De SumUp betaling is geslaagd. Wil je de fysieke bon uitprinten op de SumUp Solo?</p>
             <div className="flex space-x-2 pt-2">
-              <button onClick={() => setCompletedOrderForReceipt(null)} className="w-1/2 bg-gray-200 py-3 rounded text-xs font-bold">Sluiten</button>
-              <button onClick={() => { triggerPrintReceipt(completedOrderForReceipt); setCompletedOrderForReceipt(null); }} className="w-1/2 bg-red-600 text-white py-3 rounded text-xs font-bold">🖨️ Print</button>
+              <button 
+                onClick={() => setCompletedOrderForReceipt(null)} 
+                className="w-1/2 bg-gray-200 py-3 rounded text-xs font-bold text-black"
+              >
+                Overslaan
+              </button>
+              <button 
+                onClick={() => { 
+                  triggerSoloPrint(completedOrderForReceipt, completedOrderForReceipt.readerId); 
+                  setCompletedOrderForReceipt(null); 
+                }} 
+                className="w-1/2 bg-red-600 hover:bg-red-700 text-white py-3 rounded text-xs font-bold"
+              >
+                🖨️ Print op Solo
+              </button>
             </div>
           </div>
         </div>

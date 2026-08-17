@@ -48,7 +48,7 @@ export default function AdminDashboard() {
     return [];
   });
 
-  // SumUp Microservice state
+  // SumUp state
   const [sumUpReaders, setSumUpReaders] = useState([]);
   const [pairingCode, setPairingCode] = useState('');
   const [terminalName, setTerminalName] = useState('');
@@ -175,13 +175,13 @@ export default function AdminDashboard() {
 
   const fetchSumUpReaders = async () => {
     try {
-      const res = await fetch('http://localhost:3001/api/terminal/readers');
+      const res = await fetch('/api/sumup/terminal-manager?action=readers');
       const data = await res.json();
       if (data.success) {
         setSumUpReaders(data.readers || []);
       }
     } catch (err) {
-      console.error('Kan geen verbinding maken met SumUp microservice op poort 3001:', err);
+      console.error('Kan geen SumUp apparaten ophalen via terminal-manager proxy:', err);
     }
   };
 
@@ -379,19 +379,19 @@ export default function AdminDashboard() {
     }
   };
 
-  // SumUp Microservice Handlers
-  const handlePairTerminal = async (e) => {
+  // SumUp Pairing via terminal-manager proxy
+  const handlePairSumUp = async (e) => {
     e.preventDefault();
-    setSumUpStatusMsg('Bezig met pairen...');
+    setSumUpStatusMsg('Bezig met SumUp koppelen...');
     try {
-      const res = await fetch('http://localhost:3001/api/terminal/pair', {
+      const res = await fetch('/api/sumup/terminal-manager?action=pair', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pairingCode, name: terminalName })
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        setSumUpStatusMsg('✅ Terminal succesvol gekoppeld!');
+        setSumUpStatusMsg('✅ SumUp apparaat succesvol gekoppeld!');
         setPairingCode('');
         setTerminalName('');
         fetchSumUpReaders();
@@ -399,20 +399,20 @@ export default function AdminDashboard() {
         setSumUpStatusMsg(`❌ Fout: ${data.error}`);
       }
     } catch (err) {
-      setSumUpStatusMsg('❌ Netwerkfout bij pairen.');
+      setSumUpStatusMsg('❌ Netwerkfout bij koppelen.');
     }
   };
 
   const handleUnlinkSumUp = async (readerId) => {
-    if (!confirm(`Weet je zeker dat je terminal ${readerId} wilt ontkoppelen?`)) return;
+    if (!confirm(`Weet je zeker dat je SumUp apparaat ${readerId} wilt ontkoppelen?`)) return;
 
     try {
-      const res = await fetch(`http://localhost:3001/api/terminal/unlink/${readerId}`, {
+      const res = await fetch(`/api/sumup/terminal-manager?action=unlink&readerId=${readerId}`, {
         method: 'DELETE'
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        alert('Terminal succesvol ontkoppeld!');
+        alert('SumUp apparaat succesvol ontkoppeld!');
         fetchSumUpReaders();
         fetchStores();
       } else {
@@ -423,7 +423,7 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleAssignStoreToReader = async (readerId) => {
+  const handleAssignStoreToSumUp = async (readerId) => {
     const storeId = selectedStoreForReader[readerId];
     if (!storeId) {
       alert('Selecteer eerst een filiaal.');
@@ -431,7 +431,7 @@ export default function AdminDashboard() {
     }
 
     try {
-      const res = await fetch('http://localhost:3001/api/terminal/assign-store', {
+      const res = await fetch('/api/sumup/terminal-manager?action=assign-store', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ storeId, readerId })
@@ -576,7 +576,7 @@ export default function AdminDashboard() {
                           <div className="font-bold text-sm text-red-600">{s.store_name || s.name}</div>
                           <div className="text-xs text-gray-500 mt-1">📍 {s.address}</div>
                           <div className="text-xs text-gray-600 mt-1">KvK: {s.kvk} | BTW: {s.btw}</div>
-                          <div className="text-xs text-gray-700 mt-2 font-mono">Terminal ID: <span className="font-bold">{s.terminal_id || 'Niet gekoppeld'}</span></div>
+                          <div className="text-xs text-gray-700 mt-2 font-mono">SumUp ID: <span className="font-bold">{s.terminal_id || 'Niet gekoppeld'}</span></div>
                         </div>
                         <div className="text-right space-x-2 pt-2 border-t">
                           <button onClick={() => setEditingStore(s)} className="text-xs bg-black text-white px-3 py-1.5 rounded font-bold">Bewerken</button>
@@ -589,22 +589,22 @@ export default function AdminDashboard() {
               </div>
             )}
 
-            {/* SumUp Microservice Tab */}
+            {/* SumUp Tab */}
             {activeTab === 'sumup' && (
               <div className="space-y-6">
                 <div className="bg-white rounded-lg shadow p-4 sm:p-6 space-y-4">
                   <div className="flex justify-between items-center border-b pb-3">
-                    <h3 className="text-sm sm:text-md font-bold">💳 SumUp Terminal Beheer (Microservice)</h3>
-                    <button onClick={fetchSumUpReaders} className="bg-black text-white px-3 py-1.5 rounded text-xs font-bold">🔄 Ververs Readers</button>
+                    <h3 className="text-sm sm:text-md font-bold">💳 SumUp Apparaat & Koppeling Beheer</h3>
+                    <button onClick={fetchSumUpReaders} className="bg-black text-white px-3 py-1.5 rounded text-xs font-bold">🔄 Ververs SumUp Apparaten</button>
                   </div>
 
                   {/* Paire Form */}
-                  <form onSubmit={handlePairTerminal} className="bg-gray-50 p-4 rounded border space-y-3">
-                    <h4 className="font-bold text-xs uppercase tracking-wider">Nieuwe Terminal Pairen</h4>
+                  <form onSubmit={handlePairSumUp} className="bg-gray-50 p-4 rounded border space-y-3">
+                    <h4 className="font-bold text-xs uppercase tracking-wider">Nieuw SumUp Apparaat Koppelen</h4>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                       <input
                         type="text"
-                        placeholder="Pairing Code (van scherm automaat)"
+                        placeholder="Pairing Code (van scherm SumUp Solo)"
                         value={pairingCode}
                         onChange={(e) => setPairingCode(e.target.value)}
                         className="p-2 border rounded text-xs"
@@ -612,27 +612,27 @@ export default function AdminDashboard() {
                       />
                       <input
                         type="text"
-                        placeholder="Naam (bijv. Kassa 1)"
+                        placeholder="Naam (bijv. Kassa Balie 1)"
                         value={terminalName}
                         onChange={(e) => setTerminalName(e.target.value)}
                         className="p-2 border rounded text-xs"
                       />
-                      <button type="submit" className="bg-red-600 hover:bg-red-700 text-white font-bold p-2 rounded text-xs uppercase">Pairen</button>
+                      <button type="submit" className="bg-red-600 hover:bg-red-700 text-white font-bold p-2 rounded text-xs uppercase">Koppelen</button>
                     </div>
                     {sumUpStatusMsg && <p className="text-xs font-bold text-gray-700">{sumUpStatusMsg}</p>}
                   </form>
 
                   {/* Gekoppelde Readers Lijst */}
                   <div className="space-y-3">
-                    <h4 className="font-bold text-xs uppercase tracking-wider">Beschikbare Readers op Account</h4>
+                    <h4 className="font-bold text-xs uppercase tracking-wider">Gekoppelde SumUp Apparaten op Account</h4>
                     <div className="divide-y border rounded">
                       {sumUpReaders.length === 0 ? (
-                        <p className="p-6 text-center text-xs text-gray-400">Geen readers gevonden of geen verbinding met poort 3001.</p>
+                        <p className="p-6 text-center text-xs text-gray-400">Geen SumUp apparaten gevonden of geen verbinding met de microservice.</p>
                       ) : (
                         sumUpReaders.map((r) => (
                           <div key={r.id} className="p-3 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white">
                             <div>
-                              <div className="font-bold text-xs">{r.name || 'Naamloze Reader'}</div>
+                              <div className="font-bold text-xs">{r.name || 'SumUp Apparaat'}</div>
                               <div className="text-[11px] font-mono text-gray-500">ID: {r.id} | Status: {r.status || 'Actief'}</div>
                             </div>
                             <div className="flex items-center gap-2 w-full sm:w-auto">
@@ -649,7 +649,7 @@ export default function AdminDashboard() {
                                 ))}
                               </select>
                               <button
-                                onClick={() => handleAssignStoreToReader(r.id)}
+                                onClick={() => handleAssignStoreToSumUp(r.id)}
                                 className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-xs font-bold"
                               >
                                 Koppel aan Filiaal
@@ -658,7 +658,7 @@ export default function AdminDashboard() {
                                 onClick={() => handleUnlinkSumUp(r.id)}
                                 className="bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded text-xs font-bold"
                               >
-                                Ontkoppel
+                                Ontkoppelen
                               </button>
                             </div>
                           </div>
