@@ -6,13 +6,45 @@ import React from 'react';
 export default function AdminDashboard() {
   const router = useRouter();
   const [currentUser, setCurrentUser] = useState(null);
-  const [activeTab, setActiveTab] = useState('users');
 
-  const [users, setUsers] = useState([]);
-  const [stores, setStores] = useState([]);
-  const [orders, setOrders] = useState([]);
+  // Caching voor actieve tab in localStorage
+  const [activeTab, setActiveTab] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('admin_active_tab') || 'users';
+    }
+    return 'users';
+  });
+
+  // Caching voor gebruikers
+  const [users, setUsers] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('admin_cached_users');
+      return saved ? JSON.parse(saved) : [];
+    }
+    return [];
+  });
+
+  // Caching voor filialen
+  const [stores, setStores] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('admin_cached_stores');
+      return saved ? JSON.parse(saved) : [];
+    }
+    return [];
+  });
+
+  // Caching voor bestellingen
+  const [orders, setOrders] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('admin_cached_orders');
+      return saved ? JSON.parse(saved) : [];
+    }
+    return [];
+  });
+
   const [loading, setLoading] = useState(false);
 
+  // Caching voor producten
   const [products, setProducts] = useState(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('admin_products');
@@ -31,11 +63,36 @@ export default function AdminDashboard() {
   const [currentPage, setCurrentPage] = useState(1);
   const ordersPerPage = 10;
 
+  // Opslaan van state in localStorage bij wijzigingen
   useEffect(() => {
-    if (products.length > 0) {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('admin_active_tab', activeTab);
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && products.length > 0) {
       localStorage.setItem('admin_products', JSON.stringify(products));
     }
   }, [products]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && users.length > 0) {
+      localStorage.setItem('admin_cached_users', JSON.stringify(users));
+    }
+  }, [users]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && stores.length > 0) {
+      localStorage.setItem('admin_cached_stores', JSON.stringify(stores));
+    }
+  }, [stores]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && orders.length > 0) {
+      localStorage.setItem('admin_cached_orders', JSON.stringify(orders));
+    }
+  }, [orders]);
 
   const formatAttributes = (attributes) => {
     if (!attributes || !Array.isArray(attributes) || attributes.length === 0) return '';
@@ -89,7 +146,10 @@ export default function AdminDashboard() {
     try {
       const res = await fetch('/api/admin/users');
       const data = await res.json();
-      if (data.success) setUsers(data.users || []);
+      if (data.success && data.users) {
+        setUsers(data.users);
+        localStorage.setItem('admin_cached_users', JSON.stringify(data.users));
+      }
     } catch (err) {
       console.error('Fout bij ophalen gebruikers:', err);
     }
@@ -100,7 +160,9 @@ export default function AdminDashboard() {
       const res = await fetch('/api/admin/store');
       const data = await res.json();
       if (data.success) {
-        setStores(Array.isArray(data.stores) ? data.stores : (data.store ? [data.store] : []));
+        const storeList = Array.isArray(data.stores) ? data.stores : (data.store ? [data.store] : []);
+        setStores(storeList);
+        localStorage.setItem('admin_cached_stores', JSON.stringify(storeList));
       }
     } catch (err) {
       console.error('Fout bij ophalen winkels:', err);
@@ -143,7 +205,10 @@ export default function AdminDashboard() {
     try {
       const res = await fetch('/api/woocommerce/orders');
       const data = await res.json();
-      if (data.success) setOrders(data.orders || []);
+      if (data.success && data.orders) {
+        setOrders(data.orders);
+        localStorage.setItem('admin_cached_orders', JSON.stringify(data.orders));
+      }
     } catch (err) {
       console.error('Fout bij ophalen bestellingen:', err);
     }
@@ -592,7 +657,7 @@ export default function AdminDashboard() {
         )}
       </div>
 
-      {/* Modals (Responsive breedte gecentreerd op mobiel en tablet) */}
+      {/* Modals */}
       {editingUser && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <form onSubmit={handleUpdateUser} className="bg-white rounded-lg p-6 max-w-sm w-full space-y-3 shadow-xl">

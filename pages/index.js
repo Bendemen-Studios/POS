@@ -18,7 +18,6 @@ export default function POSHome() {
   
   const [isChecking, setIsChecking] = useState(true);
 
-  // Producten cachen in localStorage zodat ze nooit verdwijnen bij paginawissels
   const [products, setProducts] = useState(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('pos_cached_products');
@@ -48,7 +47,13 @@ export default function POSHome() {
   const [completedOrderForReceipt, setCompletedOrderForReceipt] = useState(null);
   const [stockWarningModal, setStockWarningModal] = useState({ show: false, product: null, variation: null, price: 0 });
 
-  const [customers, setCustomers] = useState([]);
+  const [customers, setCustomers] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('pos_cached_customers');
+      return saved ? JSON.parse(saved) : [];
+    }
+    return [];
+  });
   
   const [selectedCustomer, setSelectedCustomer] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -77,12 +82,17 @@ export default function POSHome() {
   const [pickupOrders, setPickupOrders] = useState([]);
   const [loadingPickup, setLoadingPickup] = useState(false);
 
-  // Automatisch producten cachen zodra ze worden opgehaald
   useEffect(() => {
     if (typeof window !== 'undefined' && products.length > 0) {
       localStorage.setItem('pos_cached_products', JSON.stringify(products));
     }
   }, [products]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && customers.length > 0) {
+      localStorage.setItem('pos_cached_customers', JSON.stringify(customers));
+    }
+  }, [customers]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -258,7 +268,7 @@ export default function POSHome() {
 
   const handleSyncData = async () => {
     setIsSyncing(true);
-    await Promise.all([fetchProducts(), fetchCustomers(), fetchPickupOrders()]);
+    await Promise.all([fetchProducts(), fetchCustomers(), fetchUsersAsCustomers(), fetchPickupOrders()]);
     await triggerOfflineSync(false);
     setIsSyncing(false);
   };
@@ -280,9 +290,36 @@ export default function POSHome() {
     try {
       const res = await fetch('/api/woocommerce/customers');
       const data = await res.json();
-      if (data.success) setCustomers(data.customers || []);
+      if (data.success && data.customers) {
+        setCustomers(data.customers);
+      }
     } catch (err) {
       console.error('Fout bij ophalen klanten:', err);
+    }
+  };
+
+  // Haal admins/medewerkers op en voeg ze toe als klantenoptie
+  const fetchUsersAsCustomers = async () => {
+    try {
+      const res = await fetch('/api/admin/users');
+      const data = await res.json();
+      if (data.success && data.users) {
+        const staffAsCustomers = data.users.map(u => ({
+          id: `staff_${u.id}`,
+          first_name: u.username,
+          last_name: '(Medewerker / Admin)',
+          email: u.email || `${u.username}@bendemen.local`
+        }));
+        
+        setCustomers(prev => {
+          const existingIds = new Set(prev.map(c => c.id));
+          const merged = [...prev, ...staffAsCustomers.filter(s => !existingIds.has(s.id))];
+          localStorage.setItem('pos_cached_customers', JSON.stringify(merged));
+          return merged;
+        });
+      }
+    } catch (err) {
+      console.error('Fout bij ophalen medewerkers:', err);
     }
   };
 
@@ -1020,31 +1057,36 @@ export default function POSHome() {
             <div>
               <h2 className="text-base sm:text-lg font-bold mb-3 border-b pb-2">Huidige Bestelling</h2>
 
+              {/* Gekoppelde Klant (Met Naam en E-mail weergave) */}
               <div className="mb-3 bg-gray-50 p-2 rounded border">
                 <label className="text-xs font-bold text-gray-600 block mb-1">Gekoppelde Klant:</label>
                 {selectedCustomer ? (
                   <div className="flex justify-between items-center text-sm">
-                    <span className="font-semibold text-black">{selectedCustomer.first_name} {selectedCustomer.last_name}</span>
+                    <div>
+                      <span className="font-semibold text-black block">{selectedCustomer.first_name} {selectedCustomer.last_name}</span>
+                      <span className="text-[11px] text-gray-500 block">{selectedCustomer.email}</span>
+                    </div>
                     <button onClick={() => { setSelectedCustomer(null); setPointsToRedeem(0); setRedeemedDiscount(0); }} className="text-red-500 text-xs underline">Ontkoppel</button>
                   </div>
                 ) : (
                   <div>
                     <input
                       type="text"
-                      placeholder="Zoek klant op naam/email..."
+                      placeholder="Zoek klant of medewerker..."
                       value={customerSearch}
                       onChange={(e) => setCustomerSearch(e.target.value)}
                       className="w-full p-1.5 text-xs border rounded mb-1"
                     />
                     {customerSearch && (
-                      <div className="max-h-24 overflow-y-auto bg-white border rounded">
-                        {filteredCustomers.slice(0, 5).map((c) => (
+                      <div className="max-h-28 overflow-y-auto bg-white border rounded">
+                        {filteredCustomers.slice(0, 6).map((c) => (
                           <div
                             key={c.id}
                             onClick={() => { setSelectedCustomer(c); setCustomerSearch(''); }}
-                            className="p-1.5 text-xs hover:bg-gray-100 cursor-pointer"
+                            className="p-1.5 text-xs hover:bg-gray-100 cursor-pointer border-b last:border-b-0"
                           >
-                            {c.first_name} {c.last_name} ({c.email})
+                            <div className="font-bold">{c.first_name} {c.last_name}</div>
+                            <div className="text-[10px] text-gray-500">{c.email}</div>
                           </div>
                         ))}
                       </div>
