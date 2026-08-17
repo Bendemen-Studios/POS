@@ -48,12 +48,18 @@ export default function AdminDashboard() {
     return [];
   });
 
+  // SumUp Microservice state
+  const [sumUpReaders, setSumUpReaders] = useState([]);
+  const [pairingCode, setPairingCode] = useState('');
+  const [terminalName, setTerminalName] = useState('');
+  const [sumUpStatusMsg, setSumUpStatusMsg] = useState('');
+  const [selectedStoreForReader, setSelectedStoreForReader] = useState({});
+
   const [newUser, setNewUser] = useState({ username: '', password: '', role: 'cashier', store_id: '', email: '' });
   const [newStore, setNewStore] = useState({ store_name: '', address: '', kvk: '', btw: '', pickup_id: '' });
 
   const [editingUser, setEditingUser] = useState(null);
   const [editingStore, setEditingStore] = useState(null);
-  const [editingSumUp, setEditingSumUp] = useState(null);
 
   const [currentPage, setCurrentPage] = useState(1);
   const ordersPerPage = 10;
@@ -61,6 +67,9 @@ export default function AdminDashboard() {
   useEffect(() => {
     if (typeof window !== 'undefined') {
       localStorage.setItem('admin_active_tab', activeTab);
+    }
+    if (activeTab === 'sumup') {
+      fetchSumUpReaders();
     }
   }, [activeTab]);
 
@@ -126,7 +135,8 @@ export default function AdminDashboard() {
     await Promise.all([
       fetchUsers(),
       fetchStores(),
-      fetchOrders()
+      fetchOrders(),
+      fetchSumUpReaders()
     ]);
     
     const savedProducts = localStorage.getItem('admin_products');
@@ -160,6 +170,18 @@ export default function AdminDashboard() {
       }
     } catch (err) {
       console.error('Fout bij ophalen winkels:', err);
+    }
+  };
+
+  const fetchSumUpReaders = async () => {
+    try {
+      const res = await fetch('http://localhost:3001/api/terminal/readers');
+      const data = await res.json();
+      if (data.success) {
+        setSumUpReaders(data.readers || []);
+      }
+    } catch (err) {
+      console.error('Kan geen verbinding maken met SumUp microservice op poort 3001:', err);
     }
   };
 
@@ -357,48 +379,72 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleSaveSumUp = async (e) => {
+  // SumUp Microservice Handlers
+  const handlePairTerminal = async (e) => {
     e.preventDefault();
+    setSumUpStatusMsg('Bezig met pairen...');
     try {
-      const res = await fetch('/api/sumup/pair', {
+      const res = await fetch('http://localhost:3001/api/terminal/pair', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          storeId: editingSumUp.id || editingSumUp.store_id,
-          terminalId: editingSumUp.terminal_id
-        })
+        body: JSON.stringify({ pairingCode, name: terminalName })
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        alert('Terminal ID succesvol opgeslagen!');
-        setEditingSumUp(null);
-        fetchStores();
+        setSumUpStatusMsg('✅ Terminal succesvol gekoppeld!');
+        setPairingCode('');
+        setTerminalName('');
+        fetchSumUpReaders();
       } else {
-        alert('Fout bij opslaan: ' + (data.error || 'Onbekende fout'));
+        setSumUpStatusMsg(`❌ Fout: ${data.error}`);
       }
     } catch (err) {
-      alert('Netwerkfout bij opslaan Terminal ID.');
+      setSumUpStatusMsg('❌ Netwerkfout bij pairen.');
     }
   };
 
-  const handleUnlinkSumUp = async (storeId) => {
-    if (!confirm('Weet je zeker dat je deze SumUp terminal wilt ontkoppelen?')) return;
+  const handleUnlinkSumUp = async (readerId) => {
+    if (!confirm(`Weet je zeker dat je terminal ${readerId} wilt ontkoppelen?`)) return;
 
     try {
-      const res = await fetch('/api/sumup/unlink', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ storeId })
+      const res = await fetch(`http://localhost:3001/api/terminal/unlink/${readerId}`, {
+        method: 'DELETE'
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        alert('SumUp terminal succesvol ontkoppeld!');
+        alert('Terminal succesvol ontkoppeld!');
+        fetchSumUpReaders();
         fetchStores();
       } else {
         alert('Fout bij ontkoppelen: ' + (data.error || 'Onbekende fout'));
       }
     } catch (err) {
       alert('Netwerkfout bij ontkoppelen.');
+    }
+  };
+
+  const handleAssignStoreToReader = async (readerId) => {
+    const storeId = selectedStoreForReader[readerId];
+    if (!storeId) {
+      alert('Selecteer eerst een filiaal.');
+      return;
+    }
+
+    try {
+      const res = await fetch('http://localhost:3001/api/terminal/assign-store', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ storeId, readerId })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        alert(data.message);
+        fetchStores();
+      } else {
+        alert('Fout bij toewijzen: ' + (data.error || 'Onbekende fout'));
+      }
+    } catch (err) {
+      alert('Netwerkfout bij toewijzen aan filiaal.');
     }
   };
 
@@ -530,6 +576,7 @@ export default function AdminDashboard() {
                           <div className="font-bold text-sm text-red-600">{s.store_name || s.name}</div>
                           <div className="text-xs text-gray-500 mt-1">📍 {s.address}</div>
                           <div className="text-xs text-gray-600 mt-1">KvK: {s.kvk} | BTW: {s.btw}</div>
+                          <div className="text-xs text-gray-700 mt-2 font-mono">Terminal ID: <span className="font-bold">{s.terminal_id || 'Niet gekoppeld'}</span></div>
                         </div>
                         <div className="text-right space-x-2 pt-2 border-t">
                           <button onClick={() => setEditingStore(s)} className="text-xs bg-black text-white px-3 py-1.5 rounded font-bold">Bewerken</button>
@@ -542,32 +589,83 @@ export default function AdminDashboard() {
               </div>
             )}
 
-            {/* SumUp Tab */}
+            {/* SumUp Microservice Tab */}
             {activeTab === 'sumup' && (
-              <div className="bg-white rounded-lg shadow p-4 sm:p-6">
-                <h3 className="text-sm sm:text-md font-bold mb-2">💳 SumUp Terminal Beheer</h3>
-                <p className="text-xs text-gray-500 mb-4">Beheer hier per filiaal de SumUp Terminal ID.</p>
-                <div className="space-y-3">
-                  {stores.map(s => (
-                    <div key={s.id || s.store_id} className="border p-4 rounded flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-gray-50">
-                      <div>
-                        <span className="font-bold text-sm">{s.store_name || s.name}</span>
-                        <div className="text-xs text-gray-600 mt-1">
-                          Terminal ID: <span className="font-mono font-bold text-black">{s.terminal_id || 'Geen'}</span>
-                        </div>
-                      </div>
-                      <div className="flex items-center space-x-2 w-full sm:w-auto">
-                        <button onClick={() => setEditingSumUp(s)} className="text-xs bg-black text-white px-3 py-2 rounded font-bold hover:bg-gray-800 flex-1 sm:flex-initial text-center">
-                          Bewerken
-                        </button>
-                        {s.terminal_id && (
-                          <button onClick={() => handleUnlinkSumUp(s.id || s.store_id)} className="text-xs bg-red-600 text-white px-3 py-2 rounded font-bold hover:bg-red-700 flex-1 sm:flex-initial text-center">
-                            Ontkoppelen
-                          </button>
-                        )}
-                      </div>
+              <div className="space-y-6">
+                <div className="bg-white rounded-lg shadow p-4 sm:p-6 space-y-4">
+                  <div className="flex justify-between items-center border-b pb-3">
+                    <h3 className="text-sm sm:text-md font-bold">💳 SumUp Terminal Beheer (Microservice)</h3>
+                    <button onClick={fetchSumUpReaders} className="bg-black text-white px-3 py-1.5 rounded text-xs font-bold">🔄 Ververs Readers</button>
+                  </div>
+
+                  {/* Paire Form */}
+                  <form onSubmit={handlePairTerminal} className="bg-gray-50 p-4 rounded border space-y-3">
+                    <h4 className="font-bold text-xs uppercase tracking-wider">Nieuwe Terminal Pairen</h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <input
+                        type="text"
+                        placeholder="Pairing Code (van scherm automaat)"
+                        value={pairingCode}
+                        onChange={(e) => setPairingCode(e.target.value)}
+                        className="p-2 border rounded text-xs"
+                        required
+                      />
+                      <input
+                        type="text"
+                        placeholder="Naam (bijv. Kassa 1)"
+                        value={terminalName}
+                        onChange={(e) => setTerminalName(e.target.value)}
+                        className="p-2 border rounded text-xs"
+                      />
+                      <button type="submit" className="bg-red-600 hover:bg-red-700 text-white font-bold p-2 rounded text-xs uppercase">Pairen</button>
                     </div>
-                  ))}
+                    {sumUpStatusMsg && <p className="text-xs font-bold text-gray-700">{sumUpStatusMsg}</p>}
+                  </form>
+
+                  {/* Gekoppelde Readers Lijst */}
+                  <div className="space-y-3">
+                    <h4 className="font-bold text-xs uppercase tracking-wider">Beschikbare Readers op Account</h4>
+                    <div className="divide-y border rounded">
+                      {sumUpReaders.length === 0 ? (
+                        <p className="p-6 text-center text-xs text-gray-400">Geen readers gevonden of geen verbinding met poort 3001.</p>
+                      ) : (
+                        sumUpReaders.map((r) => (
+                          <div key={r.id} className="p-3 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white">
+                            <div>
+                              <div className="font-bold text-xs">{r.name || 'Naamloze Reader'}</div>
+                              <div className="text-[11px] font-mono text-gray-500">ID: {r.id} | Status: {r.status || 'Actief'}</div>
+                            </div>
+                            <div className="flex items-center gap-2 w-full sm:w-auto">
+                              <select
+                                className="border p-1.5 rounded text-xs"
+                                value={selectedStoreForReader[r.id] || ''}
+                                onChange={(e) => setSelectedStoreForReader({ ...selectedStoreForReader, [r.id]: e.target.value })}
+                              >
+                                <option value="">-- Selecteer Filiaal --</option>
+                                {stores.map(s => (
+                                  <option key={s.id || s.store_id} value={s.id || s.store_id}>
+                                    {s.store_name || s.name}
+                                  </option>
+                                ))}
+                              </select>
+                              <button
+                                onClick={() => handleAssignStoreToReader(r.id)}
+                                className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-xs font-bold"
+                              >
+                                Koppel aan Filiaal
+                              </button>
+                              <button
+                                onClick={() => handleUnlinkSumUp(r.id)}
+                                className="bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded text-xs font-bold"
+                              >
+                                Ontkoppel
+                              </button>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
@@ -703,32 +801,6 @@ export default function AdminDashboard() {
             <div className="flex space-x-2 pt-2">
               <button type="button" onClick={() => setEditingStore(null)} className="w-1/2 bg-gray-200 py-2.5 rounded text-xs font-bold">Annuleren</button>
               <button type="submit" className="w-1/2 bg-red-600 text-white py-2.5 rounded text-xs font-bold">Opslaan</button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {editingSumUp && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-          <form onSubmit={handleSaveSumUp} className="bg-white rounded-lg p-6 max-w-md w-full space-y-4 shadow-xl">
-            <h3 className="text-md font-bold border-b pb-2">SumUp Terminal ID: {editingSumUp.store_name || editingSumUp.name}</h3>
-            
-            <div>
-              <label className="text-xs font-bold text-gray-600 block mb-1">Terminal ID</label>
-              <input 
-                type="text" 
-                placeholder="Bijv. rdr_646WWCYHAB89KV4YM7M91ABQ67" 
-                value={editingSumUp.terminal_id || ''} 
-                onChange={(e) => setEditingSumUp({...editingSumUp, terminal_id: e.target.value})} 
-                className="w-full p-2.5 border rounded text-xs font-bold font-mono" 
-                required
-              />
-              <p className="text-[10px] text-gray-400 mt-1">Voer de vaste Terminal ID in om pinnen mogelijk te maken.</p>
-            </div>
-
-            <div className="flex space-x-2 pt-2">
-              <button type="button" onClick={() => setEditingStore ? setEditingStore(null) : setEditingSumUp(null)} className="w-1/2 bg-gray-200 py-2.5 rounded text-xs font-bold">Annuleren</button>
-              <button type="submit" className="w-1/2 bg-red-600 hover:bg-red-700 text-white py-2.5 rounded text-xs font-bold">Opslaan</button>
             </div>
           </form>
         </div>

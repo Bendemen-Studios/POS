@@ -616,11 +616,12 @@ export default function POSHome() {
     }
   };
 
+  // Aangepast om direct te communiceren met de zelfstandige SumUp Add-on microservice op poort 3001
   const processSumUpPayment = async (amount, storeId) => {
-    const res = await fetch('/api/sumup/terminal', {
+    const res = await fetch('http://localhost:3001/api/terminal/pay', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ totalAmount: amount, storeId })
+      body: JSON.stringify({ totalAmount: amount, storeId: storeId })
     });
 
     const data = await res.json();
