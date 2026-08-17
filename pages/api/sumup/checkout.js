@@ -14,8 +14,8 @@ export default async function handler(req, res) {
   }
 
   const sumupApiKey = process.env.SUMUP_API_KEY || process.env.SUMUP_SECRET_KEY;
-  // Haal de merchant code op uit je .env (of zet hem hier direct neer als string)
-  const merchantCode = process.env.SUMUP_MERCHANT_CODE || 'JOUW_MERCHANT_CODE';
+  // Hardcoded als directe fallback zodat hij hem nooit mist:
+  const merchantCode = process.env.SUMUP_MERCHANT_CODE || 'MM669XL6';
 
   if (!sumupApiKey) {
     return res.status(500).json({ success: false, error: 'SumUp API-sleutel ontbreekt in de .env omgeving.' });
@@ -45,7 +45,6 @@ export default async function handler(req, res) {
       return res.status(400).json({ success: false, error: 'Geen Terminal ID gevonden in de database.' });
     }
 
-    // Payload inclusief de verplichte merchant_code
     const checkoutPayload = {
       amount: parseFloat(totalAmount),
       currency: 'EUR',
