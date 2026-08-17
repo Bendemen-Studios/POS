@@ -36,17 +36,6 @@ export default function AdminDashboard() {
     }
   }, [products]);
 
-  const formatAttributes = (attributes) => {
-    if (!attributes || !Array.isArray(attributes) || attributes.length === 0) return '';
-    return attributes
-      .map((a) => {
-        const key = a.name || a.slug || 'Optie';
-        const val = a.option || 'Standaard';
-        return `${key}: ${val}`;
-      })
-      .join(' | ');
-  };
-
   useEffect(() => {
     const userStr = localStorage.getItem('pos_user');
     if (!userStr) {
@@ -81,7 +70,6 @@ export default function AdminDashboard() {
     if (!savedProducts || JSON.parse(savedProducts).length === 0) {
       await fetchProductsSilently();
     }
-    
     setLoading(false);
   };
 
@@ -298,22 +286,29 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleUpdateSumUp = async (e) => {
+  // SumUp Pair API aanroep vanuit Admin
+  const handlePairSumUp = async (e) => {
     e.preventDefault();
     try {
-      const res = await fetch('/api/admin/store', {
-        method: 'PUT',
+      const res = await fetch('/api/sumup/pair', {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editingSumUp)
+        body: JSON.stringify({
+          storeId: editingSumUp.id || editingSumUp.store_id,
+          pairingCode: editingSumUp.pair_code,
+          readerName: editingSumUp.store_name || editingSumUp.name
+        })
       });
       const data = await res.json();
-      if (data.success) {
-        alert('SumUp bijgewerkt!');
+      if (res.ok && data.success) {
+        alert('SumUp terminal succesvol gekoppeld en opgeslagen!');
         setEditingSumUp(null);
         fetchStores();
+      } else {
+        alert('Fout bij koppelen: ' + (data.error || 'Onbekende fout'));
       }
     } catch (err) {
-      alert('Fout bij bijwerken SumUp.');
+      alert('Netwerkfout bij koppelen met SumUp.');
     }
   };
 
@@ -456,15 +451,23 @@ export default function AdminDashboard() {
 
             {activeTab === 'sumup' && (
               <div className="bg-white rounded-lg shadow p-6">
-                <h3 className="text-md font-bold mb-4">💳 SumUp Terminal Koppelingen</h3>
+                <h3 className="text-md font-bold mb-2">💳 SumUp Terminal & Pair Code Koppeling</h3>
+                <p className="text-xs text-gray-500 mb-4">Beheer hier per filiaal de SumUp Terminal ID en Pair Code.</p>
                 <div className="space-y-3">
                   {stores.map(s => (
-                    <div key={s.id || s.store_id} className="border p-3 rounded flex justify-between items-center bg-gray-50">
+                    <div key={s.id || s.store_id} className="border p-4 rounded flex justify-between items-center bg-gray-50">
                       <div>
                         <span className="font-bold text-sm">{s.store_name || s.name}</span>
-                        <div className="text-xs text-gray-600">Terminal: <span className="font-mono font-bold">{s.terminal_id || 'Geen'}</span></div>
+                        <div className="text-xs text-gray-600 mt-1">
+                          Terminal ID: <span className="font-mono font-bold text-black">{s.terminal_id || 'Geen'}</span>
+                        </div>
+                        <div className="text-xs text-gray-600 mt-0.5">
+                          Pair Code: <span className="font-mono font-bold text-red-600">{s.pair_code || 'Geen'}</span>
+                        </div>
                       </div>
-                      <button onClick={() => setEditingSumUp(s)} className="text-xs bg-black text-white px-3 py-1 rounded font-bold">Koppelen</button>
+                      <button onClick={() => setEditingSumUp(s)} className="text-xs bg-black text-white px-3 py-2 rounded font-bold hover:bg-gray-800">
+                        Koppelen / Wijzigen
+                      </button>
                     </div>
                   ))}
                 </div>
@@ -555,12 +558,35 @@ export default function AdminDashboard() {
 
       {editingSumUp && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-          <form onSubmit={handleUpdateSumUp} className="bg-white rounded-lg p-6 max-w-sm w-full space-y-3">
-            <h3 className="text-md font-bold">SumUp Koppelen</h3>
-            <input type="text" placeholder="Terminal ID" value={editingSumUp.terminal_id || ''} onChange={(e) => setEditingSumUp({...editingSumUp, terminal_id: e.target.value})} className="w-full p-2 border rounded text-xs font-bold" />
+          <form onSubmit={handlePairSumUp} className="bg-white rounded-lg p-6 max-w-md w-full space-y-4">
+            <h3 className="text-md font-bold border-b pb-2">SumUp Koppelen: {editingSumUp.store_name || editingSumUp.name}</h3>
+            
+            <div>
+              <label className="text-xs font-bold text-gray-600 block mb-1">Terminal ID (Optioneel)</label>
+              <input 
+                type="text" 
+                placeholder="Bijv. terminal_123" 
+                value={editingSumUp.terminal_id || ''} 
+                onChange={(e) => setEditingSumUp({...editingSumUp, terminal_id: e.target.value})} 
+                className="w-full p-2 border rounded text-xs font-bold font-mono" 
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-gray-600 block mb-1">Pair Code (Van de pinautomaat)</label>
+              <input 
+                type="text" 
+                placeholder="Bijv. ABC123XYZ" 
+                value={editingSumUp.pair_code || ''} 
+                onChange={(e) => setEditingSumUp({...editingSumUp, pair_code: e.target.value})} 
+                className="w-full p-2 border rounded text-xs font-bold font-mono text-red-600" 
+              />
+              <p className="text-[10px] text-gray-400 mt-1">Voer de actieve koppelcode in om direct te koppelen via de SumUp API.</p>
+            </div>
+
             <div className="flex space-x-2 pt-2">
-              <button type="button" onClick={() => setEditingSumUp(null)} className="w-1/2 bg-gray-200 p-2 rounded text-xs font-bold">Annuleren</button>
-              <button type="submit" className="w-1/2 bg-red-600 text-white p-2 rounded text-xs font-bold">Opslaan</button>
+              <button type="button" onClick={() => setEditingSumUp(null)} className="w-1/2 bg-gray-200 py-2.5 rounded text-xs font-bold">Annuleren</button>
+              <button type="submit" className="w-1/2 bg-red-600 hover:bg-red-700 text-white py-2.5 rounded text-xs font-bold">Koppelen & Opslaan</button>
             </div>
           </form>
         </div>
