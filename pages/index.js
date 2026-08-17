@@ -639,7 +639,6 @@ export default function POSHome() {
     setLoading(true);
     setCheckoutStatus(null);
 
-    // Strikte controle voor SumUp: als dit kiest, wachten we op succesvol antwoord van de API
     if (selectedPaymentMethod === 'sumup') {
       try {
         const storeId = selectedStore?.id || selectedStore?.store_id || 1;
@@ -1159,7 +1158,7 @@ export default function POSHome() {
                 disabled={loading || cart.length === 0}
                 className="w-full bg-red-600 hover:bg-red-700 disabled:bg-gray-300 text-white font-bold py-3 rounded transition text-xs sm:text-sm uppercase tracking-wider"
               >
-                {loading ? '⏳ Bezig met pinnen...' : `Afrekenen (€{finalTotal.toFixed(2)})`}
+                {loading ? '⏳ Bezig met pinnen...' : `Afrekenen (€${finalTotal.toFixed(2)})`}
               </button>
             </div>
           </div>
@@ -1261,7 +1260,7 @@ export default function POSHome() {
           <div className="bg-white rounded-lg shadow-2xl max-w-sm w-full p-6 space-y-4 text-center">
             <div className="text-red-600 text-4xl">⚠️</div>
             <h3 className="text-base sm:text-lg font-bold">Voorraad Waarschuwing</h3>
-            <p className="text-xs text-gray-600">Dit product heeft een lage/negatieve voorraad.</p>
+            <p className="text-xs text-gray-600 font-semibold">Weet je zeker dat je dit product hebt</p>
             <div className="flex space-x-2 pt-2">
               <button onClick={() => setStockWarningModal({ show: false, product: null, variation: null, price: 0 })} className="w-1/2 bg-gray-200 text-black font-bold py-2.5 rounded text-xs">Nee</button>
               <button onClick={handleConfirmStockWarning} className="w-1/2 bg-red-600 text-white font-bold py-2.5 rounded text-xs">Ja, Toevoegen</button>
