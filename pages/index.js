@@ -298,7 +298,6 @@ export default function POSHome() {
     }
   };
 
-  // Haal alle WP / admin / systeem gebruikers op en voeg ze toe als klantopties
   const fetchUsersAsCustomers = async () => {
     try {
       const res = await fetch('/api/admin/users');
@@ -1012,12 +1011,6 @@ export default function POSHome() {
                     onClick={() => handleProductClick(product)}
                     className="bg-gray-50 border border-gray-200 rounded-lg p-2 flex flex-col justify-between cursor-pointer hover:border-black transition shadow-sm hover:shadow relative"
                   >
-                    {hasVariations && (
-                      <span className="absolute top-2 right-2 bg-black text-white text-[9px] font-bold px-1.5 py-0.5 rounded uppercase z-10">
-                        Variaties
-                      </span>
-                    )}
-
                     <div>
                       <div className="w-full aspect-square bg-gray-200 rounded mb-2 overflow-hidden flex items-center justify-center relative">
                         {imageUrl ? (
@@ -1029,6 +1022,13 @@ export default function POSHome() {
                         ) : (
                           <span className="text-gray-400 text-xs font-bold">GEEN FOTO</span>
                         )}
+
+                        {hasVariations && (
+                          <span className="absolute top-2 right-2 bg-black text-white text-[9px] font-bold px-1.5 py-0.5 rounded uppercase z-10 shadow">
+                            Variaties
+                          </span>
+                        )}
+
                         {stockQty !== null && (
                           <span className={`absolute bottom-1 right-1 text-[10px] px-1.5 py-0.5 rounded font-bold ${stockQty <= 0 ? 'bg-red-600 text-white' : 'bg-black text-white'}`}>
                             {stockQty}
