@@ -14,14 +14,14 @@ export default async function handler(req, res) {
   }
 
   const sumupApiKey = process.env.SUMUP_API_KEY || process.env.SUMUP_SECRET_KEY;
-  const merchantCode = process.env.SUMUP_MERCHANT_CODE;
+  // Haal de merchant code op uit je .env (of zet hem hier direct neer als string)
+  const merchantCode = process.env.SUMUP_MERCHANT_CODE || 'JOUW_MERCHANT_CODE';
 
   if (!sumupApiKey) {
     return res.status(500).json({ success: false, error: 'SumUp API-sleutel ontbreekt in de .env omgeving.' });
   }
 
   try {
-    // 1. Haal de Terminal ID op uit de database voor dit filiaal
     let terminalId = req.body.terminalId;
 
     if (!terminalId && storeId) {
@@ -42,21 +42,18 @@ export default async function handler(req, res) {
     }
 
     if (!terminalId) {
-      return res.status(400).json({ success: false, error: 'Geen Terminal ID gevonden in de database. Koppel eerst je pinautomaat in het admin paneel.' });
+      return res.status(400).json({ success: false, error: 'Geen Terminal ID gevonden in de database.' });
     }
 
-    // 2. Correcte SumUp Checkout API endpoint voor card readers / terminals
+    // Payload inclusief de verplichte merchant_code
     const checkoutPayload = {
       amount: parseFloat(totalAmount),
       currency: 'EUR',
       payment_type: 'reader',
       reader_id: terminalId.trim(),
+      merchant_code: merchantCode.trim(),
       checkout_reference: `BDM-POS-${Date.now()}`
     };
-
-    if (merchantCode) {
-      checkoutPayload.merchant_code = merchantCode.trim();
-    }
 
     const checkoutRes = await axios.post(
       'https://api.sumup.com/v0.1/checkouts',
