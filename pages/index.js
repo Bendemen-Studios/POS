@@ -619,9 +619,10 @@ export default function POSHome() {
 
   const processSumUpPayment = async (amount, terminalId) => {
     if (!terminalId) {
-      throw new Error('Geen geldige SumUp Terminal ID of Pair Code gekoppeld aan dit filiaal.');
+      throw new Error('Geen geldige Terminal ID of Pair Code gekoppeld aan dit filiaal.');
     }
 
+    // 1. Probeer eerst via de eigen VPS backend
     try {
       const vpsRes = await fetch('/api/sumup/checkout', {
         method: 'POST',
@@ -633,16 +634,14 @@ export default function POSHome() {
       if (vpsRes.ok && vpsData.success) {
         return vpsData;
       }
-      if (vpsRes.ok && !vpsData.success) {
-        throw new Error(vpsData.error || 'SumUp verzoek afgewezen door VPS.');
-      }
     } catch (vpsError) {
-      console.warn('[SUMUP] VPS niet bereikbaar/fout, schakelt over naar directe SumUp Cloud API...', vpsError.message);
+      console.warn('[SUMUP] VPS niet bereikbaar, schakelt over naar directe SumUp Cloud API fallback...', vpsError.message);
     }
 
-    const apiKey = process.env.NEXT_PUBLIC_SUMUP_API_KEY;
+    // 2. FALLBACK: Als VPS offline is, direct via browser naar de SumUp Cloud API (mits de kassa internet heeft)
+    const apiKey = process.env.NEXT_PUBLIC_SUMUP_API_KEY || process.env.SUMUP_API_KEY;
     if (!apiKey) {
-      throw new Error('Geen directe SumUp API-sleutel (NEXT_PUBLIC_SUMUP_API_KEY) geconfigureerd.');
+      throw new Error('VPS is offline en er is geen SumUp API-sleutel geconfigureerd voor de directe fallback.');
     }
 
     try {
@@ -665,7 +664,7 @@ export default function POSHome() {
       }
       return cloudData;
     } catch (cloudErr) {
-      throw new Error(`SumUp PIN mislukt: ${cloudErr.message}`);
+      throw new Error(`SumUp PIN mislukt via directe fallback: ${cloudErr.message}`);
     }
   };
 
@@ -680,7 +679,6 @@ export default function POSHome() {
 
     if (selectedPaymentMethod === 'sumup') {
       try {
-        // Fallback pakt nu zowel terminal_id als pair_code
         const terminalId = selectedStore?.terminal_id || selectedStore?.pair_code || localStorage.getItem('pos_fallback_terminal_id');
         await processSumUpPayment(finalTotal.toFixed(2), terminalId);
       } catch (sumupErr) {
@@ -1205,7 +1203,7 @@ export default function POSHome() {
         </div>
       )}
 
-      {/* Modals met hogere z-index */}
+      {/* Modals */}
       {openAmountProduct && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg shadow-xl max-w-sm w-full p-6">
