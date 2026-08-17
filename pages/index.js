@@ -798,9 +798,9 @@ export default function POSHome() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-100 flex flex-col">
+    <div className="min-h-screen bg-gray-100 flex flex-col relative">
       {/* Header */}
-      <header className="bg-black text-white p-3 sm:p-4 flex flex-col md:flex-row justify-between items-center gap-3 shadow-md">
+      <header className="bg-black text-white p-3 sm:p-4 flex flex-col md:flex-row justify-between items-center gap-3 shadow-md z-10">
         <div className="flex flex-wrap items-center gap-2 justify-center md:justify-start w-full md:w-auto">
           <span className="font-bold text-lg sm:text-xl tracking-wider">BDM POS</span>
           
@@ -1009,7 +1009,7 @@ export default function POSHome() {
                   <div
                     key={product.id}
                     onClick={() => handleProductClick(product)}
-                    className="bg-gray-50 border border-gray-200 rounded-lg p-2 flex flex-col justify-between cursor-pointer hover:border-black transition shadow-sm hover:shadow relative"
+                    className="bg-gray-50 border border-gray-200 rounded-lg p-2 flex flex-col justify-between cursor-pointer hover:border-black transition shadow-sm hover:shadow relative z-0"
                   >
                     <div>
                       <div className="w-full aspect-square bg-gray-200 rounded mb-2 overflow-hidden flex items-center justify-center relative">
@@ -1024,7 +1024,7 @@ export default function POSHome() {
                         )}
 
                         {hasVariations && (
-                          <span className="absolute top-2 right-2 bg-black text-white text-[9px] font-bold px-1.5 py-0.5 rounded uppercase z-10 shadow">
+                          <span className="absolute top-2 right-2 bg-black text-white text-[9px] font-bold px-1.5 py-0.5 rounded uppercase z-1 shadow">
                             Variaties
                           </span>
                         )}
@@ -1203,9 +1203,9 @@ export default function POSHome() {
         </div>
       )}
 
-      {/* Modals */}
+      {/* Modals met hogere z-index (z-50 t/m z-60) zodat ze altijd netjes over de achtergrond en de pagina heen vallen */}
       {openAmountProduct && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg shadow-xl max-w-sm w-full p-6">
             <h3 className="text-base sm:text-lg font-bold mb-2">Invoeren Open Bedrag</h3>
             <p className="text-xs text-gray-600 mb-4">{openAmountProduct.name}</p>
@@ -1230,7 +1230,7 @@ export default function POSHome() {
       )}
 
       {showCustomModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg shadow-xl max-w-sm w-full p-6">
             <h3 className="text-base sm:text-lg font-bold mb-4">Custom Artikel Toevoegen</h3>
             <div className="space-y-3 mb-4">
@@ -1266,7 +1266,7 @@ export default function POSHome() {
       )}
 
       {selectedProductForVariations && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
             <h3 className="text-base sm:text-lg font-bold mb-1">Kies Variatie</h3>
             <p className="text-xs text-gray-600 mb-4">{selectedProductForVariations.name}</p>
@@ -1294,7 +1294,7 @@ export default function POSHome() {
       )}
 
       {stockWarningModal.show && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-55">
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-[60]">
           <div className="bg-white rounded-lg shadow-2xl max-w-sm w-full p-6 space-y-4 text-center">
             <div className="text-red-600 text-4xl">⚠️</div>
             <h3 className="text-base sm:text-lg font-bold">Voorraad Waarschuwing</h3>
@@ -1329,7 +1329,7 @@ export default function POSHome() {
       )}
 
       {showPaymentModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
             <h3 className="text-base sm:text-lg font-bold mb-4 border-b pb-2">Kies Betaalmethode</h3>
             <div className="grid grid-cols-3 gap-2 mb-4">
