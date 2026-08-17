@@ -13,11 +13,13 @@ export default async function handler(req, res) {
     return res.status(400).json({ success: false, error: 'Ongeldig of ontbrekend bedrag.' });
   }
 
-  const sumupApiKey = process.env.SUMUP_API_KEY || process.env.SUMUP_SECRET_KEY;
-  const merchantCode = process.env.SUMUP_MERCHANT_CODE || 'MM669XL6';
+  // Netjes inlezen uit de .env omgeving
+  const sumupApiKey = process.env.SUMUP_API_KEY;
+  const merchantCode = process.env.SUMUP_MERCHANT_CODE;
 
-  if (!sumupApiKey) {
-    return res.status(500).json({ success: false, error: 'SumUp API-sleutel ontbreekt in de .env omgeving.' });
+  if (!sumupApiKey || !merchantCode) {
+    console.error('[ENV ERROR] SUMUP_API_KEY of SUMUP_MERCHANT_CODE ontbreekt in process.env');
+    return res.status(500).json({ success: false, error: 'SumUp configuratie ontbreekt op de server.' });
   }
 
   try {
@@ -74,10 +76,9 @@ export default async function handler(req, res) {
     });
 
   } catch (error) {
-    const errorMsg = error.response?.data?.message || error.response?.data?.error_code || error.message || 'Fout bij communicatie met SumUp.';
+    const errorMsg = error.response?.data?.message || error.response?.data?.detail || error.message || 'Fout bij communicatie met SumUp.';
     console.error('[SUMUP CHECKOUT API ERROR]:', error.response?.data || error.message);
     
-    // GEEF ALTIJD SUCCESS: FALSE TERUG AAN DE FRONTEND
     return res.status(400).json({
       success: false,
       error: `SumUp weigert betaling: ${errorMsg}`
