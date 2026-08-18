@@ -48,7 +48,7 @@ export default function AdminDashboard() {
     return [];
   });
 
-  // SumUp state (Dynamisch via poort 3001)
+  // SumUp state via veilige proxy route
   const [sumUpReaders, setSumUpReaders] = useState([]);
   const [pairingCode, setPairingCode] = useState('');
   const [terminalName, setTerminalName] = useState('');
@@ -175,14 +175,13 @@ export default function AdminDashboard() {
 
   const fetchSumUpReaders = async () => {
     try {
-      const baseUrl = typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.hostname}:3001` : 'http://localhost:3001';
-      const res = await fetch(`${baseUrl}/api/terminal/readers`);
+      const res = await fetch('/api/sumup/proxy?action=readers');
       const data = await res.json();
       if (data.success) {
         setSumUpReaders(data.readers || []);
       }
     } catch (err) {
-      console.error('Kan geen SumUp apparaten ophalen via microservice op poort 3001[cite: 3]:', err);
+      console.error('Kan geen SumUp apparaten ophalen via proxy:', err);
     }
   };
 
@@ -380,13 +379,12 @@ export default function AdminDashboard() {
     }
   };
 
-  // SumUp Pairing via microservice poort 3001 (dynamisch via host)[cite: 3]
+  // SumUp Pairing via veilige proxy route
   const handlePairSumUp = async (e) => {
     e.preventDefault();
     setSumUpStatusMsg('Bezig met SumUp koppelen...');
     try {
-      const baseUrl = `${window.location.protocol}//${window.location.hostname}:3001`;
-      const res = await fetch(`${baseUrl}/api/terminal/pair`, {
+      const res = await fetch('/api/sumup/proxy?action=pair', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pairingCode, name: terminalName })
@@ -398,7 +396,7 @@ export default function AdminDashboard() {
         setTerminalName('');
         fetchSumUpReaders();
       } else {
-        setSumUpStatusMsg(`❌ Fout: ${data.error}`);
+        setSumUpStatusMsg(`❌ Fout: ${data.error || 'Onbekende fout'}`);
       }
     } catch (err) {
       setSumUpStatusMsg('❌ Netwerkfout bij koppelen.');
@@ -409,8 +407,7 @@ export default function AdminDashboard() {
     if (!confirm(`Weet je zeker dat je SumUp apparaat ${readerId} wilt ontkoppelen?`)) return;
 
     try {
-      const baseUrl = `${window.location.protocol}//${window.location.hostname}:3001`;
-      const res = await fetch(`${baseUrl}/api/terminal/unlink/${readerId}`, {
+      const res = await fetch(`/api/sumup/proxy?action=unlink&readerId=${readerId}`, {
         method: 'DELETE'
       });
       const data = await res.json();
@@ -434,8 +431,7 @@ export default function AdminDashboard() {
     }
 
     try {
-      const baseUrl = `${window.location.protocol}//${window.location.hostname}:3001`;
-      const res = await fetch(`${baseUrl}/api/terminal/assign-store`, {
+      const res = await fetch('/api/sumup/proxy?action=assign-store', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ storeId, readerId })
@@ -602,7 +598,7 @@ export default function AdminDashboard() {
                     <button onClick={fetchSumUpReaders} className="bg-black text-white px-3 py-1.5 rounded text-xs font-bold">🔄 Ververs SumUp Apparaten</button>
                   </div>
 
-                  {/* Paire Form */}
+                  {/* Pair Form */}
                   <form onSubmit={handlePairSumUp} className="bg-gray-50 p-4 rounded border space-y-3">
                     <h4 className="font-bold text-xs uppercase tracking-wider">Nieuw SumUp Apparaat Koppelen</h4>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
