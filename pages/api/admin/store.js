@@ -18,6 +18,7 @@ export default async function handler(req, res) {
           store_name: s.store_name || 'Onbekend Filiaal',
           kvk: s.kvk || '',
           btw: s.btw || '',
+          terminal_id: s.terminal_id || null,
           payment_methods: pm || { sumup: true, manual_pin: true, cash: true }
         };
       });
@@ -60,10 +61,11 @@ export default async function handler(req, res) {
 
     try {
       const paymentMethodsJson = JSON.stringify(payment_methods || { sumup: true, manual_pin: true, cash: true });
+      const cleanTerminalId = terminal_id && terminal_id !== '' && terminal_id !== 'null' ? terminal_id : null;
 
       await db.query(
         'UPDATE stores SET store_name = ?, address = ?, receipt_header = ?, receipt_footer = ?, pickup_id = ?, terminal_id = ?, kvk = ?, btw = ?, payment_methods = ? WHERE id = ?',
-        [store_name.trim(), address || null, receipt_header || null, receipt_footer || null, pickup_id || null, terminal_id || null, kvk || null, btw || null, paymentMethodsJson, targetId]
+        [store_name.trim(), address || null, receipt_header || null, receipt_footer || null, pickup_id || null, cleanTerminalId, kvk || null, btw || null, paymentMethodsJson, targetId]
       );
       return res.status(200).json({ success: true, message: 'Filiaal bijgewerkt' });
     } catch (error) {
