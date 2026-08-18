@@ -238,9 +238,13 @@ export default function POSHome() {
       const data = await res.json();
       if (data.success) {
         const storeList = Array.isArray(data.stores) ? data.stores : (data.store ? [data.store] : []);
-        setAllStores(storeList);
-        if (!localStorage.getItem('selectedStore') && storeList.length > 0) {
-          handleSelectStore(storeList[0]);
+        const parsedStores = storeList.map(s => ({
+          ...s,
+          payment_methods: typeof s.payment_methods === 'string' ? JSON.parse(s.payment_methods) : (s.payment_methods || { sumup: true, manual_pin: true, cash: true })
+        }));
+        setAllStores(parsedStores);
+        if (!localStorage.getItem('selectedStore') && parsedStores.length > 0) {
+          handleSelectStore(parsedStores[0]);
         }
       }
     } catch (err) {
@@ -249,6 +253,8 @@ export default function POSHome() {
   };
 
   const handleSelectStore = (store) => {
+    const parsedMethods = typeof store.payment_methods === 'string' ? JSON.parse(store.payment_methods) : (store.payment_methods || { sumup: true, manual_pin: true, cash: true });
+    
     const storeData = {
       id: store.id || store.store_id || 1,
       store_id: store.id || store.store_id || 1,
@@ -257,7 +263,8 @@ export default function POSHome() {
       location: store.address || store.location || '',
       address: store.address || store.location || '',
       pickup_id: store.pickup_id || null,
-      terminal_id: store.terminal_id || null
+      terminal_id: store.terminal_id || null,
+      payment_methods: parsedMethods
     };
 
     setSelectedStore(storeData);
@@ -593,6 +600,20 @@ export default function POSHome() {
       alert('Winkelmand is leeg.');
       return;
     }
+
+    // Bepaal automatisch een actieve betaalmethode als de standaard geselecteerde uitstaat
+    const methods = selectedStore?.payment_methods || { sumup: true, manual_pin: true, cash: true };
+    if (selectedPaymentMethod === 'sumup' && methods.sumup === false) {
+      if (methods.manual_pin !== false) setSelectedPaymentMethod('manual_pin');
+      else if (methods.cash !== false) setSelectedPaymentMethod('cash');
+    } else if (selectedPaymentMethod === 'manual_pin' && methods.manual_pin === false) {
+      if (methods.sumup !== false) setSelectedPaymentMethod('sumup');
+      else if (methods.cash !== false) setSelectedPaymentMethod('cash');
+    } else if (selectedPaymentMethod === 'cash' && methods.cash === false) {
+      if (methods.sumup !== false) setSelectedPaymentMethod('sumup');
+      else if (methods.manual_pin !== false) setSelectedPaymentMethod('manual_pin');
+    }
+
     setCashGiven(finalTotal.toFixed(2));
     setShowPaymentModal(true);
   };
@@ -616,7 +637,6 @@ export default function POSHome() {
     }
   };
 
-  // Veilige communicatie via de proxy route i.p.v. directe localhost poort 3001
   const processSumUpPayment = async (amount, storeId) => {
     const res = await fetch('/api/sumup/proxy?action=pay', {
       method: 'POST',
@@ -762,7 +782,6 @@ export default function POSHome() {
 
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col relative">
-      {/* Header */}
       <header className="bg-black text-white p-3 sm:p-4 flex flex-col md:flex-row justify-between items-center gap-3 shadow-md z-10">
         <div className="flex flex-wrap items-center gap-2 justify-center md:justify-start w-full md:w-auto">
           <span className="font-bold text-lg sm:text-xl tracking-wider">BDM POS</span>
@@ -911,7 +930,6 @@ export default function POSHome() {
         </div>
       ) : (
         <div className="flex-1 flex flex-col lg:flex-row p-3 sm:p-4 gap-4 overflow-hidden">
-          {/* Producten & Zoeken */}
           <div className="w-full lg:w-3/5 flex flex-col bg-white rounded-lg shadow p-3 sm:p-4">
             <div className="flex space-x-2 mb-3">
               <input
@@ -1015,12 +1033,10 @@ export default function POSHome() {
             </div>
           </div>
 
-          {/* Winkelmand / Kassa */}
           <div className="w-full lg:w-2/5 flex flex-col bg-white rounded-lg shadow p-3 sm:p-4 justify-between">
             <div>
               <h2 className="text-base sm:text-lg font-bold mb-3 border-b pb-2">Huidige Bestelling</h2>
 
-              {/* Gekoppelde Klant */}
               <div className="mb-3 bg-gray-50 p-2 rounded border">
                 <label className="text-xs font-bold text-gray-600 block mb-1">Gekoppelde Klant:</label>
                 {selectedCustomer ? (
@@ -1159,14 +1175,13 @@ export default function POSHome() {
                 disabled={loading || cart.length === 0}
                 className="w-full bg-red-600 hover:bg-red-700 disabled:bg-gray-300 text-white font-bold py-3 rounded transition text-xs sm:text-sm uppercase tracking-wider"
               >
-                {loading ? '⏳ Bezig met pinnen...' : `Afrekenen (€${finalTotal.toFixed(2)})`}
+                {loading ? '⏳ Bezig met afrekenen...' : `Afrekenen (€{finalTotal.toFixed(2)})`}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Modals */}
       {openAmountProduct && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg shadow-xl max-w-sm w-full p-6">
@@ -1295,11 +1310,20 @@ export default function POSHome() {
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
             <h3 className="text-base sm:text-lg font-bold mb-4 border-b pb-2">Kies Betaalmethode</h3>
+            
+            {/* Dynamisch tonen op basis van gekozen filiaal instellingen */}
             <div className="grid grid-cols-3 gap-2 mb-4">
-              <button onClick={() => setSelectedPaymentMethod('sumup')} className={`p-3 text-xs font-bold border rounded ${selectedPaymentMethod === 'sumup' ? 'bg-black text-white' : 'bg-gray-100'}`}>💳 SumUp</button>
-              <button onClick={() => setSelectedPaymentMethod('manual_pin')} className={`p-3 text-xs font-bold border rounded ${selectedPaymentMethod === 'manual_pin' ? 'bg-black text-white' : 'bg-gray-100'}`}>📌 Pin</button>
-              <button onClick={() => setSelectedPaymentMethod('cash')} className={`p-3 text-xs font-bold border rounded ${selectedPaymentMethod === 'cash' ? 'bg-black text-white' : 'bg-gray-100'}`}>💵 Contant</button>
+              {(!selectedStore?.payment_methods || selectedStore.payment_methods.sumup !== false) && (
+                <button onClick={() => setSelectedPaymentMethod('sumup')} className={`p-3 text-xs font-bold border rounded ${selectedPaymentMethod === 'sumup' ? 'bg-black text-white' : 'bg-gray-100'}`}>💳 SumUp</button>
+              )}
+              {(!selectedStore?.payment_methods || selectedStore.payment_methods.manual_pin !== false) && (
+                <button onClick={() => setSelectedPaymentMethod('manual_pin')} className={`p-3 text-xs font-bold border rounded ${selectedPaymentMethod === 'manual_pin' ? 'bg-black text-white' : 'bg-gray-100'}`}>📌 Pin</button>
+              )}
+              {(!selectedStore?.payment_methods || selectedStore.payment_methods.cash !== false) && (
+                <button onClick={() => setSelectedPaymentMethod('cash')} className={`p-3 text-xs font-bold border rounded ${selectedPaymentMethod === 'cash' ? 'bg-black text-white' : 'bg-gray-100'}`}>💵 Contant</button>
+              )}
             </div>
+
             {selectedPaymentMethod === 'cash' && (
               <div className="bg-gray-50 p-4 rounded border mb-4 space-y-3">
                 <input type="number" step="0.01" value={cashGiven} onChange={(e) => setCashGiven(e.target.value)} className="w-full p-2.5 border rounded font-bold text-lg" placeholder="Ontvangen bedrag" />

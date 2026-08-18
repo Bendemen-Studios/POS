@@ -23,6 +23,10 @@ export default async function handler(req, res) {
       targetUrl = `${backendUrl}/assign-store`;
       options.method = 'POST';
       options.body = JSON.stringify(req.body);
+    } else if (action === 'pay') {
+      targetUrl = `${backendUrl}/pay`;
+      options.method = 'POST';
+      options.body = JSON.stringify(req.body);
     } else {
       return res.status(400).json({ success: false, error: 'Onbekende actie' });
     }

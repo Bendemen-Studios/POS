@@ -48,7 +48,6 @@ export default function AdminDashboard() {
     return [];
   });
 
-  // SumUp state via de folder proxy route (/api/sumup/proxy)
   const [sumUpReaders, setSumUpReaders] = useState([]);
   const [pairingCode, setPairingCode] = useState('');
   const [terminalName, setTerminalName] = useState('');
@@ -56,7 +55,16 @@ export default function AdminDashboard() {
   const [selectedStoreForReader, setSelectedStoreForReader] = useState({});
 
   const [newUser, setNewUser] = useState({ username: '', password: '', role: 'cashier', store_id: '', email: '' });
-  const [newStore, setNewStore] = useState({ store_name: '', address: '', kvk: '', btw: '', pickup_id: '' });
+  
+  // Standaard betaalmethodes ingesteld op true voor nieuwe filialen
+  const [newStore, setNewStore] = useState({ 
+    store_name: '', 
+    address: '', 
+    kvk: '', 
+    btw: '', 
+    pickup_id: '',
+    payment_methods: { sumup: true, manual_pin: true, cash: true }
+  });
 
   const [editingUser, setEditingUser] = useState(null);
   const [editingStore, setEditingStore] = useState(null);
@@ -165,8 +173,13 @@ export default function AdminDashboard() {
       const data = await res.json();
       if (data.success) {
         const storeList = Array.isArray(data.stores) ? data.stores : (data.store ? [data.store] : []);
-        setStores(storeList);
-        localStorage.setItem('admin_cached_stores', JSON.stringify(storeList));
+        // Parsing van payment_methods indien opgeslagen als JSON string
+        const parsedStores = storeList.map(s => ({
+          ...s,
+          payment_methods: typeof s.payment_methods === 'string' ? JSON.parse(s.payment_methods) : (s.payment_methods || { sumup: true, manual_pin: true, cash: true })
+        }));
+        setStores(parsedStores);
+        localStorage.setItem('admin_cached_stores', JSON.stringify(parsedStores));
       }
     } catch (err) {
       console.error('Fout bij ophalen winkels:', err);
@@ -331,7 +344,7 @@ export default function AdminDashboard() {
       const data = await res.json();
       if (data.success) {
         alert('Filiaal toegevoegd!');
-        setNewStore({ store_name: '', address: '', kvk: '', btw: '', pickup_id: '' });
+        setNewStore({ store_name: '', address: '', kvk: '', btw: '', pickup_id: '', payment_methods: { sumup: true, manual_pin: true, cash: true } });
         fetchStores();
       } else {
         alert('Fout: ' + data.error);
@@ -379,7 +392,6 @@ export default function AdminDashboard() {
     }
   };
 
-  // SumUp Pairing via de folder proxy route
   const handlePairSumUp = async (e) => {
     e.preventDefault();
     setSumUpStatusMsg('Bezig met SumUp koppelen...');
@@ -467,7 +479,6 @@ export default function AdminDashboard() {
 
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col">
-      {/* Header */}
       <header className="bg-black text-white p-4 flex flex-col sm:flex-row justify-between items-center gap-3 shadow-md">
         <div className="flex items-center space-x-3">
           <span className="font-bold text-lg sm:text-xl tracking-wider text-center sm:text-left">BDM POS // Admin Dashboard</span>
@@ -481,7 +492,6 @@ export default function AdminDashboard() {
         </div>
       </header>
 
-      {/* Tabs */}
       <div className="bg-white border-b px-4 sm:px-6 py-2 flex space-x-2 sm:space-x-4 shadow-sm overflow-x-auto no-scrollbar">
         <button onClick={() => setActiveTab('users')} className={`px-3 sm:px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'users' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'}`}>👥 Medewerkers</button>
         <button onClick={() => setActiveTab('stores')} className={`px-3 sm:px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'stores' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'}`}>📍 Filialen</button>
@@ -498,7 +508,6 @@ export default function AdminDashboard() {
           </div>
         ) : (
           <>
-            {/* Medewerkers Tab */}
             {activeTab === 'users' && (
               <div className="space-y-6">
                 <div className="bg-white rounded-lg shadow p-4 sm:p-6">
@@ -552,7 +561,6 @@ export default function AdminDashboard() {
               </div>
             )}
 
-            {/* Filialen Tab */}
             {activeTab === 'stores' && (
               <div className="space-y-6">
                 <div className="bg-white rounded-lg shadow p-4 sm:p-6">
@@ -563,6 +571,38 @@ export default function AdminDashboard() {
                     <input type="text" placeholder="KvK Nummer" value={newStore.kvk} onChange={(e) => setNewStore({...newStore, kvk: e.target.value})} className="p-2.5 sm:p-2 border rounded text-xs" required />
                     <input type="text" placeholder="BTW Nummer" value={newStore.btw} onChange={(e) => setNewStore({...newStore, btw: e.target.value})} className="p-2.5 sm:p-2 border rounded text-xs" required />
                     <input type="text" placeholder="Pickup ID" value={newStore.pickup_id} onChange={(e) => setNewStore({...newStore, pickup_id: e.target.value})} className="p-2.5 sm:p-2 border rounded text-xs sm:col-span-2" />
+                    
+                    {/* Betaalmethodes selectie voor nieuw filiaal */}
+                    <div className="sm:col-span-2 space-y-1 bg-gray-50 p-3 rounded border">
+                      <label className="text-xs font-bold text-gray-700 block mb-2">Actieve Betaalmethodes</label>
+                      <div className="flex gap-6 text-xs">
+                        <label className="flex items-center gap-1.5 cursor-pointer">
+                          <input 
+                            type="checkbox" 
+                            checked={newStore.payment_methods?.sumup ?? true} 
+                            onChange={(e) => setNewStore({...newStore, payment_methods: {...newStore.payment_methods, sumup: e.target.checked}})} 
+                          />
+                          SumUp
+                        </label>
+                        <label className="flex items-center gap-1.5 cursor-pointer">
+                          <input 
+                            type="checkbox" 
+                            checked={newStore.payment_methods?.manual_pin ?? true} 
+                            onChange={(e) => setNewStore({...newStore, payment_methods: {...newStore.payment_methods, manual_pin: e.target.checked}})} 
+                          />
+                          Handmatige Pin
+                        </label>
+                        <label className="flex items-center gap-1.5 cursor-pointer">
+                          <input 
+                            type="checkbox" 
+                            checked={newStore.payment_methods?.cash ?? true} 
+                            onChange={(e) => setNewStore({...newStore, payment_methods: {...newStore.payment_methods, cash: e.target.checked}})} 
+                          />
+                          Contant
+                        </label>
+                      </div>
+                    </div>
+
                     <button type="submit" className="bg-red-600 text-white font-bold p-2.5 sm:p-2 rounded text-xs uppercase sm:col-span-2">Aanmaken</button>
                   </form>
                 </div>
@@ -577,6 +617,15 @@ export default function AdminDashboard() {
                           <div className="text-xs text-gray-500 mt-1">📍 {s.address}</div>
                           <div className="text-xs text-gray-600 mt-1">KvK: {s.kvk} | BTW: {s.btw}</div>
                           <div className="text-xs text-gray-700 mt-2 font-mono">SumUp ID: <span className="font-bold">{s.terminal_id || 'Niet gekoppeld'}</span></div>
+                          <div className="text-xs text-gray-600 mt-2">
+                            Betaalmethodes: <span className="font-semibold">
+                              {[
+                                s.payment_methods?.sumup !== false ? 'SumUp' : null,
+                                s.payment_methods?.manual_pin !== false ? 'Pin' : null,
+                                s.payment_methods?.cash !== false ? 'Contant' : null
+                              ].filter(Boolean).join(', ') || 'Geen'}
+                            </span>
+                          </div>
                         </div>
                         <div className="text-right space-x-2 pt-2 border-t">
                           <button onClick={() => setEditingStore(s)} className="text-xs bg-black text-white px-3 py-1.5 rounded font-bold">Bewerken</button>
@@ -589,7 +638,6 @@ export default function AdminDashboard() {
               </div>
             )}
 
-            {/* SumUp Tab */}
             {activeTab === 'sumup' && (
               <div className="space-y-6">
                 <div className="bg-white rounded-lg shadow p-4 sm:p-6 space-y-4">
@@ -598,7 +646,6 @@ export default function AdminDashboard() {
                     <button onClick={fetchSumUpReaders} className="bg-black text-white px-3 py-1.5 rounded text-xs font-bold">🔄 Ververs SumUp Apparaten</button>
                   </div>
 
-                  {/* Pair Form */}
                   <form onSubmit={handlePairSumUp} className="bg-gray-50 p-4 rounded border space-y-3">
                     <h4 className="font-bold text-xs uppercase tracking-wider">Nieuw SumUp Apparaat Koppelen</h4>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -622,7 +669,6 @@ export default function AdminDashboard() {
                     {sumUpStatusMsg && <p className="text-xs font-bold text-gray-700">{sumUpStatusMsg}</p>}
                   </form>
 
-                  {/* Gekoppelde Readers Lijst */}
                   <div className="space-y-3">
                     <h4 className="font-bold text-xs uppercase tracking-wider">Gekoppelde SumUp Apparaten op Account</h4>
                     <div className="divide-y border rounded">
@@ -670,7 +716,6 @@ export default function AdminDashboard() {
               </div>
             )}
 
-            {/* Bestellingen Tab */}
             {activeTab === 'orders' && (
               <div className="bg-white rounded-lg shadow p-4 sm:p-6">
                 <h3 className="text-sm sm:text-md font-bold mb-4">📦 Live Bestellingen</h3>
@@ -699,7 +744,6 @@ export default function AdminDashboard() {
               </div>
             )}
 
-            {/* Voorraad Tab */}
             {activeTab === 'inventory' && (
               <div className="bg-white rounded-lg shadow p-4 sm:p-6">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
@@ -773,7 +817,6 @@ export default function AdminDashboard() {
         )}
       </div>
 
-      {/* Modals */}
       {editingUser && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <form onSubmit={handleUpdateUser} className="bg-white rounded-lg p-6 max-w-sm w-full space-y-3 shadow-xl">
@@ -794,7 +837,7 @@ export default function AdminDashboard() {
 
       {editingStore && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-          <form onSubmit={handleUpdateStore} className="bg-white rounded-lg p-6 max-w-sm w-full space-y-3 shadow-xl">
+          <form onSubmit={handleUpdateStore} className="bg-white rounded-lg p-6 max-w-sm w-full space-y-3 shadow-xl max-h-[90vh] overflow-y-auto">
             <h3 className="text-md font-bold">Filiaal Bewerken</h3>
             <div className="space-y-3">
               <div>
@@ -816,6 +859,37 @@ export default function AdminDashboard() {
               <div>
                 <label className="text-xs font-bold text-gray-600 block mb-1">Pickup ID</label>
                 <input type="text" value={editingStore.pickup_id || ''} onChange={(e) => setEditingStore({...editingStore, pickup_id: e.target.value})} className="w-full p-2.5 border rounded text-xs" />
+              </div>
+
+              {/* Betaalmethodes selectie bij bewerken */}
+              <div className="space-y-1 bg-gray-50 p-3 rounded border">
+                <label className="text-xs font-bold text-gray-700 block mb-2">Actieve Betaalmethodes</label>
+                <div className="flex flex-col gap-2 text-xs">
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={editingStore.payment_methods?.sumup ?? true} 
+                      onChange={(e) => setEditingStore({...editingStore, payment_methods: {...editingStore.payment_methods, sumup: e.target.checked}})} 
+                    />
+                    SumUp
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={editingStore.payment_methods?.manual_pin ?? true} 
+                      onChange={(e) => setEditingStore({...editingStore, payment_methods: {...editingStore.payment_methods, manual_pin: e.target.checked}})} 
+                    />
+                    Handmatige Pin
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={editingStore.payment_methods?.cash ?? true} 
+                      onChange={(e) => setEditingStore({...editingStore, payment_methods: {...editingStore.payment_methods, cash: e.target.checked}})} 
+                    />
+                    Contant
+                  </label>
+                </div>
               </div>
             </div>
             <div className="flex space-x-2 pt-2">
