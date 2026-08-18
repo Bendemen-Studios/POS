@@ -48,7 +48,7 @@ export default function AdminDashboard() {
     return [];
   });
 
-  // SumUp state via veilige proxy route
+  // SumUp state via de folder proxy route (/api/sumup/proxy)
   const [sumUpReaders, setSumUpReaders] = useState([]);
   const [pairingCode, setPairingCode] = useState('');
   const [terminalName, setTerminalName] = useState('');
@@ -379,7 +379,7 @@ export default function AdminDashboard() {
     }
   };
 
-  // SumUp Pairing via veilige proxy route
+  // SumUp Pairing via de folder proxy route
   const handlePairSumUp = async (e) => {
     e.preventDefault();
     setSumUpStatusMsg('Bezig met SumUp koppelen...');
