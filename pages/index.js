@@ -616,7 +616,7 @@ export default function POSHome() {
     }
   };
 
-  // Aangepast om direct te communiceren met de zelfstandige SumUp Add-on microservice op poort 3001
+  // Direct communiceren met de zelfstandige SumUp Add-on microservice op poort 3001
   const processSumUpPayment = async (amount, storeId) => {
     const res = await fetch('http://localhost:3001/api/terminal/pay', {
       method: 'POST',

@@ -19,7 +19,6 @@ export default function PickupDashboard() {
     fetchPickupOrders();
     triggerOfflinePickupSync();
 
-    // Event listener voor online status om offline acties automatisch te synchroniseren
     const handleOnline = () => triggerOfflinePickupSync();
     window.addEventListener('online', handleOnline);
 
@@ -28,7 +27,6 @@ export default function PickupDashboard() {
     };
   }, []);
 
-  // Automatisch opslaan in cache bij wijzigingen
   useEffect(() => {
     if (typeof window !== 'undefined' && orders.length > 0) {
       localStorage.setItem('pos_cached_pickup_orders', JSON.stringify(orders));
@@ -73,7 +71,6 @@ export default function PickupDashboard() {
   const handleMarkAsPickedUp = async (orderId) => {
     if (!confirm(`Weet je zeker dat bestelling #${orderId} is opgehaald?`)) return;
 
-    // Direct lokaal bijwerken in state en cache (optimistic update)
     const updatedOrders = orders.filter(o => o.id !== orderId);
     setOrders(updatedOrders);
     localStorage.setItem('pos_cached_pickup_orders', JSON.stringify(updatedOrders));
@@ -83,7 +80,6 @@ export default function PickupDashboard() {
     } catch (err) {
       console.warn('Server niet bereikbaar. Actie opgeslagen in offline wachtrij.');
       
-      // Opslaan in offline wachtrij als de server faalt
       const queue = JSON.parse(localStorage.getItem('pos_offline_pickup_actions') || '[]');
       queue.push({ orderId, status: 'completed', timestamp: new Date().toISOString() });
       localStorage.setItem('pos_offline_pickup_actions', JSON.stringify(queue));
