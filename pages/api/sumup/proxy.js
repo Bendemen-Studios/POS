@@ -1,3 +1,5 @@
+import db from '../../../lib/db'; // Voeg deze import toe om database queries te kunnen doen[cite: 1]
+
 export default async function handler(req, res) {
   const { action, readerId } = req.query;
   const backendUrl = 'http://localhost:3001/api/terminal';
@@ -33,6 +35,16 @@ export default async function handler(req, res) {
 
     const response = await fetch(targetUrl, options);
     const data = await response.json();
+
+    // Als de ontkoppeling bij SumUp succesvol was, zet de terminal_id in de database automatisch op NULL
+    if (response.ok && data.success && action === 'unlink' && readerId) {
+      try {
+        await db.query('UPDATE stores SET terminal_id = NULL WHERE terminal_id = ?', [readerId]);
+      } catch (dbErr) {
+        console.error('Fout bij automatisch legen terminal_id in database:', dbErr);
+      }
+    }
+
     return res.status(response.status).json(data);
   } catch (error) {
     console.error('SumUp Proxy Error:', error);
