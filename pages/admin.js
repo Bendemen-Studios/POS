@@ -48,7 +48,7 @@ export default function AdminDashboard() {
     return [];
   });
 
-  // SumUp state
+  // SumUp state (Direct naar microservice poort 3001)
   const [sumUpReaders, setSumUpReaders] = useState([]);
   const [pairingCode, setPairingCode] = useState('');
   const [terminalName, setTerminalName] = useState('');
@@ -175,13 +175,13 @@ export default function AdminDashboard() {
 
   const fetchSumUpReaders = async () => {
     try {
-      const res = await fetch('/api/sumup/terminal-manager?action=readers');
+      const res = await fetch('http://localhost:3001/api/terminal/readers');
       const data = await res.json();
       if (data.success) {
         setSumUpReaders(data.readers || []);
       }
     } catch (err) {
-      console.error('Kan geen SumUp apparaten ophalen via terminal-manager proxy:', err);
+      console.error('Kan geen SumUp apparaten ophalen via microservice op poort 3001:', err);
     }
   };
 
@@ -379,12 +379,12 @@ export default function AdminDashboard() {
     }
   };
 
-  // SumUp Pairing via terminal-manager proxy
+  // SumUp Pairing via microservice poort 3001
   const handlePairSumUp = async (e) => {
     e.preventDefault();
     setSumUpStatusMsg('Bezig met SumUp koppelen...');
     try {
-      const res = await fetch('/api/sumup/terminal-manager?action=pair', {
+      const res = await fetch('http://localhost:3001/api/terminal/pair', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pairingCode, name: terminalName })
@@ -407,7 +407,7 @@ export default function AdminDashboard() {
     if (!confirm(`Weet je zeker dat je SumUp apparaat ${readerId} wilt ontkoppelen?`)) return;
 
     try {
-      const res = await fetch(`/api/sumup/terminal-manager?action=unlink&readerId=${readerId}`, {
+      const res = await fetch(`http://localhost:3001/api/terminal/unlink/${readerId}`, {
         method: 'DELETE'
       });
       const data = await res.json();
@@ -431,7 +431,7 @@ export default function AdminDashboard() {
     }
 
     try {
-      const res = await fetch('/api/sumup/terminal-manager?action=assign-store', {
+      const res = await fetch('http://localhost:3001/api/terminal/assign-store', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ storeId, readerId })
@@ -814,7 +814,7 @@ export default function AdminDashboard() {
                 <input type="text" value={editingStore.btw || ''} onChange={(e) => setEditingStore({...editingStore, btw: e.target.value})} className="w-full p-2.5 border rounded text-xs" />
               </div>
               <div>
-                <label className="text-xs font-bold text-gray-600 block mb-1">Pickup ID</label>
+                <label className="text-xs font-bold text-gray-600 code block mb-1">Pickup ID</label>
                 <input type="text" value={editingStore.pickup_id || ''} onChange={(e) => setEditingStore({...editingStore, pickup_id: e.target.value})} className="w-full p-2.5 border rounded text-xs" />
               </div>
             </div>
