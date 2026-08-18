@@ -141,13 +141,6 @@ export default function POSHome() {
       return;
     }
 
-    const storeStr = localStorage.getItem('selectedStore') || localStorage.getItem('pos_selected_store');
-    if (storeStr) {
-      try { setSelectedStore(JSON.parse(storeStr)); } catch (e) {}
-    } else {
-      setShowStoreModal(true);
-    }
-
     fetchStores();
     handleSyncData();
     fetchPickupOrders();
@@ -233,6 +226,17 @@ export default function POSHome() {
     setPendingOfflineCount(queue.length);
   };
 
+  const parsePaymentMethods = (pm) => {
+    let methods = { sumup: true, manual_pin: true, cash: true };
+    if (!pm) return methods;
+    if (typeof pm === 'string') {
+      try { methods = JSON.parse(pm); } catch (e) {}
+    } else if (typeof pm === 'object') {
+      methods = { ...methods, ...pm };
+    }
+    return methods;
+  };
+
   const fetchStores = async () => {
     try {
       const res = await fetch('/api/admin/store');
@@ -241,11 +245,26 @@ export default function POSHome() {
         const storeList = Array.isArray(data.stores) ? data.stores : (data.store ? [data.store] : []);
         const parsedStores = storeList.map(s => ({
           ...s,
-          payment_methods: typeof s.payment_methods === 'string' ? JSON.parse(s.payment_methods) : (s.payment_methods || { sumup: true, manual_pin: true, cash: true })
+          payment_methods: parsePaymentMethods(s.payment_methods)
         }));
         setAllStores(parsedStores);
-        if (!localStorage.getItem('selectedStore') && parsedStores.length > 0) {
-          handleSelectStore(parsedStores[0]);
+
+        const storeStr = localStorage.getItem('selectedStore') || localStorage.getItem('pos_selected_store');
+        if (storeStr) {
+          try {
+            const savedStoreObj = JSON.parse(storeStr);
+            // Zoek de meest actuele versie van het filiaal op basis van ID
+            const matchedCurrent = parsedStores.find(st => String(st.id || st.store_id) === String(savedStoreObj.id || savedStoreObj.store_id));
+            if (matchedCurrent) {
+              handleSelectStore(matchedCurrent, false);
+            } else {
+              handleSelectStore(parsedStores[0], false);
+            }
+          } catch (e) {
+            handleSelectStore(parsedStores[0], false);
+          }
+        } else if (parsedStores.length > 0) {
+          handleSelectStore(parsedStores[0], false);
         }
       }
     } catch (err) {
@@ -253,8 +272,8 @@ export default function POSHome() {
     }
   };
 
-  const handleSelectStore = (store) => {
-    const parsedMethods = typeof store.payment_methods === 'string' ? JSON.parse(store.payment_methods) : (store.payment_methods || { sumup: true, manual_pin: true, cash: true });
+  const handleSelectStore = (store, shouldCloseModal = true) => {
+    const parsedMethods = parsePaymentMethods(store.payment_methods);
     
     const storeData = {
       id: store.id || store.store_id || 1,
@@ -271,12 +290,14 @@ export default function POSHome() {
     setSelectedStore(storeData);
     localStorage.setItem('selectedStore', JSON.stringify(storeData));
     localStorage.setItem('pos_selected_store', JSON.stringify(storeData));
-    setShowStoreModal(false);
+    if (shouldCloseModal) {
+      setShowStoreModal(false);
+    }
   };
 
   const handleSyncData = async () => {
     setIsSyncing(true);
-    await Promise.all([fetchProducts(), fetchCustomers(), fetchUsersAsCustomers(), fetchPickupOrders()]);
+    await Promise.all([fetchProducts(), fetchCustomers(), fetchUsersAsCustomers(), fetchPickupOrders(), fetchStores()]);
     await triggerOfflineSync(false);
     setIsSyncing(false);
   };
@@ -603,16 +624,20 @@ export default function POSHome() {
     }
 
     const methods = selectedStore?.payment_methods || { sumup: true, manual_pin: true, cash: true };
-    if (selectedPaymentMethod === 'sumup' && methods.sumup === false) {
-      if (methods.manual_pin !== false) setSelectedPaymentMethod('manual_pin');
-      else if (methods.cash !== false) setSelectedPaymentMethod('cash');
-    } else if (selectedPaymentMethod === 'manual_pin' && methods.manual_pin === false) {
-      if (methods.sumup !== false) setSelectedPaymentMethod('sumup');
-      else if (methods.cash !== false) setSelectedPaymentMethod('cash');
-    } else if (selectedPaymentMethod === 'cash' && methods.cash === false) {
-      if (methods.sumup !== false) setSelectedPaymentMethod('sumup');
-      else if (methods.manual_pin !== false) setSelectedPaymentMethod('manual_pin');
+    
+    // Automatisch een geldige betaalmethode selecteren als de huidige uitstaat
+    let validMethod = selectedPaymentMethod;
+    const isCurrentValid = 
+      (validMethod === 'sumup' && methods.sumup !== false) ||
+      (validMethod === 'manual_pin' && methods.manual_pin !== false) ||
+      (validMethod === 'cash' && methods.cash !== false);
+
+    if (!isCurrentValid) {
+      if (methods.sumup !== false) validMethod = 'sumup';
+      else if (methods.manual_pin !== false) validMethod = 'manual_pin';
+      else if (methods.cash !== false) validMethod = 'cash';
     }
+    setSelectedPaymentMethod(validMethod);
 
     setCashGiven(finalTotal.toFixed(2));
     setShowPaymentModal(true);
@@ -657,7 +682,6 @@ export default function POSHome() {
       return;
     }
 
-    // Als handmatige pin is geselecteerd: toon eerst de bevestigingspopup met het bedrag
     if (selectedPaymentMethod === 'manual_pin') {
       setShowPaymentModal(false);
       setShowManualPinConfirm(true);
@@ -790,6 +814,8 @@ export default function POSHome() {
       </div>
     );
   }
+
+  const paymentMethods = selectedStore?.payment_methods || { sumup: true, manual_pin: true, cash: true };
 
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col relative">
@@ -1323,13 +1349,13 @@ export default function POSHome() {
             <h3 className="text-base sm:text-lg font-bold mb-4 border-b pb-2">Kies Betaalmethode</h3>
             
             <div className="grid grid-cols-3 gap-2 mb-4">
-              {(!selectedStore?.payment_methods || selectedStore.payment_methods.sumup !== false) && (
+              {paymentMethods.sumup !== false && (
                 <button onClick={() => setSelectedPaymentMethod('sumup')} className={`p-3 text-xs font-bold border rounded ${selectedPaymentMethod === 'sumup' ? 'bg-black text-white' : 'bg-gray-100'}`}>💳 SumUp</button>
               )}
-              {(!selectedStore?.payment_methods || selectedStore.payment_methods.manual_pin !== false) && (
+              {paymentMethods.manual_pin !== false && (
                 <button onClick={() => setSelectedPaymentMethod('manual_pin')} className={`p-3 text-xs font-bold border rounded ${selectedPaymentMethod === 'manual_pin' ? 'bg-black text-white' : 'bg-gray-100'}`}>📌 Pin</button>
               )}
-              {(!selectedStore?.payment_methods || selectedStore.payment_methods.cash !== false) && (
+              {paymentMethods.cash !== false && (
                 <button onClick={() => setSelectedPaymentMethod('cash')} className={`p-3 text-xs font-bold border rounded ${selectedPaymentMethod === 'cash' ? 'bg-black text-white' : 'bg-gray-100'}`}>💵 Contant</button>
               )}
             </div>
@@ -1351,7 +1377,6 @@ export default function POSHome() {
         </div>
       )}
 
-      {/* Handmatige Pin Bevestigingspopup */}
       {showManualPinConfirm && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg shadow-2xl max-w-sm w-full p-6 text-center space-y-4">
