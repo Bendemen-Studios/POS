@@ -325,7 +325,7 @@ export default function POSHome() {
   const fetchPickupOrders = async () => {
     try {
       setLoadingPickup(true);
-      const res = await fetch('/api/woocommerce/pickup-orders');
+      const res = await fetch('/api/woocommerce/pickup-order');
       const data = await res.json();
       if (data.success) {
         setPickupOrders(data.orders || []);
@@ -340,10 +340,10 @@ export default function POSHome() {
   const handleMarkAsPickedUp = async (orderId) => {
     if (!confirm(`Weet je zeker dat bestelling #${orderId} is opgehaald? De status wordt gewijzigd naar Voltooid.`)) return;
     try {
-      const res = await fetch('/api/woocommerce/orders', {
+      const res = await fetch('/api/woocommerce/pickup-order', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: orderId, status: 'completed' })
+        body: JSON.stringify({ order_id: orderId, status: 'completed' })
       });
       const data = await res.json();
       if (data.success) {
@@ -616,9 +616,9 @@ export default function POSHome() {
     }
   };
 
-  // Direct communiceren met de zelfstandige SumUp Add-on microservice op poort 3001
+  // Veilige communicatie via de proxy route i.p.v. directe localhost poort 3001
   const processSumUpPayment = async (amount, storeId) => {
-    const res = await fetch('http://localhost:3001/api/terminal/pay', {
+    const res = await fetch('/api/sumup/proxy?action=pay', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ totalAmount: amount, storeId: storeId })
@@ -1261,7 +1261,7 @@ export default function POSHome() {
           <div className="bg-white rounded-lg shadow-2xl max-w-sm w-full p-6 space-y-4 text-center">
             <div className="text-red-600 text-4xl">⚠️</div>
             <h3 className="text-base sm:text-lg font-bold">Voorraad Waarschuwing</h3>
-            <p className="text-xs text-gray-600 font-semibold">Weet je zeker dat je dit product hebt</p>
+            <p className="text-xs text-gray-600 font-semibold">Weet je zeker dat je dit product wilt toevoegen?</p>
             <div className="flex space-x-2 pt-2">
               <button onClick={() => setStockWarningModal({ show: false, product: null, variation: null, price: 0 })} className="w-1/2 bg-gray-200 text-black font-bold py-2.5 rounded text-xs">Nee</button>
               <button onClick={handleConfirmStockWarning} className="w-1/2 bg-red-600 text-white font-bold py-2.5 rounded text-xs">Ja, Toevoegen</button>

@@ -35,7 +35,8 @@ export default function PickupDashboard() {
 
   const fetchPickupOrders = async () => {
     try {
-      const res = await axios.get('/api/woocommerce/pickup-orders');
+      // Aangepast naar het correcte endpoint dat we hebben aangemaakt
+      const res = await axios.get('/api/woocommerce/pickup-order');
       if (res.data && res.data.orders) {
         setOrders(res.data.orders);
         localStorage.setItem('pos_cached_pickup_orders', JSON.stringify(res.data.orders));
@@ -54,8 +55,9 @@ export default function PickupDashboard() {
 
     for (const action of queue) {
       try {
-        await axios.post('/api/woocommerce/update-order-status', { 
-          orderId: action.orderId, 
+        // Gebruikt nu de juiste PUT methode en het juiste endpoint
+        await axios.put('/api/woocommerce/pickup-order', { 
+          order_id: action.orderId, 
           status: action.status 
         });
       } catch (err) {
@@ -76,7 +78,7 @@ export default function PickupDashboard() {
     localStorage.setItem('pos_cached_pickup_orders', JSON.stringify(updatedOrders));
 
     try {
-      await axios.post('/api/woocommerce/update-order-status', { orderId, status: 'completed' });
+      await axios.put('/api/woocommerce/pickup-order', { order_id: orderId, status: 'completed' });
     } catch (err) {
       console.warn('Server niet bereikbaar. Actie opgeslagen in offline wachtrij.');
       
