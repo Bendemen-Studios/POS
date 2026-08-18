@@ -1,79 +1,37 @@
-const fetchSumUpReaders = async () => {
-    try {
-      const res = await fetch('/api/sumup/proxy?action=readers');
-      const data = await res.json();
-      if (data.success) {
-        setSumUpReaders(data.readers || []);
-      }
-    } catch (err) {
-      console.error('Kan geen SumUp apparaten ophalen:', err);
-    }
-  };
+export default async function handler(req, res) {
+  const { action, readerId } = req.query;
+  const backendUrl = 'http://localhost:3001/api/terminal';
 
-  const handlePairSumUp = async (e) => {
-    e.preventDefault();
-    setSumUpStatusMsg('Bezig met SumUp koppelen...');
-    try {
-      const res = await fetch('/api/sumup/proxy?action=pair', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pairingCode, name: terminalName })
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setSumUpStatusMsg('✅ SumUp apparaat succesvol gekoppeld!');
-        setPairingCode('');
-        setTerminalName('');
-        fetchSumUpReaders();
-      } else {
-        setSumUpStatusMsg(`❌ Fout: ${data.error || 'Onbekende fout'}`);
-      }
-    } catch (err) {
-      setSumUpStatusMsg('❌ Netwerkfout bij koppelen.');
-    }
-  };
+  try {
+    let targetUrl = backendUrl;
+    let options = {
+      method: req.method,
+      headers: { 'Content-Type': 'application/json' },
+    };
 
-  const handleUnlinkSumUp = async (readerId) => {
-    if (!confirm(`Weet je zeker dat je SumUp apparaat ${readerId} wilt ontkoppelen?`)) return;
-
-    try {
-      const res = await fetch(`/api/sumup/proxy?action=unlink&readerId=${readerId}`, {
-        method: 'DELETE'
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        alert('SumUp apparaat succesvol ontkoppeld!');
-        fetchSumUpReaders();
-        fetchStores();
-      } else {
-        alert('Fout bij ontkoppelen: ' + (data.error || 'Onbekende fout'));
-      }
-    } catch (err) {
-      alert('Netwerkfout bij ontkoppelen.');
-    }
-  };
-
-  const handleAssignStoreToSumUp = async (readerId) => {
-    const storeId = selectedStoreForReader[readerId];
-    if (!storeId) {
-      alert('Selecteer eerst een filiaal.');
-      return;
+    if (action === 'readers') {
+      targetUrl = `${backendUrl}/readers`;
+      options.method = 'GET';
+    } else if (action === 'pair') {
+      targetUrl = `${backendUrl}/pair`;
+      options.method = 'POST';
+      options.body = JSON.stringify(req.body);
+    } else if (action === 'unlink' && readerId) {
+      targetUrl = `${backendUrl}/unlink/${readerId}`;
+      options.method = 'DELETE';
+    } else if (action === 'assign-store') {
+      targetUrl = `${backendUrl}/assign-store`;
+      options.method = 'POST';
+      options.body = JSON.stringify(req.body);
+    } else {
+      return res.status(400).json({ success: false, error: 'Onbekende actie' });
     }
 
-    try {
-      const res = await fetch('/api/sumup/proxy?action=assign-store', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ storeId, readerId })
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        alert(data.message);
-        fetchStores();
-      } else {
-        alert('Fout bij toewijzen: ' + (data.error || 'Onbekende fout'));
-      }
-    } catch (err) {
-      alert('Netwerkfout bij toewijzen aan filiaal.');
-    }
-  };
+    const response = await fetch(targetUrl, options);
+    const data = await response.json();
+    return res.status(response.status).json(data);
+  } catch (error) {
+    console.error('SumUp Proxy Error:', error);
+    return res.status(500).json({ success: false, error: 'Kan geen verbinding maken met de SumUp microservice.' });
+  }
+}
