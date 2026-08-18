@@ -78,6 +78,7 @@ export default function POSHome() {
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState('sumup');
   const [cashGiven, setCashGiven] = useState('');
+  const [showManualPinConfirm, setShowManualPinConfirm] = useState(false);
 
   const [pickupOrders, setPickupOrders] = useState([]);
   const [loadingPickup, setLoadingPickup] = useState(false);
@@ -601,7 +602,6 @@ export default function POSHome() {
       return;
     }
 
-    // Bepaal automatisch een actieve betaalmethode als de standaard geselecteerde uitstaat
     const methods = selectedStore?.payment_methods || { sumup: true, manual_pin: true, cash: true };
     if (selectedPaymentMethod === 'sumup' && methods.sumup === false) {
       if (methods.manual_pin !== false) setSelectedPaymentMethod('manual_pin');
@@ -651,12 +651,25 @@ export default function POSHome() {
     return data;
   };
 
-  const handleProcessPayment = async () => {
+  const handleInitiatePayment = () => {
     if (selectedPaymentMethod === 'cash' && cashGivenFloat < finalTotal) {
       alert('Het ingegeven contante bedrag is lager dan het totaalbedrag.');
       return;
     }
 
+    // Als handmatige pin is geselecteerd: toon eerst de bevestigingspopup met het bedrag
+    if (selectedPaymentMethod === 'manual_pin') {
+      setShowPaymentModal(false);
+      setShowManualPinConfirm(true);
+      return;
+    }
+
+    executeCheckout();
+  };
+
+  const executeCheckout = async () => {
+    setShowPaymentModal(false);
+    setShowManualPinConfirm(false);
     setLoading(true);
     setCheckoutStatus(null);
 
@@ -722,8 +735,6 @@ export default function POSHome() {
         message: `⚠️ Directe checkout mislukt (${err.message}). Bestelling lokaal opgeslagen en wordt automatisch gesynchroniseerd zodra de server weer bereikbaar is.${changeText}` 
       });
     } finally {
-      setShowPaymentModal(false);
-
       setCompletedOrderForReceipt({
         order: orderPayload,
         store: selectedStore,
@@ -1175,7 +1186,7 @@ export default function POSHome() {
                 disabled={loading || cart.length === 0}
                 className="w-full bg-red-600 hover:bg-red-700 disabled:bg-gray-300 text-white font-bold py-3 rounded transition text-xs sm:text-sm uppercase tracking-wider"
               >
-                {loading ? '⏳ Bezig met afrekenen...' : `Afrekenen (€{finalTotal.toFixed(2)})`}
+                {loading ? '⏳ Bezig met afrekenen...' : `Afrekenen (€${finalTotal.toFixed(2)})`}
               </button>
             </div>
           </div>
@@ -1311,7 +1322,6 @@ export default function POSHome() {
           <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
             <h3 className="text-base sm:text-lg font-bold mb-4 border-b pb-2">Kies Betaalmethode</h3>
             
-            {/* Dynamisch tonen op basis van gekozen filiaal instellingen */}
             <div className="grid grid-cols-3 gap-2 mb-4">
               {(!selectedStore?.payment_methods || selectedStore.payment_methods.sumup !== false) && (
                 <button onClick={() => setSelectedPaymentMethod('sumup')} className={`p-3 text-xs font-bold border rounded ${selectedPaymentMethod === 'sumup' ? 'bg-black text-white' : 'bg-gray-100'}`}>💳 SumUp</button>
@@ -1335,7 +1345,26 @@ export default function POSHome() {
             )}
             <div className="flex space-x-2">
               <button onClick={() => setShowPaymentModal(false)} className="w-1/3 bg-gray-200 py-3 rounded text-xs font-bold">Annuleren</button>
-              <button onClick={handleProcessPayment} disabled={loading} className="w-2/3 bg-red-600 text-white py-3 rounded text-xs font-bold">{loading ? '⏳ Even wachten...' : 'Voltooien'}</button>
+              <button onClick={handleInitiatePayment} disabled={loading} className="w-2/3 bg-red-600 text-white py-3 rounded text-xs font-bold">{loading ? '⏳ Even wachten...' : 'Voltooien'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Handmatige Pin Bevestigingspopup */}
+      {showManualPinConfirm && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-2xl max-w-sm w-full p-6 text-center space-y-4">
+            <div className="text-3xl">📌</div>
+            <h3 className="text-base sm:text-lg font-bold">Handmatige Pin Betaling</h3>
+            <p className="text-xs text-gray-600">Voer het volgende bedrag in op de pinautomaat:</p>
+            <div className="bg-gray-100 p-4 rounded-lg border-2 border-black">
+              <span className="text-2xl font-black text-red-600">€{finalTotal.toFixed(2)}</span>
+            </div>
+            <p className="text-[11px] text-gray-500">Klik pas op bevestigen zodra de pinbetaling op de automaat is geslaagd.</p>
+            <div className="flex space-x-2 pt-2">
+              <button onClick={() => setShowManualPinConfirm(false)} className="w-1/2 bg-gray-200 py-3 rounded text-xs font-bold">Annuleren</button>
+              <button onClick={executeCheckout} className="w-1/2 bg-green-600 hover:bg-green-700 text-white py-3 rounded text-xs font-bold">✓ Betaling Bevestigen</button>
             </div>
           </div>
         </div>
