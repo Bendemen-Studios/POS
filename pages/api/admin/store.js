@@ -1,4 +1,4 @@
-import db from '../../../lib/db';
+[cite: 3]import db from '../../../lib/db';
 
 export default async function handler(req, res) {
   const { method } = req;
@@ -6,14 +6,21 @@ export default async function handler(req, res) {
   if (method === 'GET') {
     try {
       const [rows] = await db.query('SELECT * FROM stores');
-      const formattedStores = (Array.isArray(rows) ? rows : []).map((s) => ({
-        ...s,
-        id: s.id,
-        store_id: s.id,
-        store_name: s.store_name || 'Onbekend Filiaal',
-        kvk: s.kvk || '',
-        btw: s.btw || ''
-      }));
+      const formattedStores = (Array.isArray(rows) ? rows : []).map((s) => {
+        let pm = s.payment_methods;
+        if (typeof pm === 'string') {
+          try { pm = JSON.parse(pm); } catch (e) { pm = { sumup: true, manual_pin: true, cash: true }; }
+        }
+        return {
+          ...s,
+          id: s.id,
+          store_id: s.id,
+          store_name: s.store_name || 'Onbekend Filiaal',
+          kvk: s.kvk || '',
+          btw: s.btw || '',
+          payment_methods: pm || { sumup: true, manual_pin: true, cash: true }
+        };
+      });
       return res.status(200).json({ success: true, stores: formattedStores });
     } catch (error) {
       console.error('Fout bij ophalen winkels:', error);
@@ -22,18 +29,19 @@ export default async function handler(req, res) {
   }
 
   if (method === 'POST') {
-    const { store_name, address, receipt_header, receipt_footer, pickup_id, terminal_id, kvk, btw } = req.body;
+    const { store_name, address, receipt_header, receipt_footer, pickup_id, terminal_id, kvk, btw, payment_methods } = req.body;
     
-    // Verplicht veld controleren
     if (!store_name || !store_name.trim()) {
       return res.status(400).json({ success: false, error: 'De filiaalnaam (store_name) is verplicht.' });
     }
 
     try {
       const customId = `store_${Date.now()}`;
+      const paymentMethodsJson = JSON.stringify(payment_methods || { sumup: true, manual_pin: true, cash: true });
+
       await db.query(
-        'INSERT INTO stores (id, store_name, address, receipt_header, receipt_footer, pickup_id, terminal_id, kvk, btw) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [customId, store_name.trim(), address || null, receipt_header || null, receipt_footer || null, pickup_id || null, terminal_id || null, kvk || null, btw || null]
+        'INSERT INTO stores (id, store_name, address, receipt_header, receipt_footer, pickup_id, terminal_id, kvk, btw, payment_methods) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [customId, store_name.trim(), address || null, receipt_header || null, receipt_footer || null, pickup_id || null, terminal_id || null, kvk || null, btw || null, paymentMethodsJson]
       );
       return res.status(200).json({ success: true, id: customId });
     } catch (error) {
@@ -43,18 +51,19 @@ export default async function handler(req, res) {
   }
 
   if (method === 'PUT') {
-    const { id, store_id, store_name, address, receipt_header, receipt_footer, pickup_id, terminal_id, kvk, btw } = req.body;
+    const { id, store_id, store_name, address, receipt_header, receipt_footer, pickup_id, terminal_id, kvk, btw, payment_methods } = req.body;
     const targetId = id || store_id;
 
-    // Verplicht veld controleren
     if (!store_name || !store_name.trim()) {
       return res.status(400).json({ success: false, error: 'De filiaalnaam (store_name) is verplicht.' });
     }
 
     try {
+      const paymentMethodsJson = JSON.stringify(payment_methods || { sumup: true, manual_pin: true, cash: true });
+
       await db.query(
-        'UPDATE stores SET store_name = ?, address = ?, receipt_header = ?, receipt_footer = ?, pickup_id = ?, terminal_id = ?, kvk = ?, btw = ? WHERE id = ?',
-        [store_name.trim(), address || null, receipt_header || null, receipt_footer || null, pickup_id || null, terminal_id || null, kvk || null, btw || null, targetId]
+        'UPDATE stores SET store_name = ?, address = ?, receipt_header = ?, receipt_footer = ?, pickup_id = ?, terminal_id = ?, kvk = ?, btw = ?, payment_methods = ? WHERE id = ?',
+        [store_name.trim(), address || null, receipt_header || null, receipt_footer || null, pickup_id || null, terminal_id || null, kvk || null, btw || null, paymentMethodsJson, targetId]
       );
       return res.status(200).json({ success: true, message: 'Filiaal bijgewerkt' });
     } catch (error) {
