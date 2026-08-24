@@ -28,26 +28,46 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
 
+    const cleanUsername = username.trim().toLowerCase();
+
     try {
+      // 1. Probeer online in te loggen via de server
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
+        body: JSON.stringify({ username: cleanUsername, password })
       });
 
       const data = await res.json();
 
-      if (data.success) {
+      if (res.ok && data.success) {
+        // Sla gegevens en wachtwoord veilig lokaal op voor offline gebruik
         localStorage.setItem('pos_user', JSON.stringify(data.user));
         if (data.token) localStorage.setItem('pos_token', data.token);
+
+        localStorage.setItem(`pos_offline_user_${cleanUsername}`, JSON.stringify(data.user));
+        localStorage.setItem(`pos_offline_pass_${cleanUsername}`, password);
         
         router.replace('/select-store');
       } else {
         setError(data.message || 'Inloggen mislukt.');
       }
     } catch (err) {
-      console.error(err);
-      setError('Er is een fout opgetreden bij het verbinden met de server.');
+      console.warn('Server onbereikbaar, controleer offline cache...', err);
+
+      // 2. OFFLINE FALLBACK: Controleer de lokale reserve-cache in de browser
+      const cachedUser = localStorage.getItem(`pos_offline_user_${cleanUsername}`);
+      const cachedPass = localStorage.getItem(`pos_offline_pass_${cleanUsername}`);
+
+      if (cachedUser && cachedPass === password) {
+        const userObj = JSON.parse(cachedUser);
+        localStorage.setItem('pos_user', JSON.stringify(userObj));
+        
+        alert('⚠️ Geen verbinding met de server. Ingelogd via lokale offline cache.');
+        router.replace('/select-store');
+      } else {
+        setError('Geen verbinding met de server en geen geldige lokale inlogcache gevonden voor deze gebruiker.');
+      }
     } finally {
       setLoading(false);
     }
