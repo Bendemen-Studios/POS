@@ -34,21 +34,38 @@ export default function SelectStore() {
       });
       const data = await res.json();
 
-      if (data.success && Array.isArray(data.stores)) {
+      if (res.ok && data.success && Array.isArray(data.stores)) {
         setStores(data.stores);
         localStorage.setItem('cached_pos_stores', JSON.stringify(data.stores));
       } else {
-        setError(data.message || 'Geen toegewezen filialen gevonden.');
+        throw new Error(data.message || 'Geen toegewezen filialen gevonden.');
       }
     } catch (err) {
-      console.error('Fout bij laden van filialen:', err);
-      setError('Netwerkfout bij ophalen van jouw filialen.');
+      console.warn('Server offline, laden via lokale filiaalcache...', err);
+
+      // OFFLINE FALLBACK: Laad de filialen direct uit de browser-cache als de VPS plat ligt
+      const cachedStores = localStorage.getItem('cached_pos_stores');
+      if (cachedStores) {
+        try {
+          const parsedStores = JSON.parse(cachedStores);
+          setStores(parsedStores);
+          setError('⚠️ Geen verbinding met de server. Filialen geladen via lokale reserve-cache.');
+        } catch (e) {
+          setError('Kan geen filialen laden en geen geldige lokale cache gevonden.');
+        }
+      } else {
+        setError('Geen netwerkverbinding en geen lokale filiaalcache beschikbaar.');
+      }
     } finally {
       setLoading(false);
     }
   };
 
   const selectStore = (store) => {
+    const parsedMethods = typeof store.payment_methods === 'string'
+      ? JSON.parse(store.payment_methods)
+      : (store.payment_methods || { sumup: true, manual_pin: true, cash: true });
+
     const storeData = {
       id: store.id,
       store_id: store.id,
@@ -57,7 +74,8 @@ export default function SelectStore() {
       location: store.address || '',
       address: store.address || '',
       pickup_id: store.pickup_id || null,
-      terminal_id: store.terminal_id || null
+      terminal_id: store.terminal_id || null,
+      payment_methods: parsedMethods
     };
 
     localStorage.setItem('selectedStore', JSON.stringify(storeData));
@@ -90,7 +108,7 @@ export default function SelectStore() {
         )}
 
         {error && (
-          <div className="bg-red-100 border-l-4 border-red-600 text-red-700 p-3 rounded text-xs mb-4 font-semibold">
+          <div className="bg-yellow-50 border-l-4 border-yellow-600 text-yellow-800 p-3 rounded text-xs mb-4 font-semibold">
             {error}
           </div>
         )}
