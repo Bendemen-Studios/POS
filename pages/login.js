@@ -10,14 +10,12 @@ export default function LoginPage() {
   const [isChecking, setIsChecking] = useState(true);
 
   useEffect(() => {
+    // Alleen doorsturen als er al een user is, maar dwing ALTIJD tot filiaal selectie bij herstart
     const user = localStorage.getItem('pos_user');
     if (user) {
-      const selectedStore = localStorage.getItem('selectedStore');
-      if (selectedStore) {
-        router.replace('/');
-      } else {
-        router.replace('/select-store');
-      }
+      localStorage.removeItem('selectedStore');
+      localStorage.removeItem('pos_selected_store');
+      router.replace('/select-store');
     } else {
       setIsChecking(false);
     }
@@ -31,7 +29,6 @@ export default function LoginPage() {
     const cleanUsername = username.trim().toLowerCase();
 
     try {
-      // 1. Probeer online in te loggen via de server
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -41,21 +38,23 @@ export default function LoginPage() {
       const data = await res.json();
 
       if (res.ok && data.success) {
-        // Sla gegevens en wachtwoord veilig lokaal op voor offline gebruik
         localStorage.setItem('pos_user', JSON.stringify(data.user));
         if (data.token) localStorage.setItem('pos_token', data.token);
 
         localStorage.setItem(`pos_offline_user_${cleanUsername}`, JSON.stringify(data.user));
         localStorage.setItem(`pos_offline_pass_${cleanUsername}`, password);
         
+        // Wis oude winkelkeuze bij nieuwe login
+        localStorage.removeItem('selectedStore');
+        localStorage.removeItem('pos_selected_store');
+
         router.replace('/select-store');
       } else {
         setError(data.message || 'Inloggen mislukt.');
       }
     } catch (err) {
-      console.warn('Server onbereikbaar, controleer offline cache...', err);
+      console.warn('Server offline, controleer offline cache...', err);
 
-      // 2. OFFLINE FALLBACK: Controleer de lokale reserve-cache in de browser
       const cachedUser = localStorage.getItem(`pos_offline_user_${cleanUsername}`);
       const cachedPass = localStorage.getItem(`pos_offline_pass_${cleanUsername}`);
 
@@ -63,10 +62,12 @@ export default function LoginPage() {
         const userObj = JSON.parse(cachedUser);
         localStorage.setItem('pos_user', JSON.stringify(userObj));
         
-        alert('⚠️ Geen verbinding met de server. Ingelogd via lokale offline cache.');
+        localStorage.removeItem('selectedStore');
+        localStorage.removeItem('pos_selected_store');
+
         router.replace('/select-store');
       } else {
-        setError('Geen verbinding met de server en geen geldige lokale inlogcache gevonden voor deze gebruiker.');
+        setError('Geen verbinding met de server en geen geldige lokale inlogcache gevonden.');
       }
     } finally {
       setLoading(false);

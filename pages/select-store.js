@@ -11,7 +11,7 @@ export default function SelectStore() {
   useEffect(() => {
     const userStr = localStorage.getItem('pos_user');
     if (!userStr) {
-      router.push('/login');
+      router.replace('/login');
       return;
     }
 
@@ -20,7 +20,7 @@ export default function SelectStore() {
       setCurrentUser(parsedUser);
       fetchUserStores(parsedUser.id);
     } catch (e) {
-      router.push('/login');
+      router.replace('/login');
     }
   }, [router]);
 
@@ -28,36 +28,50 @@ export default function SelectStore() {
     setLoading(true);
     setError('');
 
-    try {
-      const res = await fetch(`/api/auth/store-selection?user_id=${userId}`, {
-        headers: { 'x-user-id': String(userId) }
-      });
-      const data = await res.json();
-
-      if (res.ok && data.success && Array.isArray(data.stores)) {
-        setStores(data.stores);
-        localStorage.setItem('cached_pos_stores', JSON.stringify(data.stores));
-      } else {
-        throw new Error(data.message || 'Geen toegewezen filialen gevonden.');
-      }
-    } catch (err) {
-      console.warn('Server offline, laden via lokale filiaalcache...', err);
-
-      // OFFLINE FALLBACK: Laad de filialen direct uit de browser-cache als de VPS plat ligt
+    // Probeer direct vanuit de cache te laden als fallback of als we offline zijn
+    const loadFromCache = () => {
       const cachedStores = localStorage.getItem('cached_pos_stores');
       if (cachedStores) {
         try {
           const parsedStores = JSON.parse(cachedStores);
           setStores(parsedStores);
-          setError('⚠️ Geen verbinding met de server. Filialen geladen via lokale reserve-cache.');
+          setError('⚠️ Offline modus: Filialen geladen via lokale reserve-cache.');
+          setLoading(false);
+          return true;
         } catch (e) {
-          setError('Kan geen filialen laden en geen geldige lokale cache gevonden.');
+          return false;
         }
-      } else {
-        setError('Geen netwerkverbinding en geen lokale filiaalcache beschikbaar.');
       }
-    } finally {
-      setLoading(false);
+      return false;
+    };
+
+    try {
+      // Timeout instellen op 3 seconden zodat hij bij een dode VPS niet blijft hangen
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
+
+      const res = await fetch(`/api/auth/store-selection?user_id=${userId}`, {
+        headers: { 'x-user-id': String(userId) },
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+
+      const data = await res.json();
+
+      if (res.ok && data.success && Array.isArray(data.stores)) {
+        setStores(data.stores);
+        localStorage.setItem('cached_pos_stores', JSON.stringify(data.stores));
+        setLoading(false);
+      } else {
+        throw new Error(data.message || 'Geen toegewezen filialen gevonden.');
+      }
+    } catch (err) {
+      console.warn('Server offline of traag, val terug op cache...', err);
+      const success = loadFromCache();
+      if (!success) {
+        setError('Geen verbinding met de server en geen lokale filiaalcache beschikbaar.');
+        setLoading(false);
+      }
     }
   };
 
@@ -81,12 +95,12 @@ export default function SelectStore() {
     localStorage.setItem('selectedStore', JSON.stringify(storeData));
     localStorage.setItem('pos_selected_store', JSON.stringify(storeData));
 
-    router.push('/');
+    router.replace('/');
   };
 
   const handleLogout = () => {
     localStorage.clear();
-    router.push('/login');
+    router.replace('/login');
   };
 
   if (!currentUser) return null;
