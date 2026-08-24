@@ -3,16 +3,14 @@ const withPWA = require('next-pwa')({
   disable: false,
   register: true,
   skipWaiting: true,
-  // Zorg dat offline verzoeken netjes worden opgevangen zonder vast te lopen
   fallbacks: {
-    document: '/login', // Of je hoofdpagina
+    document: '/login',
   },
 });
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  // Zorg dat assets correct worden opgeslagen voor offline gebruik
   async headers() {
     return [
       {
