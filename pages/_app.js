@@ -46,8 +46,6 @@ async function pollSumUpTransaction(clientTransactionId, originalFetch) {
         }
       }
     } catch (error) {
-      // A temporary network error must not turn a possibly successful payment
-      // into a second checkout. Continue polling until the safe timeout.
       console.warn('[SUMUP] tijdelijke statusfout:', error.message);
     }
 
@@ -97,9 +95,6 @@ function installSumUpGatewayFetch() {
       nextInit.body = JSON.stringify(body);
       headers.set('Content-Type', 'application/json');
 
-      // Starting a Solo checkout is asynchronous. The gateway returns immediately;
-      // poll the authoritative Transactions API here and only report success to the
-      // existing POS payment flow after SumUp reports SUCCESSFUL.
       const startResponse = await originalFetch(gatewayUrl.toString(), nextInit);
       const startData = await startResponse.json().catch(() => ({}));
       if (!startResponse.ok || !startData?.success) {
@@ -121,6 +116,112 @@ function installSumUpGatewayFetch() {
   };
 }
 
+async function getAdminStores() {
+  try {
+    const response = await fetch('/api/admin/store', { cache: 'no-store' });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.success) return [];
+    return Array.isArray(data.stores) ? data.stores : (data.store ? [data.store] : []);
+  } catch {
+    return [];
+  }
+}
+
+function installSumUpStoreSelector() {
+  if (typeof window === 'undefined' || window.__bendemenSumUpStoreSelectorInstalled) return;
+  window.__bendemenSumUpStoreSelectorInstalled = true;
+
+  const enhance = async () => {
+    if (!window.location.pathname.startsWith('/admin')) return;
+
+    const heading = Array.from(document.querySelectorAll('h3, h4')).find((el) =>
+      el.textContent?.includes('SumUp Apparaat & Koppeling Beheer')
+    );
+    if (!heading) return;
+
+    const form = heading.parentElement?.parentElement?.querySelector('form');
+    if (!form || form.querySelector('[data-bendemen-sumup-store]')) return;
+
+    const stores = await getAdminStores();
+    if (!stores.length) return;
+
+    const wrapper = document.createElement('div');
+    wrapper.dataset.bendemenSumupStore = 'true';
+    wrapper.className = 'bg-white border border-red-200 rounded p-3 space-y-1';
+
+    const label = document.createElement('label');
+    label.className = 'block text-xs font-bold uppercase tracking-wider text-gray-700';
+    label.textContent = 'Filiaal voor deze SumUp Solo';
+
+    const select = document.createElement('select');
+    select.id = 'bendemen-sumup-store-select';
+    select.className = 'w-full p-2 border rounded text-xs';
+    select.innerHTML = '<option value="">-- Selecteer Filiaal --</option>';
+    stores.forEach((store) => {
+      const option = document.createElement('option');
+      option.value = String(store.id || store.store_id || '');
+      option.textContent = store.store_name || store.name || option.value;
+      if (store.terminal_id) option.textContent += ` — gekoppeld: ${store.terminal_id}`;
+      select.appendChild(option);
+    });
+
+    const help = document.createElement('div');
+    help.className = 'text-[11px] text-gray-500';
+    help.textContent = 'Kies eerst het filiaal. Na het koppelen wordt de nieuwe Solo automatisch aan dit filiaal toegewezen.';
+
+    wrapper.appendChild(label);
+    wrapper.appendChild(select);
+    wrapper.appendChild(help);
+    form.insertBefore(wrapper, form.firstChild);
+
+    form.addEventListener('submit', async () => {
+      const storeId = select.value;
+      if (!storeId) {
+        setTimeout(() => alert('Selecteer eerst een filiaal voor deze SumUp Solo.'), 0);
+        return;
+      }
+
+      // admin.js performs the actual pair call. After it completes, discover the
+      // newly paired reader and persist the store -> terminal relationship.
+      const before = new Set();
+      try {
+        const current = await fetch('/api/sumup/proxy?action=readers', { cache: 'no-store' });
+        const data = await current.json().catch(() => ({}));
+        (data.readers || []).forEach((reader) => before.add(String(reader.id)));
+      } catch {}
+
+      const started = Date.now();
+      const findAndAssign = async () => {
+        if (Date.now() - started > 30000) return;
+        try {
+          const response = await fetch('/api/sumup/proxy?action=readers', { cache: 'no-store' });
+          const data = await response.json().catch(() => ({}));
+          const readers = Array.isArray(data.readers) ? data.readers : [];
+          const newest = readers.find((reader) => !before.has(String(reader.id)));
+          if (newest?.id) {
+            const assign = await fetch('/api/sumup/proxy?action=assign-store', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ storeId, readerId: newest.id }),
+            });
+            const result = await assign.json().catch(() => ({}));
+            if (result.success) {
+              setTimeout(() => window.location.reload(), 500);
+            }
+            return;
+          }
+        } catch {}
+        setTimeout(findAndAssign, 1500);
+      };
+      setTimeout(findAndAssign, 2500);
+    }, true);
+  };
+
+  const observer = new MutationObserver(() => enhance());
+  observer.observe(document.documentElement, { childList: true, subtree: true });
+  enhance();
+}
+
 function registerNativePWA() {
   if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
   window.addEventListener('load', () => {
@@ -134,6 +235,7 @@ export default function App({ Component, pageProps }) {
   useEffect(() => {
     installSumUpGatewayFetch();
     registerNativePWA();
+    installSumUpStoreSelector();
   }, []);
 
   return (
