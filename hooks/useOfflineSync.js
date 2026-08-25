@@ -1,88 +1,125 @@
 // hooks/useOfflineSync.js
-import { useEffect, useState } from 'react';
-import { db } from '../lib/db';
-import axios from 'axios';
+import { useCallback, useEffect, useRef, useState } from 'react';
+
+const OFFLINE_QUEUE_KEY = 'pos_offline_orders';
+
+function readQueue() {
+  if (typeof window === 'undefined') return [];
+  try {
+    const parsed = JSON.parse(localStorage.getItem(OFFLINE_QUEUE_KEY) || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeQueue(queue) {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
+  }
+}
 
 export function useOfflineSync() {
   const [isSyncingOrders, setIsSyncingOrders] = useState(false);
   const [unsyncedCount, setUnsyncedCount] = useState(0);
+  const syncingRef = useRef(false);
 
-  // Tel hoeveel orders nog gesynct moeten worden
-  const checkUnsyncedOrders = async () => {
-    const count = await db.orders.where('status').equals('pending_sync').count();
-    setUnsyncedCount(count);
-  };
+  const checkUnsyncedOrders = useCallback(() => {
+    setUnsyncedCount(readQueue().length);
+  }, []);
 
-  // Deze functie pakt alle offline orders op en stuurt ze naar de API
-  const syncOfflineOrders = async () => {
-    if (isSyncingOrders) return; // Voorkom dat hij 2x tegelijk draait
-    
+  const syncOfflineOrders = useCallback(async () => {
+    if (syncingRef.current) return;
+
+    const pendingOrders = readQueue();
+    if (pendingOrders.length === 0) {
+      setUnsyncedCount(0);
+      return;
+    }
+
+    syncingRef.current = true;
     setIsSyncingOrders(true);
-    
+
+    const remaining = [];
+
     try {
-      // Haal alle orders op die de status 'pending_sync' hebben
-      const pendingOrders = await db.orders.where('status').equals('pending_sync').toArray();
-
-      if (pendingOrders.length === 0) {
-        setIsSyncingOrders(false);
-        return; 
-      }
-
-      console.log(`Sync Manager: Bezig met synchroniseren van ${pendingOrders.length} orders...`);
-
       for (const order of pendingOrders) {
         try {
-          // Stuur de opgeslagen data naar onze eigen WooCommerce API
-          const response = await axios.post('/api/woocommerce/order', {
-            orderItems: order.orderItems,
-            paymentMethod: order.paymentMethod,
-            storeId: order.storeId,
-            cashierId: order.cashierId,
-            customerId: order.customerId,
-            totals: order.totals
+          let response = await fetch('/api/woocommerce/checkout', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(order.clientOrderId
+                ? { 'Idempotency-Key': String(order.clientOrderId) }
+                : {}),
+            },
+            body: JSON.stringify(order),
           });
 
-          if (response.data.success) {
-            // Als de API success meldt, updaten we de order in Dexie
-            await db.orders.update(order.id, {
-              status: 'synced',
-              is_synced: 1,
-              woo_order_id: response.data.orderId
+          if (response.status === 404) {
+            response = await fetch('/api/woocommerce/offline-order', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                ...(order.clientOrderId
+                  ? { 'Idempotency-Key': String(order.clientOrderId) }
+                  : {}),
+              },
+              body: JSON.stringify(order),
             });
-            console.log(`Order ${order.id} succesvol gesynct!`);
+          }
+
+          let data = null;
+          try {
+            data = await response.json();
+          } catch {
+            data = null;
+          }
+
+          if (!response.ok || !data?.success) {
+            remaining.push(order);
           }
         } catch (error) {
-          console.error(`Fout bij syncen van order ${order.id}:`, error);
-          // Als één order faalt (bijv. server error), gaat hij verder met de rest
+          console.warn(`Offline order ${order.clientOrderId || 'unknown'} blijft in de wachtrij:`, error);
+          remaining.push(order);
         }
       }
 
-      // Update de teller in de kassa
-      checkUnsyncedOrders();
-    } catch (error) {
-      console.error("Fout in het sync-proces:", error);
+      writeQueue(remaining);
+      setUnsyncedCount(remaining.length);
     } finally {
+      syncingRef.current = false;
       setIsSyncingOrders(false);
     }
-  };
+  }, []);
 
-  // Lifecycle listeners
   useEffect(() => {
-    // Check direct bij het openen van de app of er nog orders staan
     checkUnsyncedOrders();
 
-    // Als de browser weer online komt, trigger de sync!
-    const handleOnline = () => {
-      console.log("Internet is terug! Start automatische sync...");
+    // Probeer bij iedere app-start direct te synchroniseren wanneer er verbinding is.
+    if (navigator.onLine) {
       syncOfflineOrders();
-    };
+    }
 
+    const handleOnline = () => syncOfflineOrders();
     window.addEventListener('online', handleOnline);
+
+    // Herstel ook verbindingen waarbij de browser geen 'online' event afvuurt.
+    const interval = window.setInterval(() => {
+      if (navigator.onLine) syncOfflineOrders();
+      else checkUnsyncedOrders();
+    }, 30000);
 
     return () => {
       window.removeEventListener('online', handleOnline);
+      window.clearInterval(interval);
     };
-  }, []);
+  }, [checkUnsyncedOrders, syncOfflineOrders]);
 
-  return { isSyncingOrders, unsyncedCount, syncOfflineOrders, checkUnsyncedOrders };
+  return {
+    isSyncingOrders,
+    unsyncedCount,
+    syncOfflineOrders,
+    checkUnsyncedOrders,
+  };
 }
