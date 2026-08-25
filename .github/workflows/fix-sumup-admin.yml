@@ -10,86 +10,184 @@ permissions:
 
 jobs:
   patch:
-    if: ${{ !contains(github.event.head_commit.message, '[sumup-admin-fixed]') }}
+    if: ${{ !contains(github.event.head_commit.message, '[sumup-admin-fixed-v2]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Patch SumUp admin UI
+      - name: Patch admin.js
         run: |
           python3 <<'PY'
           from pathlib import Path
           p = Path('pages/admin.js')
           s = p.read_text()
 
-          old_fetch = '''  const fetchSumUpReaders = async () => {
-    try {
-      const res = await fetch('/api/sumup/proxy?action=readers');
-      const data = await res.json();
-      if (data.success) {
-        setSumUpReaders(data.readers || []);
-      }
-    } catch (err) {
-      console.error('Kan geen SumUp apparaten ophalen via proxy:', err);
-    }
-  };'''
+          # 1. State for the filiaal selected while pairing a NEW reader.
+          state_old = "  const [selectedStoreForReader, setSelectedStoreForReader] = useState({});\n"
+          state_new = state_old + "  const [selectedStoreForPairing, setSelectedStoreForPairing] = useState('');\n"
+          if "selectedStoreForPairing" not in s:
+              if state_old not in s:
+                  raise SystemExit('Could not find SumUp reader state')
+              s = s.replace(state_old, state_new, 1)
 
-          new_fetch = '''  const fetchSumUpReaders = async () => {
-    try {
-      const res = await fetch('/api/sumup/proxy?action=readers', { cache: 'no-store' });
-      const data = await res.json().catch(() => ({}));
-      if (data.success) {
-        setSumUpReaders(Array.isArray(data.readers) ? data.readers : []);
-        setSumUpStatusMsg('');
-      } else {
-        setSumUpReaders([]);
-        setSumUpStatusMsg(`❌ SumUp gateway: ${data.error || `HTTP ${res.status}`}`);
-      }
-    } catch (err) {
-      console.error('Kan geen SumUp apparaten ophalen via gateway:', err);
-      setSumUpReaders([]);
-      setSumUpStatusMsg('❌ Kan de SumUp gateway niet bereiken.');
-    }
-  };'''
+          # 2. Return readers from fetchSumUpReaders so pairing can detect the new reader.
+          fetch_old = """  const fetchSumUpReaders = async () => {
+            try {
+              const res = await fetch('/api/sumup/proxy?action=readers');
+              const data = await res.json();
+              if (data.success) {
+                setSumUpReaders(data.readers || []);
+              }
+            } catch (err) {
+              console.error('Kan geen SumUp apparaten ophalen via proxy:', err);
+            }
+          };"""
+          fetch_new = """  const fetchSumUpReaders = async () => {
+            try {
+              const res = await fetch('/api/sumup/proxy?action=readers', { cache: 'no-store' });
+              const data = await res.json().catch(() => ({}));
+              if (data.success) {
+                const readers = Array.isArray(data.readers) ? data.readers : [];
+                setSumUpReaders(readers);
+                return readers;
+              }
+            } catch (err) {
+              console.error('Kan geen SumUp apparaten ophalen via proxy:', err);
+            }
+            return [];
+          };"""
+          if fetch_old in s:
+              s = s.replace(fetch_old, fetch_new, 1)
 
-          if old_fetch in s:
-              s = s.replace(old_fetch, new_fetch, 1)
+          # 3. Pair the reader, then automatically assign the newly-created reader to the selected store.
+          pair_start = s.find("  const handlePairSumUp = async (e) => {")
+          pair_end = s.find("\n\n  const handleUnlinkSumUp", pair_start)
+          if pair_start == -1 or pair_end == -1:
+              raise SystemExit('Could not find handlePairSumUp block')
 
-          old_empty = '''                      {sumUpReaders.length === 0 ? (
-                        <p className="p-6 text-center text-xs text-gray-400">Geen SumUp apparaten gevonden of geen verbinding met de microservice.</p>
-                      ) : ('''
+          pair_new = """  const handlePairSumUp = async (e) => {
+            e.preventDefault();
 
-          new_empty = '''                      {sumUpReaders.length === 0 ? (
-                        <div className="p-4 space-y-4">
-                          <div className="text-center text-xs text-gray-500">
-                            {sumUpStatusMsg || 'Geen SumUp apparaten gevonden. Je filialen zijn wel beschikbaar.'}
-                          </div>
-                          <div className="border rounded-lg divide-y bg-gray-50">
-                            <div className="px-3 py-2 text-xs font-bold uppercase tracking-wider">Filialen</div>
-                            {stores.length === 0 ? (
-                              <div className="p-4 text-center text-xs text-gray-400">Geen filialen gevonden.</div>
-                            ) : stores.map((s) => (
-                              <div key={s.id || s.store_id} className="p-3 flex items-center justify-between gap-3 bg-white">
-                                <div>
-                                  <div className="font-bold text-xs">{s.store_name || s.name}</div>
-                                  <div className="text-[11px] text-gray-500">SumUp: {s.terminal_id || 'Nog niet gekoppeld'}</div>
-                                </div>
-                                <span className={`text-[10px] font-bold px-2 py-1 rounded ${s.terminal_id ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                                  {s.terminal_id ? 'Gekoppeld' : 'Geen terminal'}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                          <p className="text-center text-[11px] text-gray-400">Koppel eerst een Solo met de pairing code hierboven. Daarna verschijnt de terminal hier en kun je hem aan een filiaal koppelen.</p>
-                        </div>
-                      ) : ('''
+            if (!selectedStoreForPairing) {
+              setSumUpStatusMsg('❌ Selecteer eerst een filiaal.');
+              return;
+            }
 
-          if old_empty in s:
-              s = s.replace(old_empty, new_empty, 1)
+            setSumUpStatusMsg('Bezig met SumUp koppelen...');
+            try {
+              const beforeReaders = sumUpReaders || [];
+              const res = await fetch('/api/sumup/proxy?action=pair', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pairingCode, name: terminalName })
+              });
+              const data = await res.json();
 
-          marker = '// SUMUP_ADMIN_STORE_LIST_FIXED'
-          if marker not in s:
-              s = s.replace("export default function AdminDashboard() {", marker + "\n\nexport default function AdminDashboard() {", 1)
+              if (!res.ok || !data.success) {
+                setSumUpStatusMsg(`❌ Fout: ${data.error || 'Onbekende fout'}`);
+                return;
+              }
+
+              setSumUpStatusMsg('SumUp gekoppeld. Filiaal wordt toegewezen...');
+              setPairingCode('');
+              setTerminalName('');
+
+              let readers = await fetchSumUpReaders();
+              let newReader = readers.find(r => !beforeReaders.some(old => String(old.id) === String(r.id)));
+
+              // SumUp kan de nieuwe reader pas kort na pairing teruggeven.
+              for (let i = 0; i < 5 && !newReader; i++) {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                readers = await fetchSumUpReaders();
+                newReader = readers.find(r => !beforeReaders.some(old => String(old.id) === String(r.id)));
+              }
+
+              if (!newReader) {
+                setSumUpStatusMsg('⚠️ Apparaat gekoppeld, maar nog niet zichtbaar. Ververs en gebruik daarna "Koppel aan Filiaal".');
+                return;
+              }
+
+              const assignRes = await fetch('/api/sumup/proxy?action=assign-store', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ storeId: selectedStoreForPairing, readerId: newReader.id })
+              });
+              const assignData = await assignRes.json();
+
+              if (assignRes.ok && assignData.success) {
+                const store = stores.find(s => String(s.id || s.store_id) === String(selectedStoreForPairing));
+                setSumUpStatusMsg(`✅ SumUp apparaat succesvol gekoppeld aan ${store?.store_name || store?.name || 'het gekozen filiaal'}!`);
+                setSelectedStoreForPairing('');
+                fetchStores();
+                fetchSumUpReaders();
+              } else {
+                setSumUpStatusMsg(`⚠️ SumUp gekoppeld, maar filiaaltoewijzing mislukt: ${assignData.error || 'Onbekende fout'}`);
+              }
+            } catch (err) {
+              console.error('SumUp pairing error:', err);
+              setSumUpStatusMsg('❌ Netwerkfout bij koppelen.');
+            }
+          };"""
+          s = s[:pair_start] + pair_new + s[pair_end:]
+
+          # 4. Always show the filiaal selector in the NEW pairing form.
+          form_old = """                    <div className=\"grid grid-cols-1 sm:grid-cols-3 gap-2\">
+                      <input
+                        type=\"text\"
+                        placeholder=\"Pairing Code (van scherm SumUp Solo)\"
+                        value={pairingCode}
+                        onChange={(e) => setPairingCode(e.target.value)}
+                        className=\"p-2 border rounded text-xs\"
+                        required
+                      />
+                      <input
+                        type=\"text\"
+                        placeholder=\"Naam (bijv. Kassa Balie 1)\"
+                        value={terminalName}
+                        onChange={(e) => setTerminalName(e.target.value)}
+                        className=\"p-2 border rounded text-xs\"
+                      />
+                      <button type=\"submit\" className=\"bg-red-600 hover:bg-red-700 text-white font-bold p-2 rounded text-xs uppercase\">Koppelen</button>
+                    </div>"""
+          form_new = """                    <div className=\"grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2\">
+                      <input
+                        type=\"text\"
+                        placeholder=\"Pairing Code (van scherm SumUp Solo)\"
+                        value={pairingCode}
+                        onChange={(e) => setPairingCode(e.target.value)}
+                        className=\"p-2 border rounded text-xs\"
+                        required
+                      />
+                      <input
+                        type=\"text\"
+                        placeholder=\"Naam (bijv. Kassa Balie 1)\"
+                        value={terminalName}
+                        onChange={(e) => setTerminalName(e.target.value)}
+                        className=\"p-2 border rounded text-xs\"
+                      />
+                      <select
+                        value={selectedStoreForPairing}
+                        onChange={(e) => setSelectedStoreForPairing(e.target.value)}
+                        className=\"p-2 border rounded text-xs bg-white\"
+                        required
+                      >
+                        <option value=\"\">-- Kies Filiaal --</option>
+                        {stores.map(s => (
+                          <option key={s.id || s.store_id} value={s.id || s.store_id}>
+                            {s.store_name || s.name}
+                          </option>
+                        ))}
+                      </select>
+                      <button type=\"submit\" className=\"bg-red-600 hover:bg-red-700 text-white font-bold p-2 rounded text-xs uppercase\">Koppelen</button>
+                    </div>"""
+          if form_old in s:
+              s = s.replace(form_old, form_new, 1)
+          elif "value={selectedStoreForPairing}" not in s:
+              raise SystemExit('Could not find new SumUp pairing form')
+
+          # Marker prevents this patch from being applied repeatedly.
+          if '// SUMUP_ADMIN_PAIRING_SELECTOR_FIXED' not in s:
+              s = s.replace('export default function AdminDashboard() {', '// SUMUP_ADMIN_PAIRING_SELECTOR_FIXED\n\nexport default function AdminDashboard() {', 1)
 
           p.write_text(s)
           PY
@@ -103,5 +201,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add pages/admin.js
-          git commit -m "Fix SumUp admin store list [sumup-admin-fixed]"
+          git commit -m "Fix SumUp admin pairing selector [sumup-admin-fixed-v2]"
           git push
