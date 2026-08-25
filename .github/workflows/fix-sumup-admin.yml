@@ -1,0 +1,107 @@
+name: Fix SumUp admin store list
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[sumup-admin-fixed]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Patch SumUp admin UI
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          p = Path('pages/admin.js')
+          s = p.read_text()
+
+          old_fetch = '''  const fetchSumUpReaders = async () => {
+    try {
+      const res = await fetch('/api/sumup/proxy?action=readers');
+      const data = await res.json();
+      if (data.success) {
+        setSumUpReaders(data.readers || []);
+      }
+    } catch (err) {
+      console.error('Kan geen SumUp apparaten ophalen via proxy:', err);
+    }
+  };'''
+
+          new_fetch = '''  const fetchSumUpReaders = async () => {
+    try {
+      const res = await fetch('/api/sumup/proxy?action=readers', { cache: 'no-store' });
+      const data = await res.json().catch(() => ({}));
+      if (data.success) {
+        setSumUpReaders(Array.isArray(data.readers) ? data.readers : []);
+        setSumUpStatusMsg('');
+      } else {
+        setSumUpReaders([]);
+        setSumUpStatusMsg(`❌ SumUp gateway: ${data.error || `HTTP ${res.status}`}`);
+      }
+    } catch (err) {
+      console.error('Kan geen SumUp apparaten ophalen via gateway:', err);
+      setSumUpReaders([]);
+      setSumUpStatusMsg('❌ Kan de SumUp gateway niet bereiken.');
+    }
+  };'''
+
+          if old_fetch in s:
+              s = s.replace(old_fetch, new_fetch, 1)
+
+          old_empty = '''                      {sumUpReaders.length === 0 ? (
+                        <p className="p-6 text-center text-xs text-gray-400">Geen SumUp apparaten gevonden of geen verbinding met de microservice.</p>
+                      ) : ('''
+
+          new_empty = '''                      {sumUpReaders.length === 0 ? (
+                        <div className="p-4 space-y-4">
+                          <div className="text-center text-xs text-gray-500">
+                            {sumUpStatusMsg || 'Geen SumUp apparaten gevonden. Je filialen zijn wel beschikbaar.'}
+                          </div>
+                          <div className="border rounded-lg divide-y bg-gray-50">
+                            <div className="px-3 py-2 text-xs font-bold uppercase tracking-wider">Filialen</div>
+                            {stores.length === 0 ? (
+                              <div className="p-4 text-center text-xs text-gray-400">Geen filialen gevonden.</div>
+                            ) : stores.map((s) => (
+                              <div key={s.id || s.store_id} className="p-3 flex items-center justify-between gap-3 bg-white">
+                                <div>
+                                  <div className="font-bold text-xs">{s.store_name || s.name}</div>
+                                  <div className="text-[11px] text-gray-500">SumUp: {s.terminal_id || 'Nog niet gekoppeld'}</div>
+                                </div>
+                                <span className={`text-[10px] font-bold px-2 py-1 rounded ${s.terminal_id ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                                  {s.terminal_id ? 'Gekoppeld' : 'Geen terminal'}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                          <p className="text-center text-[11px] text-gray-400">Koppel eerst een Solo met de pairing code hierboven. Daarna verschijnt de terminal hier en kun je hem aan een filiaal koppelen.</p>
+                        </div>
+                      ) : ('''
+
+          if old_empty in s:
+              s = s.replace(old_empty, new_empty, 1)
+
+          marker = '// SUMUP_ADMIN_STORE_LIST_FIXED'
+          if marker not in s:
+              s = s.replace("export default function AdminDashboard() {", marker + "\n\nexport default function AdminDashboard() {", 1)
+
+          p.write_text(s)
+          PY
+
+      - name: Commit patch
+        run: |
+          if git diff --quiet; then
+            echo "No changes needed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pages/admin.js
+          git commit -m "Fix SumUp admin store list [sumup-admin-fixed]"
+          git push
