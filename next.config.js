@@ -1,6 +1,8 @@
+const isProduction = process.env.NODE_ENV === 'production';
+
 const withPWA = require('next-pwa')({
   dest: 'public',
-  disable: false,
+  disable: !isProduction,
   register: true,
   skipWaiting: true,
   reloadOnOnline: false,
@@ -28,8 +30,10 @@ const withPWA = require('next-pwa')({
       },
     },
     {
-      urlPattern: ({ url, request }) =>
-        url.pathname.startsWith('/api/') && request.method === 'GET',
+      urlPattern: ({ url, request }) => {
+        const pathname = url?.pathname || '';
+        return pathname.startsWith('/api/') && request.method === 'GET';
+      },
       handler: 'NetworkFirst',
       options: {
         cacheName: 'bendemen-pos-api-get',
