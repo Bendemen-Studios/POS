@@ -1,10 +1,24 @@
 import WooCommerceRestApi from '@woocommerce/woocommerce-rest-api';
+import { createHash } from 'crypto';
+import { claimOrder, completeOrder, releaseOrder } from '../../../lib/orderIdempotency';
+
+function getClientOrderId(req) {
+  const headerId = req.headers['idempotency-key'];
+  if (headerId) return String(headerId).slice(0, 128);
+
+  return createHash('sha256')
+    .update(JSON.stringify(req.body || {}))
+    .digest('hex');
+}
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', ['POST']);
     return res.status(405).json({ success: false, error: `Method ${req.method} Not Allowed` });
   }
+
+  const clientOrderId = getClientOrderId(req);
+  let claimed = false;
 
   const url = process.env.WOOCOMMERCE_URL || process.env.NEXT_PUBLIC_WOOCOMMERCE_URL || 'https://www.bendemen.com';
   const consumerKey = process.env.WOOCOMMERCE_CONSUMER_KEY || process.env.WOOCOMMERCE_KEY || process.env.NEXT_PUBLIC_WOOCOMMERCE_KEY;
@@ -17,21 +31,40 @@ export default async function handler(req, res) {
     });
   }
 
-  const { orderItems, paymentMethod, storeId, cashierId, customerId, totals, cashDetails, created_at } = req.body;
-
-  const authHeader = 'Basic ' + Buffer.from(`${consumerKey}:${consumerSecret}`).toString('base64');
-  const customHeaders = {
-    'Authorization': authHeader,
-    'Content-Type': 'application/json',
-    'User-Agent': 'BDM-POS-Client/1.0 (Mozilla/5.0; Node.js)',
-    'Connection': 'close'
-  };
-
   try {
+    const claim = await claimOrder(clientOrderId);
+
+    if (claim.completed) {
+      return res.status(200).json({
+        success: true,
+        idempotent: true,
+        order: { id: claim.wooOrderId }
+      });
+    }
+
+    if (claim.processing) {
+      return res.status(409).json({
+        success: false,
+        retryable: true,
+        error: 'Deze bestelling wordt al verwerkt.'
+      });
+    }
+
+    claimed = claim.claimed;
+
+    const { orderItems, paymentMethod, storeId, cashierId, customerId, totals, cashDetails, created_at } = req.body;
+
+    const authHeader = 'Basic ' + Buffer.from(`${consumerKey}:${consumerSecret}`).toString('base64');
+    const customHeaders = {
+      'Authorization': authHeader,
+      'Content-Type': 'application/json',
+      'User-Agent': 'BDM-POS-Client/1.0 (Mozilla/5.0; Node.js)',
+      'Connection': 'close'
+    };
+
     const lineItems = [];
     const feeLines = [];
 
-    // Verwerk winkelmand-items en scheid normale producten van custom items
     (orderItems || []).forEach((item) => {
       const pid = Number(item.product_id || item.id);
       const isCustomItem = !pid || isNaN(pid) || pid === 0 || String(item.id).startsWith('custom_');
@@ -58,7 +91,6 @@ export default async function handler(req, res) {
       }
     });
 
-    // Korting toevoegen
     if (totals?.discountAmount > 0) {
       feeLines.push({
         name: 'Handmatige Korting',
@@ -68,8 +100,8 @@ export default async function handler(req, res) {
       });
     }
 
-    const paymentTitle = paymentMethod === 'cash' 
-      ? 'Contant (Kassa Direct)' 
+    const paymentTitle = paymentMethod === 'cash'
+      ? 'Contant (Kassa Direct)'
       : (paymentMethod === 'manual_pin' ? 'Handmatige Pin (Kassa Direct)' : 'SumUp Pin (Kassa Direct)');
 
     const orderData = {
@@ -85,7 +117,8 @@ export default async function handler(req, res) {
         { key: '_pos_cashier_id', value: String(cashierId || 1) },
         { key: '_pos_payment_type', value: String(paymentMethod) },
         { key: '_pos_direct_checkout', value: 'true' },
-        { key: '_pos_created_at', value: String(created_at || new Date().toISOString()) }
+        { key: '_pos_created_at', value: String(created_at || new Date().toISOString()) },
+        { key: '_pos_client_order_id', value: clientOrderId }
       ]
     };
 
@@ -98,7 +131,6 @@ export default async function handler(req, res) {
 
     let responseOrder;
 
-    // Directe Native Fetch call (snel & betrouwbaar)
     try {
       const fetchRes = await fetch(`${url}/wp-json/wc/v3/orders`, {
         method: 'POST',
@@ -130,12 +162,28 @@ export default async function handler(req, res) {
       responseOrder = data;
     }
 
-    return res.status(200).json({ success: true, order: responseOrder });
+    if (!responseOrder?.id) {
+      throw new Error('WooCommerce gaf geen order-ID terug.');
+    }
 
+    if (claimed) {
+      await completeOrder(clientOrderId, responseOrder.id);
+    }
+
+    return res.status(200).json({ success: true, order: responseOrder });
   } catch (error) {
+    if (claimed) {
+      try {
+        await releaseOrder(clientOrderId);
+      } catch (releaseError) {
+        console.error('[CHECKOUT IDEMPOTENCY RELEASE ERROR]:', releaseError.message);
+      }
+    }
+
     console.error('[CHECKOUT API ERROR]:', error.message);
     return res.status(500).json({
       success: false,
+      retryable: true,
       error: error.message || 'Fout bij direct aanmaken van bestelling in WooCommerce.'
     });
   }
