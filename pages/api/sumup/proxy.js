@@ -24,6 +24,30 @@ async function sumup(path, options = {}) {
   return data;
 }
 
+async function getTransaction(merchantCode, clientTransactionId) {
+  return sumup(`/v2.1/merchants/${encodeURIComponent(merchantCode)}/transactions?client_transaction_id=${encodeURIComponent(clientTransactionId)}`, { method: 'GET' });
+}
+
+async function waitForTransaction(merchantCode, clientTransactionId, timeoutMs = 120000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    try {
+      const result = await getTransaction(merchantCode, clientTransactionId);
+      const tx = result?.data || result;
+      const status = String(tx?.status || tx?.simple_status || '').toUpperCase();
+      if (status === 'SUCCESSFUL') return tx;
+      if (['FAILED', 'CANCELLED', 'REFUNDED', 'CHARGE_BACK'].includes(status)) {
+        throw new Error(`SumUp betaling ${status.toLowerCase()}.`);
+      }
+    } catch (error) {
+      if (/betaling (failed|cancelled|refunded|charge_back)/i.test(error.message)) throw error;
+      // De transactie bestaat soms pas enkele seconden na het starten.
+    }
+    await new Promise(resolve => setTimeout(resolve, 2000));
+  }
+  throw new Error('SumUp betaling wacht nog op bevestiging. Controleer de Solo voordat je opnieuw probeert te betalen.');
+}
+
 const webhookUrl = () => process.env.SUMUP_WEBHOOK_URL || `${process.env.NEXT_PUBLIC_APP_URL || 'https://www.bendemen.com'}/api/sumup/webhook`;
 
 export default async function handler(req, res) {
@@ -75,7 +99,8 @@ export default async function handler(req, res) {
       }
       if (!targetReaderId) return res.status(400).json({ success: false, error: 'Geen SumUp Solo gekoppeld aan dit filiaal.' });
 
-      const affiliate = appId && affiliateKey ? { app_id: appId, key: affiliateKey, foreign_transaction_id: String(foreignTransactionId || crypto.randomUUID()) } : undefined;
+      const foreignId = String(foreignTransactionId || `bdm-${Date.now()}-${crypto.randomUUID()}`);
+      const affiliate = appId && affiliateKey ? { app_id: appId, key: affiliateKey, foreign_transaction_id: foreignId } : undefined;
       const payload = {
         total_amount: { currency: 'EUR', minor_unit: 2, value: Math.round(amount * 100) },
         description: description || 'Bendemen POS betaling',
@@ -87,7 +112,15 @@ export default async function handler(req, res) {
       const clientTransactionId = checkout?.data?.client_transaction_id;
       if (!clientTransactionId) throw new Error('SumUp gaf geen client_transaction_id terug.');
 
-      return res.status(200).json({ success: true, readerId: targetReaderId, clientTransactionId, checkout: checkout.data, message: 'Betaling gestart op de SumUp Solo.' });
+      // Wacht server-side op het definitieve betaalresultaat. Daardoor maakt de POS
+      // pas na een echte SUCCESSFUL betaling de WooCommerce-order aan.
+      const transaction = await waitForTransaction(merchantCode, clientTransactionId);
+      return res.status(200).json({ success: true, readerId: targetReaderId, clientTransactionId, transaction, checkout: checkout.data });
+    }
+
+    if (action === 'transaction' && req.query.clientTransactionId) {
+      const transaction = await getTransaction(merchantCode, req.query.clientTransactionId);
+      return res.status(200).json({ success: true, transaction: transaction?.data || transaction });
     }
 
     if (action === 'checkout' && readerId && checkoutId) {
