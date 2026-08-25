@@ -1,10 +1,24 @@
 import WooCommerceRestApi from '@woocommerce/woocommerce-rest-api';
+import { createHash } from 'crypto';
+import { claimOrder, completeOrder, releaseOrder } from '../../../lib/orderIdempotency';
+
+function getClientOrderId(req) {
+  const headerId = req.headers['idempotency-key'];
+  if (headerId) return String(headerId).slice(0, 128);
+
+  return createHash('sha256')
+    .update(JSON.stringify(req.body || {}))
+    .digest('hex');
+}
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', ['POST']);
     return res.status(405).json({ success: false, error: `Method ${req.method} Not Allowed` });
   }
+
+  const clientOrderId = getClientOrderId(req);
+  let claimed = false;
 
   const wcUrl = process.env.WOOCOMMERCE_URL || process.env.NEXT_PUBLIC_WOOCOMMERCE_URL || 'https://www.bendemen.com';
   const consumerKey = process.env.WOOCOMMERCE_CONSUMER_KEY || process.env.WOOCOMMERCE_KEY || process.env.NEXT_PUBLIC_WOOCOMMERCE_KEY;
@@ -14,17 +28,37 @@ export default async function handler(req, res) {
     console.error('[OFFLINE ORDER ERROR]: WooCommerce API keys ontbreken in .env');
     return res.status(500).json({
       success: false,
+      retryable: true,
       error: 'Serverconfiguratiefout: WooCommerce API keys ontbreken in .env'
     });
   }
 
-  const { orderItems, paymentMethod, storeId, cashierId, customerId, totals, cashDetails, created_at } = req.body;
-
   try {
+    const claim = await claimOrder(clientOrderId);
+
+    if (claim.completed) {
+      return res.status(200).json({
+        success: true,
+        idempotent: true,
+        order: { id: claim.wooOrderId }
+      });
+    }
+
+    if (claim.processing) {
+      return res.status(409).json({
+        success: false,
+        retryable: true,
+        error: 'Deze bestelling wordt al verwerkt.'
+      });
+    }
+
+    claimed = claim.claimed;
+
+    const { orderItems, paymentMethod, storeId, cashierId, customerId, totals, cashDetails, created_at } = req.body;
+
     const lineItems = [];
     const feeLines = [];
 
-    // Verwerk de bestelregels en vang custom / ongeldige items op
     (orderItems || []).forEach((item) => {
       const pid = Number(item.product_id || item.id);
       const isCustomItem = !pid || isNaN(pid) || pid === 0 || String(item.id).startsWith('custom_');
@@ -51,7 +85,6 @@ export default async function handler(req, res) {
       }
     });
 
-    // Voeg korting toe aan fee_lines
     if (totals?.discountAmount > 0) {
       feeLines.push({
         name: 'Handmatige Korting',
@@ -61,8 +94,8 @@ export default async function handler(req, res) {
       });
     }
 
-    const paymentTitle = paymentMethod === 'cash' 
-      ? 'Contant (Offline Gesynchroniseerd)' 
+    const paymentTitle = paymentMethod === 'cash'
+      ? 'Contant (Offline Gesynchroniseerd)'
       : (paymentMethod === 'manual_pin' ? 'Handmatige Pin (Offline Gesynchroniseerd)' : 'SumUp Pin (Offline Gesynchroniseerd)');
 
     const orderData = {
@@ -78,7 +111,8 @@ export default async function handler(req, res) {
         { key: '_pos_cashier_id', value: String(cashierId || 1) },
         { key: '_pos_payment_type', value: String(paymentMethod) },
         { key: '_pos_offline_synced', value: 'true' },
-        { key: '_pos_original_created_at', value: String(created_at || new Date().toISOString()) }
+        { key: '_pos_original_created_at', value: String(created_at || new Date().toISOString()) },
+        { key: '_pos_client_order_id', value: clientOrderId }
       ]
     };
 
@@ -90,6 +124,7 @@ export default async function handler(req, res) {
     }
 
     let responseOrder;
+
     try {
       const WooCommerce = new WooCommerceRestApi({
         url: wcUrl,
@@ -121,12 +156,28 @@ export default async function handler(req, res) {
       responseOrder = JSON.parse(fetchText);
     }
 
-    return res.status(200).json({ success: true, order: responseOrder });
+    if (!responseOrder?.id) {
+      throw new Error('WooCommerce gaf geen order-ID terug.');
+    }
 
+    if (claimed) {
+      await completeOrder(clientOrderId, responseOrder.id);
+    }
+
+    return res.status(200).json({ success: true, order: responseOrder });
   } catch (error) {
+    if (claimed) {
+      try {
+        await releaseOrder(clientOrderId);
+      } catch (releaseError) {
+        console.error('[OFFLINE IDEMPOTENCY RELEASE ERROR]:', releaseError.message);
+      }
+    }
+
     console.error('[OFFLINE ORDER SYNC ERROR]:', error?.response?.data || error.message);
     return res.status(500).json({
       success: false,
+      retryable: true,
       error: error?.response?.data?.message || error.message || 'Fout bij verwerken van offline bestelling.'
     });
   }
