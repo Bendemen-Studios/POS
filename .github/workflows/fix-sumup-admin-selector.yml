@@ -1,0 +1,61 @@
+name: Fix SumUp admin selector
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: ${{ !contains(github.event.head_commit.message, 'fix: restore SumUp filiaal selector in admin') && !contains(github.event.head_commit.message, 'chore: remove temporary SumUp fix workflow') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Patch admin.js
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          p = Path('pages/admin.js')
+          s = p.read_text()
+
+          s = s.replace(
+              "  const [selectedStoreForReader, setSelectedStoreForReader] = useState({});\n",
+              "  const [selectedStoreForReader, setSelectedStoreForReader] = useState({});\n  const [selectedStoreForPairing, setSelectedStoreForPairing] = useState('');\n"
+          )
+
+          s = s.replace(
+              "  const fetchSumUpReaders = async () => {\n    try {\n      const res = await fetch('/api/sumup/proxy?action=readers');\n      const data = await res.json();\n      if (data.success) {\n        setSumUpReaders(data.readers || []);\n      }\n    } catch (err) {\n      console.error('Kan geen SumUp apparaten ophalen via proxy:', err);\n    }\n  };",
+              "  const fetchSumUpReaders = async () => {\n    try {\n      const res = await fetch('/api/sumup/proxy?action=readers');\n      const data = await res.json();\n      if (data.success) {\n        const readers = data.readers || [];\n        setSumUpReaders(readers);\n        return readers;\n      }\n    } catch (err) {\n      console.error('Kan geen SumUp apparaten ophalen via proxy:', err);\n    }\n    return [];\n  };"
+          )
+
+          old_pair = '''  const handlePairSumUp = async (e) => {\n    e.preventDefault();\n    setSumUpStatusMsg('Bezig met SumUp koppelen...');\n    try {\n      const res = await fetch('/api/sumup/proxy?action=pair', {\n        method: 'POST',\n        headers: { 'Content-Type': 'application/json' },\n        body: JSON.stringify({ pairingCode, name: terminalName })\n      });\n      const data = await res.json();\n      if (res.ok && data.success) {\n        setSumUpStatusMsg('✅ SumUp apparaat succesvol gekoppeld!');\n        setPairingCode('');\n        setTerminalName('');\n        fetchSumUpReaders();\n      } else {\n        setSumUpStatusMsg(`❌ Fout: ${data.error || 'Onbekende fout'}`);\n      }\n    } catch (err) {\n      setSumUpStatusMsg('❌ Netwerkfout bij koppelen.');\n    }\n  };'''
+
+          new_pair = '''  const handlePairSumUp = async (e) => {\n    e.preventDefault();\n\n    if (!selectedStoreForPairing) {\n      setSumUpStatusMsg('❌ Selecteer eerst een filiaal.');\n      return;\n    }\n\n    setSumUpStatusMsg('Bezig met SumUp koppelen...');\n    try {\n      const beforeReaders = sumUpReaders || [];\n\n      const res = await fetch('/api/sumup/proxy?action=pair', {\n        method: 'POST',\n        headers: { 'Content-Type': 'application/json' },\n        body: JSON.stringify({ pairingCode, name: terminalName })\n      });\n      const data = await res.json();\n\n      if (res.ok && data.success) {\n        setSumUpStatusMsg('SumUp gekoppeld. Filiaal wordt toegewezen...');\n        setPairingCode('');\n        setTerminalName('');\n\n        // Het nieuwe reader-ID kan pas na pairing worden opgehaald.\n        let readers = await fetchSumUpReaders();\n        let newReader = readers.find(r => !beforeReaders.some(old => String(old.id) === String(r.id)));\n\n        // Geef SumUp een paar seconden om de nieuwe reader zichtbaar te maken.\n        for (let i = 0; i < 5 && !newReader; i++) {\n          await new Promise(resolve => setTimeout(resolve, 1000));\n          readers = await fetchSumUpReaders();\n          newReader = readers.find(r => !beforeReaders.some(old => String(old.id) === String(r.id)));\n        }\n\n        if (!newReader) {\n          setSumUpStatusMsg('⚠️ Apparaat gekoppeld, maar het nieuwe apparaat kon nog niet aan het filiaal worden toegewezen. Gebruik hieronder "Koppel aan Filiaal".');\n          return;\n        }\n\n        const assignRes = await fetch('/api/sumup/proxy?action=assign-store', {\n          method: 'POST',\n          headers: { 'Content-Type': 'application/json' },\n          body: JSON.stringify({ storeId: selectedStoreForPairing, readerId: newReader.id })\n        });\n        const assignData = await assignRes.json();\n\n        if (assignRes.ok && assignData.success) {\n          setSumUpStatusMsg(`✅ SumUp apparaat succesvol gekoppeld aan ${stores.find(s => String(s.id || s.store_id) === String(selectedStoreForPairing))?.store_name || 'het gekozen filiaal'}!`);\n          setSelectedStoreForPairing('');\n          fetchStores();\n          fetchSumUpReaders();\n        } else {\n          setSumUpStatusMsg(`⚠️ SumUp gekoppeld, maar filiaaltoewijzing mislukt: ${assignData.error || 'Onbekende fout'}`);\n        }\n      } else {\n        setSumUpStatusMsg(`❌ Fout: ${data.error || 'Onbekende fout'}`);\n      }\n    } catch (err) {\n      console.error('SumUp pairing error:', err);\n      setSumUpStatusMsg('❌ Netwerkfout bij koppelen.');\n    }\n  };'''
+
+          if old_pair not in s:
+              raise SystemExit('handlePairSumUp block not found')
+          s = s.replace(old_pair, new_pair)
+
+          old_form = '''                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">\n                      <input\n                        type="text"\n                        placeholder="Pairing Code (van scherm SumUp Solo)"\n                        value={pairingCode}\n                        onChange={(e) => setPairingCode(e.target.value)}\n                        className="p-2 border rounded text-xs"\n                        required\n                      />\n                      <input\n                        type="text"\n                        placeholder="Naam (bijv. Kassa Balie 1)"\n                        value={terminalName}\n                        onChange={(e) => setTerminalName(e.target.value)}\n                        className="p-2 border rounded text-xs"\n                      />\n                      <button type="submit" className="bg-red-600 hover:bg-red-700 text-white font-bold p-2 rounded text-xs uppercase">Koppelen</button>\n                    </div>'''
+
+          new_form = '''                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">\n                      <input\n                        type="text"\n                        placeholder="Pairing Code (van scherm SumUp Solo)"\n                        value={pairingCode}\n                        onChange={(e) => setPairingCode(e.target.value)}\n                        className="p-2 border rounded text-xs"\n                        required\n                      />\n                      <input\n                        type="text"\n                        placeholder="Naam (bijv. Kassa Balie 1)"\n                        value={terminalName}\n                        onChange={(e) => setTerminalName(e.target.value)}\n                        className="p-2 border rounded text-xs"\n                      />\n                      <select\n                        value={selectedStoreForPairing}\n                        onChange={(e) => setSelectedStoreForPairing(e.target.value)}\n                        className="p-2 border rounded text-xs bg-white"\n                        required\n                      >\n                        <option value="">-- Kies Filiaal --</option>\n                        {stores.map(s => (\n                          <option key={s.id || s.store_id} value={s.id || s.store_id}>\n                            {s.store_name || s.name}\n                          </option>\n                        ))}\n                      </select>\n                      <button type="submit" className="bg-red-600 hover:bg-red-700 text-white font-bold p-2 rounded text-xs uppercase">Koppelen</button>\n                    </div>'''
+
+          if old_form not in s:
+              raise SystemExit('pairing form block not found')
+          s = s.replace(old_form, new_form)
+
+          p.write_text(s)
+          print('admin.js patched successfully')
+          PY
+
+      - name: Commit fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pages/admin.js
+          git commit -m "fix: restore SumUp filiaal selector in admin"
+          git push
