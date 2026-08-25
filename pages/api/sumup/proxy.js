@@ -7,7 +7,9 @@ function getConfig() {
   const merchantCode = process.env.SUMUP_MERCHANT_CODE;
   const appId = process.env.SUMUP_APP_ID;
   const affiliateKey = process.env.SUMUP_AFFILIATE_KEY;
-  if (!apiKey || !merchantCode) throw new Error('SUMUP_API_KEY en SUMUP_MERCHANT_CODE ontbreken in .env');
+  if (!apiKey || !merchantCode || !appId || !affiliateKey) {
+    throw new Error('SUMUP_API_KEY, SUMUP_MERCHANT_CODE, SUMUP_APP_ID en SUMUP_AFFILIATE_KEY moeten in .env staan.');
+  }
   return { apiKey, merchantCode, appId, affiliateKey };
 }
 
@@ -41,7 +43,6 @@ async function waitForTransaction(merchantCode, clientTransactionId, timeoutMs =
       }
     } catch (error) {
       if (/betaling (failed|cancelled|refunded|charge_back)/i.test(error.message)) throw error;
-      // De transactie bestaat soms pas enkele seconden na het starten.
     }
     await new Promise(resolve => setTimeout(resolve, 2000));
   }
@@ -100,20 +101,17 @@ export default async function handler(req, res) {
       if (!targetReaderId) return res.status(400).json({ success: false, error: 'Geen SumUp Solo gekoppeld aan dit filiaal.' });
 
       const foreignId = String(foreignTransactionId || `bdm-${Date.now()}-${crypto.randomUUID()}`);
-      const affiliate = appId && affiliateKey ? { app_id: appId, key: affiliateKey, foreign_transaction_id: foreignId } : undefined;
       const payload = {
         total_amount: { currency: 'EUR', minor_unit: 2, value: Math.round(amount * 100) },
         description: description || 'Bendemen POS betaling',
         return_url: webhookUrl(),
-        ...(affiliate ? { affiliate } : {}),
+        affiliate: { app_id: appId, key: affiliateKey, foreign_transaction_id: foreignId },
       };
 
       const checkout = await sumup(`/v0.1/merchants/${encodeURIComponent(merchantCode)}/readers/${encodeURIComponent(targetReaderId)}/checkout`, { method: 'POST', body: JSON.stringify(payload) });
       const clientTransactionId = checkout?.data?.client_transaction_id;
       if (!clientTransactionId) throw new Error('SumUp gaf geen client_transaction_id terug.');
 
-      // Wacht server-side op het definitieve betaalresultaat. Daardoor maakt de POS
-      // pas na een echte SUCCESSFUL betaling de WooCommerce-order aan.
       const transaction = await waitForTransaction(merchantCode, clientTransactionId);
       return res.status(200).json({ success: true, readerId: targetReaderId, clientTransactionId, transaction, checkout: checkout.data });
     }
