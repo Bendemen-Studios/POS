@@ -29,9 +29,7 @@ const withPWA = require('next-pwa')({
     },
     {
       urlPattern: ({ url, request }) =>
-        url.origin === self.location?.origin &&
-        url.pathname.startsWith('/api/') &&
-        request.method === 'GET',
+        url.pathname.startsWith('/api/') && request.method === 'GET',
       handler: 'NetworkFirst',
       options: {
         cacheName: 'bendemen-pos-api-get',
