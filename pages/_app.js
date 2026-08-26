@@ -86,6 +86,19 @@ function installSumUpGatewayFetch() {
       let body = {};
       try { body = typeof init.body === 'string' ? JSON.parse(init.body) : {}; } catch {}
 
+      // Een bestelling van €0 hoeft nooit naar de SumUp-terminal.
+      // Dit voorkomt dat een gratis/test-order minutenlang op PENDING blijft staan.
+      const totalAmount = Number(body.totalAmount ?? body.amount ?? body.total ?? 0);
+      if (Number.isFinite(totalAmount) && totalAmount <= 0) {
+        return jsonResponse({
+          success: true,
+          skipped: true,
+          pending: false,
+          status: 'SUCCESSFUL',
+          clientTransactionId: `zero-total-${Date.now()}`,
+        });
+      }
+
       try {
         const rawStore = localStorage.getItem('selectedStore') || localStorage.getItem('pos_selected_store');
         const store = rawStore ? JSON.parse(rawStore) : null;
@@ -138,10 +151,11 @@ function installOfflineAjaxBridge(notify) {
   if (typeof window === 'undefined' || window.__bendemenOfflineAjaxInstalled) return () => {};
   window.__bendemenOfflineAjaxInstalled = true;
 
-  // Alleen de offline-order queue triggert een remount. Product-cache writes
-  // gebeuren ook tijdens normale renders en mogen geen refresh-loop veroorzaken.
+  // Alleen de offline-order queue triggert een melding. De POS-component
+  // wordt NIET meer geremount: dat kan een lopende checkout/sync onderbreken.
   const notifyKeys = new Set(['pos_offline_orders']);
   const originalSetItem = Storage.prototype.setItem;
+  const originalGetItem = Storage.prototype.getItem;
   const originalRemoveItem = Storage.prototype.removeItem;
   let refreshTimer = null;
 
@@ -167,8 +181,6 @@ function installOfflineAjaxBridge(notify) {
     }
     originalSetItem.call(this, key, value);
   };
-
-  const originalGetItem = Storage.prototype.getItem;
 
   Storage.prototype.removeItem = function(key) {
     const oldCount = notifyKeys.has(key) ? getOfflineQueueCount(originalGetItem.call(this, key)) : 0;
@@ -207,14 +219,12 @@ function installOfflineAjaxBridge(notify) {
 }
 
 export default function App({ Component, pageProps }) {
-  const [offlineAjaxRevision, setOfflineAjaxRevision] = useState(0);
   const [offlineSyncMessage, setOfflineSyncMessage] = useState(null);
 
   useEffect(() => {
     installSumUpGatewayFetch();
     registerNativePWA();
     return installOfflineAjaxBridge((message) => {
-      setOfflineAjaxRevision((value) => value + 1);
       if (message) {
         setOfflineSyncMessage(message);
         window.setTimeout(() => setOfflineSyncMessage(null), 4500);
@@ -256,7 +266,7 @@ export default function App({ Component, pageProps }) {
           {offlineSyncMessage}
         </div>
       )}
-      <Component key={`pos-${offlineAjaxRevision}`} {...pageProps} />
+      <Component {...pageProps} />
     </>
   );
 }
