@@ -12,6 +12,16 @@ function getClientOrderId(req) {
     .digest('hex');
 }
 
+async function fetchWithTimeout(url, options, timeoutMs = 15000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', ['POST']);
@@ -127,22 +137,22 @@ export default async function handler(req, res) {
     let responseOrder;
 
     try {
-      const fetchRes = await fetch(`${url}/wp-json/wc/v3/orders`, {
+      const fetchRes = await fetchWithTimeout(`${url}/wp-json/wc/v3/orders`, {
         method: 'POST',
         headers: customHeaders,
         body: JSON.stringify(orderData)
-      });
+      }, 15000);
       const responseText = await fetchRes.text();
       if (!fetchRes.ok) throw new Error(`HTTP ${fetchRes.status}: ${responseText}`);
       responseOrder = JSON.parse(responseText);
     } catch (fetchErr) {
-      console.warn('[CHECKOUT API]: Native fetch faalt, probeert SDK fallback...', fetchErr.message);
+      console.warn('[CHECKOUT API]: Native fetch faalt/time-out, probeert SDK fallback...', fetchErr.message);
       const api = new WooCommerceRestApi({
         url,
         consumerKey,
         consumerSecret,
         version: 'wc/v3',
-        axiosConfig: { timeout: 20000, headers: customHeaders }
+        axiosConfig: { timeout: 15000, headers: customHeaders }
       });
       const { data } = await api.post('orders', orderData);
       responseOrder = data;
