@@ -1,6 +1,7 @@
 import WooCommerceRestApi from '@woocommerce/woocommerce-rest-api';
 import { createHash } from 'crypto';
 import { claimOrder, completeOrder, releaseOrder } from '../../../lib/orderIdempotency';
+import { updateCustomerPoints } from '../../../lib/customerPoints';
 
 function getClientOrderId(req) {
   const headerId = req.headers['idempotency-key'];
@@ -26,30 +27,18 @@ export default async function handler(req, res) {
 
   if (!consumerKey || !consumerSecret) {
     console.error('[OFFLINE ORDER ERROR]: WooCommerce API keys ontbreken in .env');
-    return res.status(500).json({
-      success: false,
-      retryable: true,
-      error: 'Serverconfiguratiefout: WooCommerce API keys ontbreken in .env'
-    });
+    return res.status(500).json({ success: false, retryable: true, error: 'Serverconfiguratiefout: WooCommerce API keys ontbreken in .env' });
   }
 
   try {
     const claim = await claimOrder(clientOrderId);
 
     if (claim.completed) {
-      return res.status(200).json({
-        success: true,
-        idempotent: true,
-        order: { id: claim.wooOrderId }
-      });
+      return res.status(200).json({ success: true, idempotent: true, order: { id: claim.wooOrderId } });
     }
 
     if (claim.processing) {
-      return res.status(409).json({
-        success: false,
-        retryable: true,
-        error: 'Deze bestelling wordt al verwerkt.'
-      });
+      return res.status(409).json({ success: false, retryable: true, error: 'Deze bestelling wordt al verwerkt.' });
     }
 
     claimed = claim.claimed;
@@ -76,11 +65,7 @@ export default async function handler(req, res) {
           quantity: item.quantity || 1,
           total: (parseFloat(item.price || 0) * (item.quantity || 1)).toFixed(2)
         };
-
-        if (item.variation_id && Number(item.variation_id) > 0) {
-          lineObj.variation_id = Number(item.variation_id);
-        }
-
+        if (item.variation_id && Number(item.variation_id) > 0) lineObj.variation_id = Number(item.variation_id);
         lineItems.push(lineObj);
       }
     });
@@ -89,6 +74,15 @@ export default async function handler(req, res) {
       feeLines.push({
         name: 'Handmatige Korting',
         total: `-${parseFloat(totals.discountAmount).toFixed(2)}`,
+        tax_class: '',
+        tax_status: 'none'
+      });
+    }
+
+    if (totals?.pointsDiscount > 0) {
+      feeLines.push({
+        name: 'Punten Ingewisseld',
+        total: `-${parseFloat(totals.pointsDiscount).toFixed(2)}`,
         tax_class: '',
         tax_status: 'none'
       });
@@ -126,50 +120,44 @@ export default async function handler(req, res) {
     let responseOrder;
 
     try {
-      const WooCommerce = new WooCommerceRestApi({
-        url: wcUrl,
-        consumerKey,
-        consumerSecret,
-        version: 'wc/v3',
-      });
-
+      const WooCommerce = new WooCommerceRestApi({ url: wcUrl, consumerKey, consumerSecret, version: 'wc/v3' });
       const { data } = await WooCommerce.post('orders', orderData);
       responseOrder = data;
     } catch (sdkError) {
       console.warn('[OFFLINE ORDER]: SDK faalt, schakelt over naar fetch fallback...', sdkError?.message);
-
       const authHeader = 'Basic ' + Buffer.from(`${consumerKey}:${consumerSecret}`).toString('base64');
       const fetchRes = await fetch(`${wcUrl}/wp-json/wc/v3/orders`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': authHeader
-        },
+        headers: { 'Content-Type': 'application/json', 'Authorization': authHeader },
         body: JSON.stringify(orderData)
       });
-
       const fetchText = await fetchRes.text();
-      if (!fetchRes.ok) {
-        throw new Error(`WooCommerce HTTP ${fetchRes.status}: ${fetchText}`);
-      }
-
+      if (!fetchRes.ok) throw new Error(`WooCommerce HTTP ${fetchRes.status}: ${fetchText}`);
       responseOrder = JSON.parse(fetchText);
     }
 
-    if (!responseOrder?.id) {
-      throw new Error('WooCommerce gaf geen order-ID terug.');
+    if (!responseOrder?.id) throw new Error('WooCommerce gaf geen order-ID terug.');
+
+    if (claimed) await completeOrder(clientOrderId, responseOrder.id);
+
+    let pointsSyncPending = false;
+    if (customerId && Number.isFinite(Number(customerId)) && Number(customerId) > 0) {
+      try {
+        await updateCustomerPoints({
+          customerId: Number(customerId),
+          pointsUsed: totals?.pointsUsed || 0,
+          totalPaid: totals?.totalPaid || 0,
+        });
+      } catch (pointsError) {
+        pointsSyncPending = true;
+        console.error('[OFFLINE ORDER POINTS SYNC]:', pointsError.message);
+      }
     }
 
-    if (claimed) {
-      await completeOrder(clientOrderId, responseOrder.id);
-    }
-
-    return res.status(200).json({ success: true, order: responseOrder });
+    return res.status(200).json({ success: true, order: responseOrder, pointsSyncPending });
   } catch (error) {
     if (claimed) {
-      try {
-        await releaseOrder(clientOrderId);
-      } catch (releaseError) {
+      try { await releaseOrder(clientOrderId); } catch (releaseError) {
         console.error('[OFFLINE IDEMPOTENCY RELEASE ERROR]:', releaseError.message);
       }
     }
