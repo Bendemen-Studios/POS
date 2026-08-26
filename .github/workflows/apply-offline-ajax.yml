@@ -1,0 +1,57 @@
+name: Apply offline AJAX UI patch
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message != 'chore: apply offline ajax ui patch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Patch POS offline UI
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('pages/index.js')
+          text = path.read_text(encoding='utf-8')
+
+          old = """  useEffect(() => {\n    if (typeof window !== 'undefined') {\n      localStorage.setItem('pos_active_tab', activeTab);\n    }\n  }, [activeTab]);\n"""
+          new = """  useEffect(() => {\n    if (typeof window !== 'undefined') {\n      localStorage.setItem('pos_active_tab', activeTab);\n    }\n  }, [activeTab]);\n\n  // Offline/AJAX state bridge: update this POS immediately when another\n  // checkout/sync changes the local cache. No manual reload is required.\n  useEffect(() => {\n    if (typeof window === 'undefined') return;\n\n    const refreshLocalPosState = () => {\n      try {\n        const cachedProducts = localStorage.getItem('pos_cached_products');\n        if (cachedProducts) setProducts(JSON.parse(cachedProducts));\n\n        const queue = JSON.parse(localStorage.getItem('pos_offline_orders') || '[]');\n        setPendingOfflineCount(Array.isArray(queue) ? queue.length : 0);\n      } catch (error) {\n        console.warn('[POS AJAX] Lokale status kon niet direct worden bijgewerkt:', error);\n      }\n    };\n\n    const handlePosLocalUpdate = () => refreshLocalPosState();\n    window.addEventListener('pos:offline-updated', handlePosLocalUpdate);\n    window.addEventListener('storage', handlePosLocalUpdate);\n\n    let channel = null;\n    if ('BroadcastChannel' in window) {\n      channel = new BroadcastChannel('bendemen-pos');\n      channel.addEventListener('message', handlePosLocalUpdate);\n    }\n\n    return () => {\n      window.removeEventListener('pos:offline-updated', handlePosLocalUpdate);\n      window.removeEventListener('storage', handlePosLocalUpdate);\n      if (channel) channel.close();\n    };\n  }, []);\n"""
+          if old not in text:
+              raise SystemExit('Expected activeTab effect was not found')
+          text = text.replace(old, new, 1)
+
+          old = """    localStorage.setItem('pos_offline_orders', JSON.stringify(remainingQueue));\n    setPendingOfflineCount(remainingQueue.length);\n    setIsSyncing(false);\n"""
+          new = """    localStorage.setItem('pos_offline_orders', JSON.stringify(remainingQueue));\n    setPendingOfflineCount(remainingQueue.length);\n    setIsSyncing(false);\n\n    // Push the new local state to the UI immediately after an AJAX sync.\n    window.dispatchEvent(new Event('pos:offline-updated'));\n    if ('BroadcastChannel' in window) {\n      try {\n        const channel = new BroadcastChannel('bendemen-pos');\n        channel.postMessage({ type: 'offline-sync', pending: remainingQueue.length });\n        channel.close();\n      } catch (_) {}\n    }\n"""
+          if old not in text:
+              raise SystemExit('Expected offline sync state block was not found')
+          text = text.replace(old, new, 1)
+
+          old = """      localStorage.setItem('pos_offline_orders', JSON.stringify(offlineQueue));\n      setPendingOfflineCount(offlineQueue.length);\n\n      const changeText = selectedPaymentMethod === 'cash' && changeDue > 0 ? ` (Wisselgeld: €${changeDue.toFixed(2)})` : '';\n"""
+          new = """      localStorage.setItem('pos_offline_orders', JSON.stringify(offlineQueue));\n      setPendingOfflineCount(offlineQueue.length);\n\n      // Optimistic/AJAX UI update: reflect sold stock locally immediately.\n      // The server remains the source of truth when the queue synchronizes.\n      setProducts((prevProducts) => {\n        const updatedProducts = prevProducts.map((product) => {\n          const soldItems = cart.filter((item) => String(item.product_id || item.id) === String(product.id));\n          if (soldItems.length === 0 || product.stock_quantity === null || product.stock_quantity === undefined) return product;\n          const soldQuantity = soldItems.reduce((sum, item) => sum + Number(item.quantity || 0), 0);\n          return { ...product, stock_quantity: Math.max(0, Number(product.stock_quantity) - soldQuantity) };\n        });\n        try { localStorage.setItem('pos_cached_products', JSON.stringify(updatedProducts)); } catch (_) {}\n        return updatedProducts;\n      });\n\n      // Same-tab + multi-tab notification: React updates without reload.\n      window.dispatchEvent(new Event('pos:offline-updated'));\n      if ('BroadcastChannel' in window) {\n        try {\n          const channel = new BroadcastChannel('bendemen-pos');\n          channel.postMessage({ type: 'offline-order-added', pending: offlineQueue.length });\n          channel.close();\n        } catch (_) {}\n      }\n\n      const changeText = selectedPaymentMethod === 'cash' && changeDue > 0 ? ` (Wisselgeld: €${changeDue.toFixed(2)})` : '';\n"""
+          if old not in text:
+              raise SystemExit('Expected offline queue block was not found')
+          text = text.replace(old, new, 1)
+
+          path.write_text(text, encoding='utf-8')
+
+          workflow = Path('.github/workflows/apply-offline-ajax.yml')
+          workflow.unlink(missing_ok=True)
+
+      - name: Commit patched UI and remove patch workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pages/index.js .github/workflows/apply-offline-ajax.yml
+          git diff --cached --quiet && exit 0
+          git commit -m "fix: update offline POS UI instantly"
+          git push
