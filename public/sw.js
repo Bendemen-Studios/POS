@@ -1,7 +1,8 @@
-const CACHE_NAME = 'bendemen-pos-v4';
+const CACHE_NAME = 'bendemen-pos-v5';
 const OFFLINE_URL = '/login';
 const NAVIGATION_TIMEOUT = 2500;
 const API_TIMEOUT = 1800;
+const CHECKOUT_TIMEOUT = 1800;
 
 const APP_SHELL = [
   '/',
@@ -23,12 +24,10 @@ const CACHEABLE_API_PREFIXES = [
 ];
 
 function timeoutFetch(request, timeout = NAVIGATION_TIMEOUT) {
-  return Promise.race([
-    fetch(request, { cache: 'no-store' }),
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('NETWORK_TIMEOUT')), timeout)
-    ),
-  ]);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  return fetch(request, { cache: 'no-store', signal: controller.signal })
+    .finally(() => clearTimeout(timer));
 }
 
 async function cacheResponse(cache, request, response) {
@@ -54,6 +53,22 @@ async function refreshApiCache(request) {
     return response;
   } catch (_) {
     return null;
+  }
+}
+
+async function handleCheckoutRequest(request) {
+  try {
+    return await timeoutFetch(request, CHECKOUT_TIMEOUT);
+  } catch (_) {
+    return new Response(
+      JSON.stringify({
+        success: false,
+        offline: true,
+        queued: true,
+        error: 'POS-server offline of niet bereikbaar. De bestelling wordt lokaal opgeslagen.',
+      }),
+      { status: 503, headers: { 'Content-Type': 'application/json' } }
+    );
   }
 }
 
@@ -92,18 +107,22 @@ self.addEventListener('fetch', (event) => {
 
   if (url.origin !== self.location.origin) return;
 
-  // API POST/PUT/DELETE blijft bij de applicatie; deze moeten nooit door
-  // de service worker worden nagebootst of gecached.
+  // Checkout mag nooit blijven hangen wanneer de VPS offline is.
+  // De POS-pagina ontvangt bewust een 503 zodat zijn bestaande offline
+  // fallback de bestelling direct in localStorage zet.
+  if (request.method === 'POST' && url.pathname === '/api/woocommerce/checkout') {
+    event.respondWith(handleCheckoutRequest(request));
+    return;
+  }
+
+  // Andere API POST/PUT/DELETE requests worden niet door de service worker
+  // nagebootst of gecached.
   if (request.method !== 'GET') return;
 
-  // Cache-first API's voor data die veilig lokaal gebruikt kan worden.
-  // Hierdoor zijn producten, klanten, gebruikers, filialen, afhaallijsten
-  // en vooral de per-filiaal ingestelde betaalmethoden direct beschikbaar.
   if (url.pathname.startsWith('/api/') && isCacheableApi(url.pathname)) {
     event.respondWith((async () => {
       const cached = await caches.match(request);
 
-      // Toon lokale data onmiddellijk. Werk de cache op de achtergrond bij.
       if (cached) {
         event.waitUntil(refreshApiCache(request));
         return cached;
