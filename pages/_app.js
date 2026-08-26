@@ -86,17 +86,16 @@ function installSumUpGatewayFetch() {
       let body = {};
       try { body = typeof init.body === 'string' ? JSON.parse(init.body) : {}; } catch {}
 
-      // Een bestelling van €0 hoeft nooit naar de SumUp-terminal.
-      // Dit voorkomt dat een gratis/test-order minutenlang op PENDING blijft staan.
+      // SumUp accepteert geen betalingen onder €1,00.
       const totalAmount = Number(body.totalAmount ?? body.amount ?? body.total ?? 0);
-      if (Number.isFinite(totalAmount) && totalAmount <= 0) {
+      if (Number.isFinite(totalAmount) && totalAmount < 1) {
+        window.alert('SumUp-betalingen moeten minimaal €1,00 zijn.');
         return jsonResponse({
-          success: true,
-          skipped: true,
+          success: false,
           pending: false,
-          status: 'SUCCESSFUL',
-          clientTransactionId: `zero-total-${Date.now()}`,
-        });
+          status: 'FAILED',
+          error: 'Het minimale bedrag voor een SumUp-betaling is €1,00.',
+        }, 400);
       }
 
       try {
