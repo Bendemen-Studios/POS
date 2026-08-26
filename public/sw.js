@@ -72,7 +72,10 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       caches.match(request).then((cached) => {
         if (cached) return cached;
-        return fetch(request).then((response) => cacheResponse(caches.open(CACHE_NAME), request, response));
+        return fetch(request).then(async (response) => {
+          const cache = await caches.open(CACHE_NAME);
+          return cacheResponse(cache, request, response);
+        });
       })
     );
     return;
@@ -113,7 +116,10 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     caches.match(request).then((cached) => {
       if (cached) return cached;
-      return fetch(request).then((response) => cacheResponse(caches.open(CACHE_NAME), request, response));
+      return fetch(request).then(async (response) => {
+        const cache = await caches.open(CACHE_NAME);
+        return cacheResponse(cache, request, response);
+      });
     })
   );
 });
