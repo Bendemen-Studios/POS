@@ -19,6 +19,7 @@ const CACHEABLE_API_PREFIXES = [
   '/api/woocommerce/products',
   '/api/woocommerce/customers',
   '/api/admin/users',
+  '/api/woocommerce/pickup-order',
 ];
 
 function timeoutFetch(request, timeout = NAVIGATION_TIMEOUT) {
@@ -96,8 +97,8 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return;
 
   // Cache-first API's voor data die veilig lokaal gebruikt kan worden.
-  // Hierdoor zijn producten, klanten, gebruikers, filialen en vooral de
-  // per-filiaal ingestelde betaalmethoden direct beschikbaar bij offline gebruik.
+  // Hierdoor zijn producten, klanten, gebruikers, filialen, afhaallijsten
+  // en vooral de per-filiaal ingestelde betaalmethoden direct beschikbaar.
   if (url.pathname.startsWith('/api/') && isCacheableApi(url.pathname)) {
     event.respondWith((async () => {
       const cached = await caches.match(request);
