@@ -125,6 +125,15 @@ function registerNativePWA() {
   }, { once: true });
 }
 
+function getOfflineQueueCount(value) {
+  try {
+    const parsed = JSON.parse(value || '[]');
+    return Array.isArray(parsed) ? parsed.length : 0;
+  } catch {
+    return 0;
+  }
+}
+
 function installOfflineAjaxBridge(notify) {
   if (typeof window === 'undefined' || window.__bendemenOfflineAjaxInstalled) return () => {};
   window.__bendemenOfflineAjaxInstalled = true;
@@ -136,27 +145,47 @@ function installOfflineAjaxBridge(notify) {
   const originalRemoveItem = Storage.prototype.removeItem;
   let refreshTimer = null;
 
-  const scheduleRefresh = (key) => {
+  const scheduleRefresh = (key, message = null) => {
     if (!notifyKeys.has(key)) return;
     clearTimeout(refreshTimer);
     refreshTimer = setTimeout(() => {
       window.dispatchEvent(new Event('pos:ajax-refresh'));
-      notify();
+      notify(message);
     }, 0);
   };
 
   Storage.prototype.setItem = function(key, value) {
+    if (notifyKeys.has(key)) {
+      const oldCount = getOfflineQueueCount(originalGetItem.call(this, key));
+      const newCount = getOfflineQueueCount(value);
+      const message = newCount < oldCount
+        ? `✅ ${oldCount - newCount} offline bestelling(en) succesvol geüpload!`
+        : null;
+      originalSetItem.call(this, key, value);
+      scheduleRefresh(key, message);
+      return;
+    }
     originalSetItem.call(this, key, value);
-    scheduleRefresh(key);
   };
 
+  const originalGetItem = Storage.prototype.getItem;
+
   Storage.prototype.removeItem = function(key) {
+    const oldCount = notifyKeys.has(key) ? getOfflineQueueCount(originalGetItem.call(this, key)) : 0;
     originalRemoveItem.call(this, key);
-    scheduleRefresh(key);
+    if (notifyKeys.has(key) && oldCount > 0) {
+      scheduleRefresh(key, `🗑️ ${oldCount} offline bestelling(en) uit de wachtrij verwijderd.`);
+    }
   };
 
   const handleStorage = (event) => {
-    if (event.key && notifyKeys.has(event.key)) scheduleRefresh(event.key);
+    if (!event.key || !notifyKeys.has(event.key)) return;
+    const oldCount = getOfflineQueueCount(event.oldValue);
+    const newCount = getOfflineQueueCount(event.newValue);
+    const message = newCount < oldCount
+      ? `✅ ${oldCount - newCount} offline bestelling(en) succesvol geüpload!`
+      : null;
+    scheduleRefresh(event.key, message);
   };
 
   window.addEventListener('storage', handleStorage);
@@ -164,7 +193,7 @@ function installOfflineAjaxBridge(notify) {
   let channel = null;
   if ('BroadcastChannel' in window) {
     channel = new BroadcastChannel('bendemen-pos');
-    channel.addEventListener('message', () => notify());
+    channel.addEventListener('message', () => notify(null));
   }
 
   return () => {
@@ -179,11 +208,18 @@ function installOfflineAjaxBridge(notify) {
 
 export default function App({ Component, pageProps }) {
   const [offlineAjaxRevision, setOfflineAjaxRevision] = useState(0);
+  const [offlineSyncMessage, setOfflineSyncMessage] = useState(null);
 
   useEffect(() => {
     installSumUpGatewayFetch();
     registerNativePWA();
-    return installOfflineAjaxBridge(() => setOfflineAjaxRevision((value) => value + 1));
+    return installOfflineAjaxBridge((message) => {
+      setOfflineAjaxRevision((value) => value + 1);
+      if (message) {
+        setOfflineSyncMessage(message);
+        window.setTimeout(() => setOfflineSyncMessage(null), 4500);
+      }
+    });
   }, []);
 
   return (
@@ -197,6 +233,29 @@ export default function App({ Component, pageProps }) {
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
       </Head>
+      {offlineSyncMessage && (
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            position: 'fixed',
+            top: 18,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 99999,
+            background: '#111827',
+            color: '#fff',
+            padding: '12px 18px',
+            borderRadius: 10,
+            boxShadow: '0 8px 30px rgba(0,0,0,.28)',
+            fontSize: 15,
+            fontWeight: 600,
+            pointerEvents: 'none',
+          }}
+        >
+          {offlineSyncMessage}
+        </div>
+      )}
       <Component key={`pos-${offlineAjaxRevision}`} {...pageProps} />
     </>
   );
