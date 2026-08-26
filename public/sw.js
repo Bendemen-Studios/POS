@@ -1,6 +1,7 @@
-const CACHE_NAME = 'bendemen-pos-v3';
+const CACHE_NAME = 'bendemen-pos-v4';
 const OFFLINE_URL = '/login';
 const NAVIGATION_TIMEOUT = 2500;
+const API_TIMEOUT = 1800;
 
 const APP_SHELL = [
   '/',
@@ -10,6 +11,14 @@ const APP_SHELL = [
   '/admin',
   '/manifest.json',
   '/favicon.ico',
+];
+
+const CACHEABLE_API_PREFIXES = [
+  '/api/admin/store',
+  '/api/auth/store-selection',
+  '/api/woocommerce/products',
+  '/api/woocommerce/customers',
+  '/api/admin/users',
 ];
 
 function timeoutFetch(request, timeout = NAVIGATION_TIMEOUT) {
@@ -28,6 +37,23 @@ async function cacheResponse(cache, request, response) {
     } catch (_) {}
   }
   return response;
+}
+
+function isCacheableApi(pathname) {
+  return CACHEABLE_API_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}?`));
+}
+
+async function refreshApiCache(request) {
+  try {
+    const response = await timeoutFetch(request, API_TIMEOUT);
+    if (response.ok) {
+      const cache = await caches.open(CACHE_NAME);
+      await cache.put(request, response.clone());
+    }
+    return response;
+  } catch (_) {
+    return null;
+  }
 }
 
 self.addEventListener('install', (event) => {
@@ -61,10 +87,37 @@ self.addEventListener('message', (event) => {
 
 self.addEventListener('fetch', (event) => {
   const request = event.request;
+  const url = new URL(request.url);
+
+  if (url.origin !== self.location.origin) return;
+
+  // API POST/PUT/DELETE blijft bij de applicatie; deze moeten nooit door
+  // de service worker worden nagebootst of gecached.
   if (request.method !== 'GET') return;
 
-  const url = new URL(request.url);
-  if (url.origin !== self.location.origin) return;
+  // Cache-first API's voor data die veilig lokaal gebruikt kan worden.
+  // Hierdoor zijn producten, klanten, gebruikers, filialen en vooral de
+  // per-filiaal ingestelde betaalmethoden direct beschikbaar bij offline gebruik.
+  if (url.pathname.startsWith('/api/') && isCacheableApi(url.pathname)) {
+    event.respondWith((async () => {
+      const cached = await caches.match(request);
+
+      // Toon lokale data onmiddellijk. Werk de cache op de achtergrond bij.
+      if (cached) {
+        event.waitUntil(refreshApiCache(request));
+        return cached;
+      }
+
+      const fresh = await refreshApiCache(request);
+      if (fresh) return fresh;
+
+      return new Response(
+        JSON.stringify({ success: false, offline: true, error: 'Offline en geen lokale cache beschikbaar.' }),
+        { status: 503, headers: { 'Content-Type': 'application/json' } }
+      );
+    })());
+    return;
+  }
 
   if (url.pathname.startsWith('/api/')) return;
 
