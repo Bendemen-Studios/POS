@@ -1,9 +1,7 @@
-const CACHE_NAME = 'bendemen-pos-v2';
+const CACHE_NAME = 'bendemen-pos-v3';
 const OFFLINE_URL = '/login';
+const NAVIGATION_TIMEOUT = 2500;
 
-// Pages that must be available for POS navigation, including the first
-// navigation after an offline restart. Pages are cached when the user visits
-// them and the shell is warmed during service-worker installation.
 const APP_SHELL = [
   '/',
   '/login',
@@ -14,15 +12,31 @@ const APP_SHELL = [
   '/favicon.ico',
 ];
 
+function timeoutFetch(request, timeout = NAVIGATION_TIMEOUT) {
+  return Promise.race([
+    fetch(request, { cache: 'no-store' }),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('NETWORK_TIMEOUT')), timeout)
+    ),
+  ]);
+}
+
+async function cacheResponse(cache, request, response) {
+  if (response && response.ok && response.type !== 'opaqueredirect') {
+    try {
+      await cache.put(request, response.clone());
+    } catch (_) {}
+  }
+  return response;
+}
+
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(async (cache) => {
-        // Do not fail the complete SW installation because one dynamic page
-        // cannot be precached. Each page will still be cached on first visit.
         await Promise.allSettled(APP_SHELL.map(async (url) => {
           try {
-            const response = await fetch(url, { cache: 'no-store' });
+            const response = await timeoutFetch(url, 5000);
             if (response.ok) await cache.put(url, response);
           } catch (_) {}
         }));
@@ -52,61 +66,54 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
 
-  // Never cache API calls. Offline data/synchronisation is handled by the app.
   if (url.pathname.startsWith('/api/')) return;
 
-  // Next.js static assets can safely use cache-first. This also prevents a
-  // transient network failure from breaking an already loaded POS shell.
   if (url.pathname.startsWith('/_next/static/')) {
     event.respondWith(
-      caches.match(request).then((cached) => cached || fetch(request).then((response) => {
-        if (response.ok) {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+      caches.match(request).then((cached) => {
+        if (cached) return cached;
+        return fetch(request).then((response) => cacheResponse(caches.open(CACHE_NAME), request, response));
+      })
+    );
+    return;
+  }
+
+  if (request.mode === 'navigate') {
+    event.respondWith((async () => {
+      const cache = await caches.open(CACHE_NAME);
+
+      try {
+        const response = await timeoutFetch(request);
+        if (response.ok && response.type !== 'opaqueredirect') {
+          await cache.put(request, response.clone());
         }
         return response;
-      }))
-    );
+      } catch (_) {
+        const cached = await caches.match(request, { ignoreSearch: true });
+        if (cached) return cached;
+
+        const pathCached = await caches.match(url.pathname, { ignoreSearch: true });
+        if (pathCached) return pathCached;
+
+        const rootCached = await caches.match('/');
+        if (rootCached) return rootCached;
+
+        const loginCached = await caches.match(OFFLINE_URL);
+        if (loginCached) return loginCached;
+
+        return new Response(
+          '<!doctype html><html><body style="margin:0;background:#fff;display:flex;align-items:center;justify-content:center;height:100vh;font-family:Arial"><div style="text-align:center"><strong>BENDEMEN POS</strong><p>Offline modus wordt gestart...</p></div></body></html>',
+          { headers: { 'Content-Type': 'text/html; charset=utf-8' } }
+        );
+      }
+    })());
     return;
   }
 
-  // HTML navigation: network first so deployments are picked up immediately;
-  // cache the successful document for offline navigation. If the network is
-  // unavailable, use the exact cached route before falling back to login.
-  if (request.mode === 'navigate') {
-    event.respondWith(
-      fetch(request, { cache: 'no-store' })
-        .then((response) => {
-          if (response.ok && response.type !== 'opaqueredirect') {
-            const copy = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
-          }
-          return response;
-        })
-        .catch(async () => {
-          const cached = await caches.match(request, { ignoreSearch: true });
-          if (cached) return cached;
-
-          const pathCached = await caches.match(url.pathname, { ignoreSearch: true });
-          if (pathCached) return pathCached;
-
-          return caches.match(OFFLINE_URL);
-        })
-    );
-    return;
-  }
-
-  // Other same-origin resources: cache-first with network fallback.
   event.respondWith(
     caches.match(request).then((cached) => {
       if (cached) return cached;
-      return fetch(request).then((response) => {
-        if (response.ok) {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
-        }
-        return response;
-      });
+      return fetch(request).then((response) => cacheResponse(caches.open(CACHE_NAME), request, response));
     })
   );
 });
