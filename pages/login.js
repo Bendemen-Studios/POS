@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 
+const OFFLINE_TIMEOUT_MS = 2500;
+
 export default function LoginPage() {
   const router = useRouter();
   const [username, setUsername] = useState('');
@@ -10,16 +12,32 @@ export default function LoginPage() {
   const [isChecking, setIsChecking] = useState(true);
 
   useEffect(() => {
-    // Alleen doorsturen als er al een user is, maar dwing ALTIJD tot filiaal selectie bij herstart
     const user = localStorage.getItem('pos_user');
     if (user) {
       localStorage.removeItem('selectedStore');
       localStorage.removeItem('pos_selected_store');
-      router.replace('/select-store');
+      window.location.replace('/select-store');
     } else {
       setIsChecking(false);
     }
   }, [router]);
+
+  const getCachedLogin = (cleanUsername, enteredPassword) => {
+    const cachedUser = localStorage.getItem(`pos_offline_user_${cleanUsername}`);
+    const cachedPass = localStorage.getItem(`pos_offline_pass_${cleanUsername}`);
+    if (!cachedUser || cachedPass !== enteredPassword) return false;
+
+    try {
+      const userObj = JSON.parse(cachedUser);
+      localStorage.setItem('pos_user', JSON.stringify(userObj));
+      localStorage.removeItem('selectedStore');
+      localStorage.removeItem('pos_selected_store');
+      window.location.replace('/select-store');
+      return true;
+    } catch (_) {
+      return false;
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -28,49 +46,50 @@ export default function LoginPage() {
 
     const cleanUsername = username.trim().toLowerCase();
 
+    // Do not wait for a dead VPS when the device already knows it is offline.
+    if (!navigator.onLine) {
+      if (!getCachedLogin(cleanUsername, password)) {
+        setError('Offline: geen geldige lokale inlogcache gevonden. Log minstens één keer online in.');
+        setLoading(false);
+      }
+      return;
+    }
+
+    let timeoutId;
     try {
+      const controller = new AbortController();
+      timeoutId = setTimeout(() => controller.abort(), OFFLINE_TIMEOUT_MS);
+
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: cleanUsername, password })
+        body: JSON.stringify({ username: cleanUsername, password }),
+        signal: controller.signal
       });
 
+      clearTimeout(timeoutId);
       const data = await res.json();
 
       if (res.ok && data.success) {
         localStorage.setItem('pos_user', JSON.stringify(data.user));
         if (data.token) localStorage.setItem('pos_token', data.token);
-
         localStorage.setItem(`pos_offline_user_${cleanUsername}`, JSON.stringify(data.user));
         localStorage.setItem(`pos_offline_pass_${cleanUsername}`, password);
-        
-        // Wis oude winkelkeuze bij nieuwe login
         localStorage.removeItem('selectedStore');
         localStorage.removeItem('pos_selected_store');
-
-        router.replace('/select-store');
+        window.location.replace('/select-store');
       } else {
         setError(data.message || 'Inloggen mislukt.');
+        setLoading(false);
       }
     } catch (err) {
-      console.warn('Server offline, controleer offline cache...', err);
+      if (timeoutId) clearTimeout(timeoutId);
+      console.warn('Server offline/timeout, controleer offline cache...', err);
 
-      const cachedUser = localStorage.getItem(`pos_offline_user_${cleanUsername}`);
-      const cachedPass = localStorage.getItem(`pos_offline_pass_${cleanUsername}`);
-
-      if (cachedUser && cachedPass === password) {
-        const userObj = JSON.parse(cachedUser);
-        localStorage.setItem('pos_user', JSON.stringify(userObj));
-        
-        localStorage.removeItem('selectedStore');
-        localStorage.removeItem('pos_selected_store');
-
-        router.replace('/select-store');
-      } else {
+      if (!getCachedLogin(cleanUsername, password)) {
         setError('Geen verbinding met de server en geen geldige lokale inlogcache gevonden.');
+        setLoading(false);
       }
-    } finally {
-      setLoading(false);
     }
   };
 
