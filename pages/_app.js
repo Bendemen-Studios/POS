@@ -1,6 +1,5 @@
 import Head from 'next/head';
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/router';
 import '../styles/globals.css';
 
 const SUMUP_GATEWAY = 'https://pos-sumup.vercel.app';
@@ -130,7 +129,9 @@ function installOfflineAjaxBridge(notify) {
   if (typeof window === 'undefined' || window.__bendemenOfflineAjaxInstalled) return () => {};
   window.__bendemenOfflineAjaxInstalled = true;
 
-  const notifyKeys = new Set(['pos_offline_orders', 'pos_cached_products', 'pos_selected_store', 'selectedStore']);
+  // Alleen de offline-order queue triggert een remount. Product-cache writes
+  // gebeuren ook tijdens normale renders en mogen geen refresh-loop veroorzaken.
+  const notifyKeys = new Set(['pos_offline_orders']);
   const originalSetItem = Storage.prototype.setItem;
   const originalRemoveItem = Storage.prototype.removeItem;
   let refreshTimer = null;
