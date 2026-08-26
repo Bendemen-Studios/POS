@@ -11,7 +11,7 @@ export default function SelectStore() {
   useEffect(() => {
     const userStr = localStorage.getItem('pos_user');
     if (!userStr) {
-      router.replace('/login');
+      window.location.replace('/login');
       return;
     }
 
@@ -20,7 +20,7 @@ export default function SelectStore() {
       setCurrentUser(parsedUser);
       fetchUserStores(parsedUser.id);
     } catch (e) {
-      router.replace('/login');
+      window.location.replace('/login');
     }
   }, [router]);
 
@@ -28,12 +28,12 @@ export default function SelectStore() {
     setLoading(true);
     setError('');
 
-    // Probeer direct vanuit de cache te laden als fallback of als we offline zijn
     const loadFromCache = () => {
       const cachedStores = localStorage.getItem('cached_pos_stores');
       if (cachedStores) {
         try {
           const parsedStores = JSON.parse(cachedStores);
+          if (!Array.isArray(parsedStores) || parsedStores.length === 0) return false;
           setStores(parsedStores);
           setError('⚠️ Offline modus: Filialen geladen via lokale reserve-cache.');
           setLoading(false);
@@ -45,14 +45,23 @@ export default function SelectStore() {
       return false;
     };
 
+    // Immediately use the known cache when the device has no network.
+    if (!navigator.onLine) {
+      if (!loadFromCache()) {
+        setError('Geen verbinding met de server en geen lokale filiaalcache beschikbaar.');
+        setLoading(false);
+      }
+      return;
+    }
+
     try {
-      // Timeout instellen op 3 seconden zodat hij bij een dode VPS niet blijft hangen
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 3000);
+      const timeoutId = setTimeout(() => controller.abort(), 2500);
 
       const res = await fetch(`/api/auth/store-selection?user_id=${userId}`, {
         headers: { 'x-user-id': String(userId) },
-        signal: controller.signal
+        signal: controller.signal,
+        cache: 'no-store'
       });
       clearTimeout(timeoutId);
 
@@ -76,9 +85,14 @@ export default function SelectStore() {
   };
 
   const selectStore = (store) => {
-    const parsedMethods = typeof store.payment_methods === 'string'
-      ? JSON.parse(store.payment_methods)
-      : (store.payment_methods || { sumup: true, manual_pin: true, cash: true });
+    let parsedMethods;
+    try {
+      parsedMethods = typeof store.payment_methods === 'string'
+        ? JSON.parse(store.payment_methods)
+        : (store.payment_methods || { sumup: true, manual_pin: true, cash: true });
+    } catch (_) {
+      parsedMethods = { sumup: true, manual_pin: true, cash: true };
+    }
 
     const storeData = {
       id: store.id,
@@ -95,12 +109,15 @@ export default function SelectStore() {
     localStorage.setItem('selectedStore', JSON.stringify(storeData));
     localStorage.setItem('pos_selected_store', JSON.stringify(storeData));
 
-    router.replace('/');
+    // Force a document navigation so the Service Worker can serve the cached
+    // POS shell even when the VPS is completely unavailable.
+    window.location.replace('/');
   };
 
   const handleLogout = () => {
-    localStorage.clear();
-    router.replace('/login');
+    localStorage.removeItem('pos_user');
+    localStorage.removeItem('pos_token');
+    window.location.replace('/login');
   };
 
   if (!currentUser) return null;
@@ -144,7 +161,7 @@ export default function SelectStore() {
               >
                 <div>
                   <h3 className="font-bold text-sm text-gray-900 group-hover:text-black">
-                    {store.store_name}
+                    {store.store_name || store.name}
                   </h3>
                   {store.address && (
                     <span className="text-xs text-gray-500 font-medium block mt-0.5">
