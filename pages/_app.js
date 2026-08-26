@@ -1,5 +1,6 @@
 import Head from 'next/head';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/router';
 import '../styles/globals.css';
 
 const SUMUP_GATEWAY = 'https://pos-sumup.vercel.app';
@@ -125,10 +126,63 @@ function registerNativePWA() {
   }, { once: true });
 }
 
+function installOfflineAjaxBridge(notify) {
+  if (typeof window === 'undefined' || window.__bendemenOfflineAjaxInstalled) return () => {};
+  window.__bendemenOfflineAjaxInstalled = true;
+
+  const notifyKeys = new Set(['pos_offline_orders', 'pos_cached_products', 'pos_selected_store', 'selectedStore']);
+  const originalSetItem = Storage.prototype.setItem;
+  const originalRemoveItem = Storage.prototype.removeItem;
+  let refreshTimer = null;
+
+  const scheduleRefresh = (key) => {
+    if (!notifyKeys.has(key)) return;
+    clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(() => {
+      window.dispatchEvent(new Event('pos:ajax-refresh'));
+      notify();
+    }, 0);
+  };
+
+  Storage.prototype.setItem = function(key, value) {
+    originalSetItem.call(this, key, value);
+    scheduleRefresh(key);
+  };
+
+  Storage.prototype.removeItem = function(key) {
+    originalRemoveItem.call(this, key);
+    scheduleRefresh(key);
+  };
+
+  const handleStorage = (event) => {
+    if (event.key && notifyKeys.has(event.key)) scheduleRefresh(event.key);
+  };
+
+  window.addEventListener('storage', handleStorage);
+
+  let channel = null;
+  if ('BroadcastChannel' in window) {
+    channel = new BroadcastChannel('bendemen-pos');
+    channel.addEventListener('message', () => notify());
+  }
+
+  return () => {
+    clearTimeout(refreshTimer);
+    Storage.prototype.setItem = originalSetItem;
+    Storage.prototype.removeItem = originalRemoveItem;
+    window.removeEventListener('storage', handleStorage);
+    if (channel) channel.close();
+    window.__bendemenOfflineAjaxInstalled = false;
+  };
+}
+
 export default function App({ Component, pageProps }) {
+  const [offlineAjaxRevision, setOfflineAjaxRevision] = useState(0);
+
   useEffect(() => {
     installSumUpGatewayFetch();
     registerNativePWA();
+    return installOfflineAjaxBridge(() => setOfflineAjaxRevision((value) => value + 1));
   }, []);
 
   return (
@@ -142,7 +196,7 @@ export default function App({ Component, pageProps }) {
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
       </Head>
-      <Component {...pageProps} />
+      <Component key={`pos-${offlineAjaxRevision}`} {...pageProps} />
     </>
   );
 }
