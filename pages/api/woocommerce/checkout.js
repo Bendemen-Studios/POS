@@ -1,6 +1,7 @@
 import WooCommerceRestApi from '@woocommerce/woocommerce-rest-api';
 import { createHash } from 'crypto';
 import { claimOrder, completeOrder, releaseOrder } from '../../../lib/orderIdempotency';
+import { updateCustomerPoints } from '../../../lib/customerPoints';
 
 function getClientOrderId(req) {
   const headerId = req.headers['idempotency-key'];
@@ -25,29 +26,18 @@ export default async function handler(req, res) {
   const consumerSecret = process.env.WOOCOMMERCE_CONSUMER_SECRET || process.env.WOOCOMMERCE_SECRET || process.env.NEXT_PUBLIC_WOOCOMMERCE_SECRET;
 
   if (!consumerKey || !consumerSecret) {
-    return res.status(500).json({
-      success: false,
-      error: 'WooCommerce API sleutels zijn niet geconfigureerd in .env'
-    });
+    return res.status(500).json({ success: false, error: 'WooCommerce API sleutels zijn niet geconfigureerd in .env' });
   }
 
   try {
     const claim = await claimOrder(clientOrderId);
 
     if (claim.completed) {
-      return res.status(200).json({
-        success: true,
-        idempotent: true,
-        order: { id: claim.wooOrderId }
-      });
+      return res.status(200).json({ success: true, idempotent: true, order: { id: claim.wooOrderId } });
     }
 
     if (claim.processing) {
-      return res.status(409).json({
-        success: false,
-        retryable: true,
-        error: 'Deze bestelling wordt al verwerkt.'
-      });
+      return res.status(409).json({ success: false, retryable: true, error: 'Deze bestelling wordt al verwerkt.' });
     }
 
     claimed = claim.claimed;
@@ -56,10 +46,10 @@ export default async function handler(req, res) {
 
     const authHeader = 'Basic ' + Buffer.from(`${consumerKey}:${consumerSecret}`).toString('base64');
     const customHeaders = {
-      'Authorization': authHeader,
+      Authorization: authHeader,
       'Content-Type': 'application/json',
       'User-Agent': 'BDM-POS-Client/1.0 (Mozilla/5.0; Node.js)',
-      'Connection': 'close'
+      Connection: 'close'
     };
 
     const lineItems = [];
@@ -82,11 +72,7 @@ export default async function handler(req, res) {
           quantity: item.quantity || 1,
           total: (parseFloat(item.price || 0) * (item.quantity || 1)).toFixed(2)
         };
-
-        if (item.variation_id && Number(item.variation_id) > 0) {
-          lineObj.variation_id = Number(item.variation_id);
-        }
-
+        if (item.variation_id && Number(item.variation_id) > 0) lineObj.variation_id = Number(item.variation_id);
         lineItems.push(lineObj);
       }
     });
@@ -95,6 +81,15 @@ export default async function handler(req, res) {
       feeLines.push({
         name: 'Handmatige Korting',
         total: `-${parseFloat(totals.discountAmount).toFixed(2)}`,
+        tax_class: '',
+        tax_status: 'none'
+      });
+    }
+
+    if (totals?.pointsDiscount > 0) {
+      feeLines.push({
+        name: 'Punten Ingewisseld',
+        total: `-${parseFloat(totals.pointsDiscount).toFixed(2)}`,
         tax_class: '',
         tax_status: 'none'
       });
@@ -137,45 +132,44 @@ export default async function handler(req, res) {
         headers: customHeaders,
         body: JSON.stringify(orderData)
       });
-
       const responseText = await fetchRes.text();
-      if (!fetchRes.ok) {
-        throw new Error(`HTTP ${fetchRes.status}: ${responseText}`);
-      }
-
+      if (!fetchRes.ok) throw new Error(`HTTP ${fetchRes.status}: ${responseText}`);
       responseOrder = JSON.parse(responseText);
     } catch (fetchErr) {
       console.warn('[CHECKOUT API]: Native fetch faalt, probeert SDK fallback...', fetchErr.message);
-
       const api = new WooCommerceRestApi({
         url,
         consumerKey,
         consumerSecret,
         version: 'wc/v3',
-        axiosConfig: {
-          timeout: 20000,
-          headers: customHeaders
-        }
+        axiosConfig: { timeout: 20000, headers: customHeaders }
       });
-
       const { data } = await api.post('orders', orderData);
       responseOrder = data;
     }
 
-    if (!responseOrder?.id) {
-      throw new Error('WooCommerce gaf geen order-ID terug.');
+    if (!responseOrder?.id) throw new Error('WooCommerce gaf geen order-ID terug.');
+
+    if (claimed) await completeOrder(clientOrderId, responseOrder.id);
+
+    let pointsSyncPending = false;
+    if (customerId && Number.isFinite(Number(customerId)) && Number(customerId) > 0) {
+      try {
+        await updateCustomerPoints({
+          customerId: Number(customerId),
+          pointsUsed: totals?.pointsUsed || 0,
+          totalPaid: totals?.totalPaid || 0,
+        });
+      } catch (pointsError) {
+        pointsSyncPending = true;
+        console.error('[CHECKOUT POINTS SYNC]:', pointsError.message);
+      }
     }
 
-    if (claimed) {
-      await completeOrder(clientOrderId, responseOrder.id);
-    }
-
-    return res.status(200).json({ success: true, order: responseOrder });
+    return res.status(200).json({ success: true, order: responseOrder, pointsSyncPending });
   } catch (error) {
     if (claimed) {
-      try {
-        await releaseOrder(clientOrderId);
-      } catch (releaseError) {
+      try { await releaseOrder(clientOrderId); } catch (releaseError) {
         console.error('[CHECKOUT IDEMPOTENCY RELEASE ERROR]:', releaseError.message);
       }
     }
