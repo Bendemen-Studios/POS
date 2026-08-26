@@ -1,41 +1,81 @@
 #!/bin/bash
-set -e
+set -Eeuo pipefail
 
-echo "🚀 Start deployment..."
+APP_DIR="/var/www/bendemen-pos"
+APP_NAME="bendemen-pos"
+BRANCH="main"
 
-# 1. Ga naar de map
-cd /var/www/bendemen-pos
+printf '\n🚀 BENDEMEN POS deployment starten...\n'
 
-# Zorg dat dit script altijd uitvoerbaar blijft
-chmod +x "$0"
+if [ "$(id -u)" -ne 0 ]; then
+  echo "❌ Start dit script als root (of met sudo)."
+  exit 1
+fi
 
-# 2. Forceer het ophalen van de laatste code en negeer lokale conflicten
-git fetch origin main
-git reset --hard origin/main
+cd "$APP_DIR"
 
-# 3. Controleer of .env bestaat, zo niet, maak hem aan vanuit .env.example
+# Zorg dat git en Node/npm beschikbaar zijn voordat we wijzigingen uitvoeren.
+command -v git >/dev/null || { echo "❌ git ontbreekt."; exit 1; }
+command -v npm >/dev/null || { echo "❌ npm ontbreekt."; exit 1; }
+command -v pm2 >/dev/null || { echo "❌ pm2 ontbreekt."; exit 1; }
+
+# Het script zelf kan na git reset worden vervangen; maak de lokale kopie
+# daarom opnieuw uitvoerbaar nadat de repository is bijgewerkt.
+git fetch --prune origin "$BRANCH"
+git reset --hard "origin/$BRANCH"
+git clean -fd -e .env -e .env.local
+chmod +x "$APP_DIR/deploy.sh" 2>/dev/null || true
+
+# Bewaar productieconfiguratie altijd buiten Git.
 if [ ! -f .env ]; then
   if [ -f .env.example ]; then
     cp .env.example .env
-    echo "⚠️ .env bestand aangemaakt vanuit .env.example!"
+    chmod 600 .env
+    echo "⚠️ .env aangemaakt vanuit .env.example. Controleer je productiegegevens."
   else
     touch .env
-    echo "⚠️ .env bestand leeg aangemaakt!"
+    chmod 600 .env
+    echo "⚠️ .env bestaat nog niet; leeg bestand aangemaakt."
   fi
-  echo "👉 Vergeet niet je gegevens in te vullen via: nano .env"
 fi
 
-# 4. Installeer dependencies, bouw en herstart PM2
-npm install
+# Controleer package.json voordat npm draait.
+if [ ! -f package.json ]; then
+  echo "❌ package.json ontbreekt na git update. Deployment gestopt."
+  exit 1
+fi
+
+# npm ci is reproduceerbaar wanneer package-lock aanwezig is.
+if [ -f package-lock.json ]; then
+  npm ci --omit=dev
+else
+  npm install --omit=dev
+fi
+
+# Verwijder een oude Next build zodat geen oude chunks/404's kunnen blijven hangen.
+rm -rf .next
 npm run build
 
-# Herstart PM2 of start hem als hij nog niet draait
-if pm2 describe bendemen-pos > /dev/null 2>&1; then
-  pm2 restart bendemen-pos
+# Start/restart PM2 met de actuele build en productieomgeving.
+if pm2 describe "$APP_NAME" >/dev/null 2>&1; then
+  pm2 restart "$APP_NAME" --update-env
 else
-  pm2 start ecosystem.config.js
+  if [ -f ecosystem.config.js ]; then
+    pm2 start ecosystem.config.js --update-env
+  else
+    pm2 start npm --name "$APP_NAME" -- start
+  fi
 fi
 
 pm2 save
 
-echo "✨ Deployment succesvol voltooid!"
+# Controleer dat de applicatie daadwerkelijk online is.
+sleep 2
+if ! pm2 describe "$APP_NAME" | grep -q "online"; then
+  echo "❌ PM2 kon $APP_NAME niet online krijgen."
+  pm2 logs "$APP_NAME" --lines 30 --nostream || true
+  exit 1
+fi
+
+printf '\n✨ Deployment succesvol voltooid!\n'
+pm2 status "$APP_NAME"
