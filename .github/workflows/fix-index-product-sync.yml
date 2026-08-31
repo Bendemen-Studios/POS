@@ -22,11 +22,14 @@ jobs:
           p = Path('pages/index.js')
           s = p.read_text()
           old = "const fetchProducts=async()=>{try{const res=await fetchWithServerCheck('/api/woocommerce/products');"
-          new = "const fetchProducts=async()=>{try{const res=await fetchWithServerCheck('/api/woocommerce/products',{},60000);"
+          new = "const fetchProducts=async()=>{try{const res=await fetchWithServerCheck(`/api/woocommerce/products?_sync=${Date.now()}`,{},60000);"
           if old in s:
               s = s.replace(old, new, 1)
               p.write_text(s)
-          elif new not in s:
+              print('Patched product sync to 60s with cache-busting query.')
+          elif new in s:
+              print('Product sync patch already present.')
+          else:
               raise SystemExit('Expected product sync function not found')
           PY
 
@@ -36,7 +39,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add pages/index.js
-          git diff --cached --quiet || git commit -m "fix: allow product sync up to 60 seconds"
+          git diff --cached --quiet || git commit -m "fix: increase index product sync timeout"
           git push
 
       - name: Remove temporary workflow
