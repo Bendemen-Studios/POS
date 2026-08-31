@@ -42,8 +42,14 @@ export default function AdminDashboard() {
 
   const [products, setProducts] = useState(() => {
     if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('admin_products');
-      return saved ? JSON.parse(saved) : [];
+      try {
+        const adminSaved = localStorage.getItem('admin_products');
+        const adminProducts = adminSaved ? JSON.parse(adminSaved) : [];
+        if (Array.isArray(adminProducts) && adminProducts.length > 0) return adminProducts;
+        const posSaved = localStorage.getItem('pos_cached_products');
+        const posProducts = posSaved ? JSON.parse(posSaved) : [];
+        return Array.isArray(posProducts) ? posProducts : [];
+      } catch (_) { return []; }
     }
     return [];
   });
@@ -148,7 +154,10 @@ export default function AdminDashboard() {
     ]);
     
     const savedProducts = localStorage.getItem('admin_products');
-    if (!savedProducts || JSON.parse(savedProducts).length === 0) {
+    const savedPosProducts = localStorage.getItem('pos_cached_products');
+    const adminCount = savedProducts ? JSON.parse(savedProducts).length : 0;
+    const posCount = savedPosProducts ? JSON.parse(savedPosProducts).length : 0;
+    if (adminCount === 0 && posCount === 0) {
       await fetchProductsSilently();
     }
     setLoading(false);
@@ -205,6 +214,7 @@ export default function AdminDashboard() {
       if (data.success) {
         setProducts(data.products || []);
         localStorage.setItem('admin_products', JSON.stringify(data.products || []));
+        localStorage.setItem('pos_cached_products', JSON.stringify(data.products || []));
       }
     } catch (err) {
       console.error('Fout bij ophalen producten:', err);
@@ -219,6 +229,7 @@ export default function AdminDashboard() {
       if (data.success) {
         setProducts(data.products || []);
         localStorage.setItem('admin_products', JSON.stringify(data.products || []));
+        localStorage.setItem('pos_cached_products', JSON.stringify(data.products || []));
         alert('Producten succesvol gesynchroniseerd met WooCommerce!');
       } else {
         alert('Fout bij synchroniseren van producten.');
