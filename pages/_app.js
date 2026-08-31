@@ -89,26 +89,6 @@ function installSumUpGatewayFetch() {
     let url;
     try { url = new URL(rawUrl, window.location.origin); } catch { return originalFetch(input, init); }
 
-    if (url.pathname === '/api/woocommerce/products' && (init?.method || 'GET').toUpperCase() === 'GET') {
-      const productUrl = new URL(url.toString());
-      productUrl.searchParams.set('_sync', String(Date.now()));
-      const productController = new AbortController();
-      const productTimer = setTimeout(() => productController.abort(), PRODUCT_SYNC_TIMEOUT);
-      try {
-        return await originalFetch(productUrl.toString(), {
-          ...init,
-          cache: 'no-store',
-          signal: productController.signal,
-          headers: {
-            ...(init?.headers || {}),
-            'Cache-Control': 'no-cache, no-store, must-revalidate',
-          },
-        });
-      } finally {
-        clearTimeout(productTimer);
-      }
-    }
-
     if (url.pathname !== '/api/sumup/proxy') return originalFetch(input, init);
     if (url.searchParams.get('action') === 'assign-store') return originalFetch(input, init);
 

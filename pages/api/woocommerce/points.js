@@ -38,6 +38,11 @@ export default async function handler(req, res) {
       });
     }
 
+    if (action === 'calculate_earned') {
+      const pointsEarned = Math.floor(parseFloat(orderTotal) || 0);
+      return res.status(200).json({ success: true, pointsEarned, pointsBalance: currentPoints });
+    }
+
     if (action === 'redeem') {
       const redeemPoints = parseInt(pointsToRedeem, 10) || 0;
 
