@@ -2,6 +2,11 @@ name: POS Sync Fix
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'pages/index.js'
+      - '.github/workflows/pos-sync-fix.yml'
 
 jobs:
   patch-pos:
@@ -12,41 +17,56 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Patch POS sync/server status
+      - name: Patch only POS sync/server logic
+        shell: python
         run: |
-          python3 - <<'PY'
           from pathlib import Path
+          import re
           p = Path('pages/index.js')
-          s = p.read_text()
+          s = p.read_text(encoding='utf-8')
           original = s
 
-          # Use the dedicated health endpoint instead of the old healthcheck query.
-          s = s.replace("/api/admin/store?healthcheck=1", "/api/admin/store?_pos_health=" + "${Date.now()}")
+          # Fix the health URL: it must be a JS template literal, not a literal ${Date.now()} string.
+          s = s.replace("'/api/admin/store?_pos_health=${Date.now()}'", "`/api/admin/store?_pos_health=${Date.now()}`")
 
-          # Persist the known online state whenever the server is confirmed reachable.
-          s = s.replace("setServerOnline(true); return true;", "setServerOnline(true); localStorage.setItem('pos_server_online','1'); return true;")
-          s = s.replace("if (serverCheckState.current.failures >= 2) setServerOnline(false);", "if (serverCheckState.current.failures >= 2) { setServerOnline(false); localStorage.setItem('pos_server_online','0'); }")
+          # Health check must use the actual POS origin and must always release its lock.
+          s = re.sub(
+              r"const response = await fetch\(`/api/admin/store\?_pos_health=\$\{Date\.now\(\)\}`,\{method:'GET',cache:'no-store',signal:controller\.signal,headers:\{'Cache-Control':'no-cache, no-store, must-revalidate'\}\}\);",
+              "const response = await fetch(`${window.location.origin}/api/admin/store?_pos_health=${Date.now()}`,{method:'GET',cache:'no-store',signal:controller.signal,credentials:'same-origin',headers:{'Cache-Control':'no-cache, no-store, must-revalidate'}});",
+              s
+          )
 
-          # Make the existing product sync refresh the admin-side stock cache as well.
-          marker = "localStorage.setItem('pos_cached_products',JSON.stringify(data.products));"
-          if marker in s and "localStorage.setItem('admin_products'" not in s:
-              s = s.replace(marker, marker + " localStorage.setItem('admin_products',JSON.stringify(data.products));", 1)
+          # Successful product retrieval is also proof that the VPS/API is online.
+          old = "const res=await fetchWithServerCheck('/api/woocommerce/products');const data=await res.json();if(data.success&&data.products){setProducts(data.products);localStorage.setItem('pos_cached_products',JSON.stringify(data.products));localStorage.setItem('admin_products',JSON.stringify(data.products));}"
+          new = "const res=await fetchWithServerCheck(`/api/woocommerce/products?_sync=${Date.now()}`,{},120000);const data=await res.json();if(!res.ok||!data.success||!Array.isArray(data.products))throw new Error(data.error||`HTTP ${res.status}`);setProducts(data.products);localStorage.setItem('pos_cached_products',JSON.stringify(data.products));localStorage.setItem('admin_products',JSON.stringify(data.products));localStorage.setItem('pos_cached_products_updated_at',String(Date.now()));setServerOnline(true);localStorage.setItem('pos_server_online','1');"
+          if old in s:
+              s = s.replace(old, new, 1)
+
+          # Never let navigator.onLine alone block a real server sync.
+          s = s.replace("if(typeof navigator!=='undefined'&&navigator.onLine===false)return;setIsSyncing(true);try{", "setIsSyncing(true);try{", 1)
+
+          # Prevent overlapping full syncs and make sure the UI always leaves Syncing state.
+          if "if(isSyncing)return;setIsSyncing(true);try{" not in s:
+              s = s.replace("const handleSyncData=async()=>{setIsSyncing(true);try{", "const handleSyncData=async()=>{if(isSyncing)return;setIsSyncing(true);try{", 1)
 
           if s == original:
-              raise SystemExit('No patchable POS code found; aborting without commit')
-
-          p.write_text(s)
+              print('No further patch needed; leaving pages/index.js unchanged.')
+          else:
+              p.write_text(s, encoding='utf-8')
+              print('Patched pages/index.js without replacing the file.')
           PY
 
-      - name: Validate
-        run: |
-          node --check pages/index.js
+      - name: Validate JavaScript
+        run: node --check pages/index.js
 
-      - name: Commit and push
+      - name: Commit only when changed
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add pages/index.js
-          git diff --cached --quiet && exit 0
-          git commit -m "fix: POS server status and admin stock sync"
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "fix: POS server check and product sync"
           git push
