@@ -1,9 +1,7 @@
-const CACHE_NAME = 'bendemen-pos-v8';
+const CACHE_NAME = 'bendemen-pos-v9';
 const OFFLINE_URL = '/login';
 const NAVIGATION_TIMEOUT = 3500;
 const API_TIMEOUT = 4000;
-// Checkout is explicitly online-first. Give a reachable VPS enough time to
-// answer before the POS falls back to its local offline queue.
 const CHECKOUT_TIMEOUT = 10000;
 
 const APP_SHELL = [
@@ -16,12 +14,13 @@ const APP_SHELL = [
   '/favicon.ico',
 ];
 
+// Alleen kleine, snel ladende GET-data valt terug op cache.
+// Producten en afhaalorders mogen NIET door de 4s service-worker timeout,
+// omdat deze endpoints batch/paginering gebruiken.
 const CACHEABLE_API_PREFIXES = [
   '/api/auth/store-selection',
-  '/api/woocommerce/products',
   '/api/woocommerce/customers',
   '/api/admin/users',
-  '/api/woocommerce/pickup-order',
 ];
 
 function timeoutFetch(request, timeout = NAVIGATION_TIMEOUT) {
@@ -57,9 +56,6 @@ async function refreshApiCache(request) {
 
 async function handleServerStatusRequest(request) {
   try {
-    // IMPORTANT: the health/status request is NEVER allowed to use the
-    // service-worker cache. A cached 200 response would incorrectly show
-    // "Server online" while the VPS is actually down.
     return await timeoutFetch(request, 3000);
   } catch (_) {
     return new Response(
@@ -71,10 +67,8 @@ async function handleServerStatusRequest(request) {
 
 async function handleCheckoutRequest(request) {
   try {
-    // Never read a cached checkout response. The real VPS must be tried first.
     return await timeoutFetch(request, CHECKOUT_TIMEOUT);
   } catch (_) {
-    // Let the page's existing offline-order queue handle the failed checkout.
     return new Response(
       JSON.stringify({ success: false, offline: true, queued: true, error: 'POS-server offline of niet bereikbaar. De bestelling wordt lokaal opgeslagen.' }),
       { status: 503, headers: { 'Content-Type': 'application/json' } }
@@ -117,15 +111,13 @@ self.addEventListener('fetch', (event) => {
 
   if (url.origin !== self.location.origin) return;
 
-  // Server status is ALWAYS a real network check. Never answer it from cache.
+  // Status is altijd netwerk-only.
   if (request.method === 'GET' && url.pathname === '/api/admin/store') {
     event.respondWith(handleServerStatusRequest(request));
     return;
   }
 
-  // Checkout is always network-first, even when navigator.onLine is false.
-  // This is important when the browser's connection state is stale while the
-  // POS server is actually reachable.
+  // Checkout is altijd netwerk-first en krijgt extra tijd.
   if (request.method === 'POST' && url.pathname === '/api/woocommerce/checkout') {
     event.respondWith(handleCheckoutRequest(request));
     return;
@@ -133,25 +125,25 @@ self.addEventListener('fetch', (event) => {
 
   if (request.method !== 'GET') return;
 
-  // API-data is NETWORK-FIRST. An old API-cache may only be used when the
-  // actual VPS request fails. The server-status endpoint above is excluded.
-  if (url.pathname.startsWith('/api/') && isCacheableApi(url.pathname)) {
-    event.respondWith((async () => {
-      const fresh = await refreshApiCache(request);
-      if (fresh) return fresh;
-
-      const cached = await caches.match(request);
-      if (cached) return cached;
-
-      return new Response(
-        JSON.stringify({ success: false, offline: true, error: 'Offline en geen lokale cache beschikbaar.' }),
-        { status: 503, headers: { 'Content-Type': 'application/json' } }
-      );
-    })());
+  // Producten en pickup-orders vallen hier bewust NIET onder: laat hun echte
+  // response volledig door, zodat batch/paginering langer dan 4s mag duren.
+  if (url.pathname.startsWith('/api/')) {
+    if (isCacheableApi(url.pathname)) {
+      event.respondWith((async () => {
+        const fresh = await refreshApiCache(request);
+        if (fresh) return fresh;
+        const cached = await caches.match(request);
+        if (cached) return cached;
+        return new Response(
+          JSON.stringify({ success: false, offline: true, error: 'Offline en geen lokale cache beschikbaar.' }),
+          { status: 503, headers: { 'Content-Type': 'application/json' } }
+        );
+      })());
+      return;
+    }
+    event.respondWith(fetch(request));
     return;
   }
-
-  if (url.pathname.startsWith('/api/')) return;
 
   if (url.pathname.startsWith('/_next/static/')) {
     event.respondWith(
