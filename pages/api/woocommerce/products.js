@@ -51,9 +51,10 @@ export default async function handler(req, res) {
     const maxPages = 1000;
     const products = [];
 
-    // Eerst alle gepubliceerde producten batch voor batch ophalen.
+    // WooCommerce-beheer gebruikt menu_order als de handmatig ingestelde volgorde.
+    // Gebruik die volgorde ook in de POS/Admin en sorteer ID als stabiele fallback.
     for (let page = 1; page <= maxPages; page += 1) {
-      const endpoint = `${url}/wp-json/wc/v3/products?per_page=${batchSize}&page=${page}&status=publish&orderby=id&order=asc`;
+      const endpoint = `${url}/wp-json/wc/v3/products?per_page=${batchSize}&page=${page}&status=publish&orderby=menu_order&order=asc`;
       let rawProducts;
 
       try {
@@ -72,7 +73,7 @@ export default async function handler(req, res) {
             per_page: batchSize,
             page,
             status: 'publish',
-            orderby: 'id',
+            orderby: 'menu_order',
             order: 'asc'
           });
           rawProducts = response.data || [];
@@ -89,9 +90,12 @@ export default async function handler(req, res) {
       await sleep(50);
     }
 
-    // Variaties blijven onderdeel van de product-sync, zodat de POS de keuze-popup,
-    // variantprijzen en variantvoorraad kan tonen. We halen ze per variabel product
-    // in batches op en verwerken ze met beperkte concurrency om de sync stabiel te houden.
+    products.sort((a, b) => {
+      const orderA = Number.isFinite(Number(a.menu_order)) ? Number(a.menu_order) : 0;
+      const orderB = Number.isFinite(Number(b.menu_order)) ? Number(b.menu_order) : 0;
+      return orderA - orderB || Number(a.id || 0) - Number(b.id || 0);
+    });
+
     const variableProducts = products.filter(
       (product) => product.type === 'variable' && Array.isArray(product.variations) && product.variations.length > 0
     );
@@ -105,7 +109,7 @@ export default async function handler(req, res) {
           const allVariations = [];
           for (let page = 1; page <= maxPages; page += 1) {
             const variations = await fetchJson(
-              `${url}/wp-json/wc/v3/products/${product.id}/variations?per_page=${batchSize}&page=${page}&orderby=id&order=asc`,
+              `${url}/wp-json/wc/v3/products/${product.id}/variations?per_page=${batchSize}&page=${page}&orderby=menu_order&order=asc`,
               {},
               20000
             );
@@ -113,6 +117,11 @@ export default async function handler(req, res) {
             allVariations.push(...variations);
             if (variations.length < batchSize) break;
           }
+          allVariations.sort((a, b) => {
+            const orderA = Number.isFinite(Number(a.menu_order)) ? Number(a.menu_order) : 0;
+            const orderB = Number.isFinite(Number(b.menu_order)) ? Number(b.menu_order) : 0;
+            return orderA - orderB || Number(a.id || 0) - Number(b.id || 0);
+          });
           variationMap.set(product.id, allVariations);
         } catch (err) {
           console.error(`[VARIATION SKIPPED] Fout bij ophalen variaties voor product #${product.id}:`, err.message);
@@ -127,6 +136,7 @@ export default async function handler(req, res) {
       const variationsData = rawVariations.map((v) => ({
         id: v.id,
         variation_id: v.id,
+        menu_order: v.menu_order ?? 0,
         price: v.price || v.regular_price || 0,
         regular_price: v.regular_price || 0,
         sale_price: v.sale_price || null,
@@ -141,6 +151,7 @@ export default async function handler(req, res) {
         id: product.id,
         name: product.name,
         slug: product.slug,
+        menu_order: product.menu_order ?? 0,
         price: product.price || product.regular_price || 0,
         regular_price: product.regular_price || 0,
         sale_price: product.sale_price || null,
