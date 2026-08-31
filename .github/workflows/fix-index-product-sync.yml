@@ -51,3 +51,5 @@ jobs:
           git rm -f .github/workflows/fix-index-product-sync.yml || true
           git commit -m "chore: remove temporary product sync workflow" || true
           git push || true
+
+# trigger product sync patch run
