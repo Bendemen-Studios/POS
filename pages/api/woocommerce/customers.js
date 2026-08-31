@@ -5,9 +5,10 @@ const WooCommerce = WooCommerceRestApi.default || WooCommerceRestApi;
 
 const api = new WooCommerce({
   url: process.env.WOO_SITE_URL || process.env.WOOCOMMERCE_URL || "https://www.bendemen.com",
-  consumerKey: process.env.WOO_CONSUMER_KEY,
-  consumerSecret: process.env.WOO_CONSUMER_SECRET,
-  version: "wc/v3"
+  consumerKey: process.env.WOO_CONSUMER_KEY || process.env.WOOCOMMERCE_CONSUMER_KEY || process.env.WOOCOMMERCE_KEY,
+  consumerSecret: process.env.WOO_CONSUMER_SECRET || process.env.WOOCOMMERCE_CONSUMER_SECRET || process.env.WOOCOMMERCE_SECRET,
+  version: "wc/v3",
+  axiosConfig: { timeout: 15000 },
 });
 
 export default async function handler(req, res) {
@@ -18,16 +19,19 @@ export default async function handler(req, res) {
 
   try {
     const allCustomers = [];
+    const perPage = 100;
     let page = 1;
 
-    while (true) {
-      const response = await api.get("customers", { per_page: 100, page });
+    while (page <= 1000) {
+      const response = await api.get("customers", { per_page: perPage, page });
       const customers = Array.isArray(response.data) ? response.data : [];
 
-      allCustomers.push(...customers.map((customer) => ({
-        ...customer,
-        points_balance: extractCustomerPoints(customer),
-      })));
+      allCustomers.push(
+        ...customers.map((customer) => ({
+          ...customer,
+          points_balance: extractCustomerPoints(customer),
+        }))
+      );
 
       const totalPages = Number(
         response.headers?.['x-wp-totalpages'] ||
@@ -35,17 +39,18 @@ export default async function handler(req, res) {
         0
       );
 
-      if (customers.length < 100 || (totalPages > 0 && page >= totalPages)) break;
+      if (customers.length < perPage || (totalPages > 0 && page >= totalPages)) break;
       page += 1;
     }
 
+    res.setHeader('Cache-Control', 'private, max-age=0, no-cache, no-store, must-revalidate');
     return res.status(200).json({
       success: true,
       customers: allCustomers,
       total: allCustomers.length,
     });
   } catch (error) {
-    console.error("WooCommerce Customers Fetch Error:", error.message);
-    return res.status(500).json({ success: false, error: error.message });
+    console.error("WooCommerce Customers Fetch Error:", error.response?.data || error.message);
+    return res.status(502).json({ success: false, error: error.response?.data?.message || error.message || 'Fout bij ophalen klanten' });
   }
 }
