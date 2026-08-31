@@ -12,7 +12,7 @@ function getWooCommerceApi() {
     consumerKey,
     consumerSecret,
     version: 'wc/v3',
-    axiosConfig: { timeout: 15000 },
+    axiosConfig: { timeout: 20000 },
   });
 }
 
@@ -21,17 +21,58 @@ function sendApiError(res, status, message) {
 }
 
 function isPickupOrder(order) {
-  return Array.isArray(order.shipping_lines) && order.shipping_lines.some((line) => {
+  const shippingPickup = Array.isArray(order.shipping_lines) && order.shipping_lines.some((line) => {
     const methodId = String(line.method_id || '').toLowerCase();
     const methodTitle = String(line.method_title || '').toLowerCase();
     return methodId.includes('local_pickup') || methodTitle.includes('afhalen') || methodTitle.includes('afhaal');
   });
+
+  const metaPickup = Array.isArray(order.meta_data) && order.meta_data.some((meta) => {
+    const key = String(meta.key || '').toLowerCase();
+    return key.includes('pickup') || key.includes('afhaal');
+  });
+
+  return shippingPickup || metaPickup;
 }
 
 function matchesPickupId(order, pickupId) {
-  if (!pickupId) return false;
-  return Array.isArray(order.meta_data) && order.meta_data.some((meta) =>
-    String(meta.key || '').toLowerCase().includes('pickup') && String(meta.value ?? '') === String(pickupId)
+  if (!pickupId || !Array.isArray(order.meta_data)) return false;
+  return order.meta_data.some((meta) => {
+    const key = String(meta.key || '').toLowerCase();
+    return key.includes('pickup') && String(meta.value ?? '') === String(pickupId);
+  });
+}
+
+async function getOrdersForStatus(api, status) {
+  const perPage = 100;
+  const first = await api.get('orders', {
+    per_page: perPage,
+    page: 1,
+    status,
+    orderby: 'date',
+    order: 'desc',
+  });
+
+  const firstOrders = Array.isArray(first.data) ? first.data : [];
+  const totalPages = Math.min(
+    100,
+    Math.max(1, Number(first.headers?.['x-wp-totalpages'] || first.headers?.['X-WP-TotalPages'] || 1))
+  );
+
+  if (totalPages === 1) return firstOrders;
+
+  const responses = await Promise.all(
+    Array.from({ length: totalPages - 1 }, (_, index) => api.get('orders', {
+      per_page: perPage,
+      page: index + 2,
+      status,
+      orderby: 'date',
+      order: 'desc',
+    }))
+  );
+
+  return firstOrders.concat(
+    ...responses.map((response) => Array.isArray(response.data) ? response.data : [])
   );
 }
 
@@ -46,51 +87,39 @@ export default async function handler(req, res) {
   if (method === 'GET') {
     try {
       const { pickup_id } = req.query;
-      const allOrders = [];
-      const perPage = 100;
-      let page = 1;
 
-      // Haal alle relevante orders op in pagina's zodat oudere/latere afhaalorders niet ontbreken.
-      while (page <= 100) {
-        const response = await api.get('orders', {
-          per_page: perPage,
-          page,
-          status: 'processing,pending',
-          orderby: 'date',
-          order: 'asc',
-        });
+      const [pendingOrders, processingOrders] = await Promise.all([
+        getOrdersForStatus(api, 'pending'),
+        getOrdersForStatus(api, 'processing'),
+      ]);
 
-        const orders = Array.isArray(response.data) ? response.data : [];
-        allOrders.push(...orders);
-
-        const totalPages = Number(
-          response.headers?.['x-wp-totalpages'] ||
-          response.headers?.['X-WP-TotalPages'] ||
-          0
-        );
-
-        if (orders.length < perPage || (totalPages > 0 && page >= totalPages)) break;
-        page += 1;
-      }
-
-      const filteredOrders = allOrders.filter((order) => {
-        const pickup = isPickupOrder(order);
-        if (pickup_id) return pickup || matchesPickupId(order, pickup_id);
-        return pickup;
+      const byId = new Map();
+      [...pendingOrders, ...processingOrders].forEach((order) => {
+        if (order?.id) byId.set(String(order.id), order);
       });
 
-      // Nieuwste afhaalbestellingen eerst in de POS.
-      filteredOrders.sort((a, b) => {
-        const da = new Date(a.date_created || 0).getTime();
-        const db = new Date(b.date_created || 0).getTime();
-        return db - da;
-      });
+      const filteredOrders = Array.from(byId.values())
+        .filter((order) => {
+          const pickup = isPickupOrder(order);
+          if (pickup_id) return pickup || matchesPickupId(order, pickup_id);
+          return pickup;
+        })
+        .sort((a, b) => new Date(b.date_created || 0).getTime() - new Date(a.date_created || 0).getTime());
 
       res.setHeader('Cache-Control', 'private, max-age=0, no-cache, no-store, must-revalidate');
-      return res.status(200).json({ success: true, orders: filteredOrders });
+      return res.status(200).json({
+        success: true,
+        orders: filteredOrders,
+        total: filteredOrders.length,
+        source: 'woocommerce',
+      });
     } catch (error) {
       console.error('WooCommerce Pickup Orders Error:', error.response?.data || error.message);
-      return sendApiError(res, 502, `Kan afhaalbestellingen niet ophalen uit WooCommerce: ${error.response?.data?.message || error.message || 'onbekende fout'}`);
+      return sendApiError(
+        res,
+        502,
+        `Kan afhaalbestellingen niet ophalen uit WooCommerce: ${error.response?.data?.message || error.message || 'onbekende fout'}`
+      );
     }
   }
 
@@ -100,17 +129,21 @@ export default async function handler(req, res) {
       if (!order_id) return sendApiError(res, 400, 'Order ID is verplicht.');
 
       const response = await api.put(`orders/${order_id}`, {
-        status: status || 'completed'
+        status: status || 'completed',
       });
 
       return res.status(200).json({
         success: true,
         order: response.data,
-        message: 'Afhaalbestelling succesvol afgerond!'
+        message: 'Afhaalbestelling succesvol afgerond!',
       });
     } catch (error) {
       console.error('WooCommerce Update Order Error:', error.response?.data || error.message);
-      return sendApiError(res, 502, `Kon de status van de afhaalbestelling niet bijwerken: ${error.response?.data?.message || error.message || 'onbekende fout'}`);
+      return sendApiError(
+        res,
+        502,
+        `Kon de status van de afhaalbestelling niet bijwerken: ${error.response?.data?.message || error.message || 'onbekende fout'}`
+      );
     }
   }
 
