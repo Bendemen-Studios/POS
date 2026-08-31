@@ -38,6 +38,18 @@ if [ ! -f package.json ]; then
   exit 1
 fi
 
+# POS polling bewust op 5 seconden zetten.
+# Dit houdt de serverstatus en offline-order synchronisatie actueel zonder
+# dat hiervoor handmatig een reload nodig is.
+if grep -q "}, 15000);" pages/index.js; then
+  sed -i '0,/}, 15000);/s//}, 5000);/' pages/index.js
+  echo "🔄 POS status/offline-order polling ingesteld op 5 seconden."
+elif grep -q "}, 5000);" pages/index.js; then
+  echo "✅ POS polling staat al op 5 seconden."
+else
+  echo "⚠️ POS polling-regel niet gevonden; bestaande code blijft ongewijzigd."
+fi
+
 # Next.js 14 probeert een incomplete/out-of-sync lockfile te patchen voor SWC.
 # Daarom maken we op de VPS eerst een volledig schone dependency-installatie.
 rm -rf node_modules package-lock.json
