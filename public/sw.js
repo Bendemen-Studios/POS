@@ -1,7 +1,7 @@
-const CACHE_NAME = 'bendemen-pos-v9';
+const CACHE_NAME = 'bendemen-pos-v10';
 const OFFLINE_URL = '/login';
 const NAVIGATION_TIMEOUT = 3500;
-const API_TIMEOUT = 4000;
+const API_TIMEOUT = 10000;
 const CHECKOUT_TIMEOUT = 10000;
 
 const APP_SHELL = [
@@ -14,13 +14,16 @@ const APP_SHELL = [
   '/favicon.ico',
 ];
 
-// Alleen kleine, snel ladende GET-data valt terug op cache.
-// Producten en afhaalorders mogen NIET door de 4s service-worker timeout,
-// omdat deze endpoints batch/paginering gebruiken.
+// GET-data die in Admin offline als alleen-lezen beschikbaar mag zijn.
 const CACHEABLE_API_PREFIXES = [
   '/api/auth/store-selection',
-  '/api/woocommerce/customers',
   '/api/admin/users',
+  '/api/admin/store',
+  '/api/woocommerce/products',
+  '/api/woocommerce/customers',
+  '/api/woocommerce/orders',
+  '/api/woocommerce/pickup-order',
+  '/api/sumup/proxy',
 ];
 
 function timeoutFetch(request, timeout = NAVIGATION_TIMEOUT) {
@@ -111,13 +114,11 @@ self.addEventListener('fetch', (event) => {
 
   if (url.origin !== self.location.origin) return;
 
-  // Status is altijd netwerk-only.
   if (request.method === 'GET' && url.pathname === '/api/admin/store') {
     event.respondWith(handleServerStatusRequest(request));
     return;
   }
 
-  // Checkout is altijd netwerk-first en krijgt extra tijd.
   if (request.method === 'POST' && url.pathname === '/api/woocommerce/checkout') {
     event.respondWith(handleCheckoutRequest(request));
     return;
@@ -125,22 +126,24 @@ self.addEventListener('fetch', (event) => {
 
   if (request.method !== 'GET') return;
 
-  // Producten en pickup-orders vallen hier bewust NIET onder: laat hun echte
-  // response volledig door, zodat batch/paginering langer dan 4s mag duren.
+  // Admin/POS data is network-first, with cached data available only when
+  // the real server cannot be reached. This makes Admin usable offline but
+  // never turns stale data into a write source.
+  if (url.pathname.startsWith('/api/') && isCacheableApi(url.pathname)) {
+    event.respondWith((async () => {
+      const fresh = await refreshApiCache(request);
+      if (fresh) return fresh;
+      const cached = await caches.match(request);
+      if (cached) return cached;
+      return new Response(
+        JSON.stringify({ success: false, offline: true, error: 'Offline en geen lokale cache beschikbaar.' }),
+        { status: 503, headers: { 'Content-Type': 'application/json' } }
+      );
+    })());
+    return;
+  }
+
   if (url.pathname.startsWith('/api/')) {
-    if (isCacheableApi(url.pathname)) {
-      event.respondWith((async () => {
-        const fresh = await refreshApiCache(request);
-        if (fresh) return fresh;
-        const cached = await caches.match(request);
-        if (cached) return cached;
-        return new Response(
-          JSON.stringify({ success: false, offline: true, error: 'Offline en geen lokale cache beschikbaar.' }),
-          { status: 503, headers: { 'Content-Type': 'application/json' } }
-        );
-      })());
-      return;
-    }
     event.respondWith(fetch(request));
     return;
   }
