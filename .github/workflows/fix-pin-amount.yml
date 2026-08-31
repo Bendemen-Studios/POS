@@ -1,0 +1,41 @@
+name: One-time PIN amount UI fix
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Update manual PIN confirmation amount
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('pages/index.js')
+          s = p.read_text()
+          old = '<p className="text-xs text-gray-600 mb-5">Bevestig dat de betaling van €{finalTotal.toFixed(2)} op de PIN-terminal succesvol is uitgevoerd.</p>'
+          new = '''<div className="bg-gray-100 border-2 border-black rounded-xl p-4 mb-4 shadow-sm"><div className="text-xs font-extrabold uppercase tracking-widest text-gray-500 mb-1">TE BETALEN</div><div className="text-5xl font-black tracking-tight text-black leading-none">€{finalTotal.toFixed(2)}</div></div><p className="text-xs text-gray-600 mb-5">Bevestig dat dit bedrag op de PIN-terminal succesvol is betaald.</p>'''
+          if old not in s:
+              print('PIN amount UI already updated or source differs; nothing to do.')
+          else:
+              p.write_text(s.replace(old, new, 1))
+          PY
+
+      - name: Commit and push, then remove one-time workflow
+        run: |
+          if git diff --quiet -- pages/index.js; then
+            echo 'No change needed.'
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pages/index.js .github/workflows/fix-pin-amount.yml
+          git rm .github/workflows/fix-pin-amount.yml
+          git commit -m "ui: maak bedrag handmatige PIN-betaling duidelijker"
+          git push origin main
