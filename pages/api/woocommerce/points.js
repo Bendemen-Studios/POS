@@ -8,14 +8,9 @@ export default async function handler(req, res) {
 
   try {
     const customerId = req.method === 'GET' ? req.query.customerId : req.body?.customerId;
-    const { orderTotal, pointsToRedeem, action } = req.body || {};
 
-    // Calculeren van verdiende punten heeft geen klantbalans nodig.
-    if (req.method === 'POST' && action === 'calculate_earned') {
-      const pointsEarned = Math.floor(parseFloat(orderTotal) || 0);
-      return res.status(200).json({ success: true, pointsEarned });
-    }
-
+    // Een klant is altijd verplicht voor de puntencheck: we moeten
+    // de actuele WooCommerce-puntenbalans van die specifieke klant ophalen.
     if (!customerId) {
       return res.status(400).json({
         success: false,
@@ -32,11 +27,25 @@ export default async function handler(req, res) {
       });
     }
 
+    const { orderTotal, pointsToRedeem, action } = req.body || {};
+
+    if (action === 'calculate_earned') {
+      const pointsEarned = Math.floor(parseFloat(orderTotal) || 0);
+      return res.status(200).json({
+        success: true,
+        pointsEarned,
+        pointsBalance: currentPoints,
+      });
+    }
+
     if (action === 'redeem') {
       const redeemPoints = parseInt(pointsToRedeem, 10) || 0;
 
       if (redeemPoints <= 0) {
-        return res.status(400).json({ success: false, message: 'Voer minimaal 1 punt in om in te wisselen.' });
+        return res.status(400).json({
+          success: false,
+          message: 'Voer minimaal 1 punt in om in te wisselen.'
+        });
       }
 
       if (redeemPoints > currentPoints) {
@@ -60,9 +69,15 @@ export default async function handler(req, res) {
       });
     }
 
-    return res.status(400).json({ success: false, message: 'Onbekende actie opgegeven.' });
+    return res.status(400).json({
+      success: false,
+      message: 'Onbekende actie opgegeven.'
+    });
   } catch (error) {
     console.error("Points API Error:", error);
-    return res.status(500).json({ success: false, error: error.message });
+    return res.status(500).json({
+      success: false,
+      error: error.message
+    });
   }
 }
