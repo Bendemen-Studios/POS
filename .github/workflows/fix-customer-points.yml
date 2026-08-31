@@ -15,17 +15,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Patch customer/points integration
-        shell: python
+      - name: Patch customer sync and offline points
+        shell: bash
         run: |
+          python3 <<'PY'
           from pathlib import Path
-          import re
 
-          p = Path('pages/index.js')
-          text = p.read_text(encoding='utf-8')
+          path = Path('pages/index.js')
+          text = path.read_text(encoding='utf-8')
 
           def replace_arrow_function(src, name, replacement):
-              marker = f"const {name}="
+              marker = f'const {name}='
               start = src.find(marker)
               if start < 0:
                   raise SystemExit(f'{marker} not found')
@@ -41,7 +41,7 @@ jobs:
                   if quote:
                       if escape:
                           escape = False
-                      elif ch == '\\':
+                      elif ch == '\\\\':
                           escape = True
                       elif ch == quote:
                           quote = None
@@ -60,48 +60,27 @@ jobs:
                   i += 1
               raise SystemExit(f'could not parse {name}')
 
-          # Customer fetch: always preserve/use the local customer cache and refresh online.
-          old = "const fetchCustomers=async()=>{try{const res=await fetchWithServerCheck('/api/woocommerce/customers',{},30000);const data=await res.json();if(data.success&&Array.isArray(data.customers)){setCustomers(data.customers);localStorage.setItem('pos_cached_customers',JSON.stringify(data.customers));}}catch(err){console.error('Fout bij ophalen klanten:',err);}};"
-          new = """const fetchCustomers=async()=>{\n            const cached=(()=>{try{const raw=localStorage.getItem('pos_cached_customers');const value=raw?JSON.parse(raw):[];return Array.isArray(value)?value:[];}catch(_){return [];}})();\n            if(cached.length)setCustomers(cached);\n            if(typeof navigator!=='undefined'&&navigator.onLine===false)return;\n            try{\n              const res=await fetchWithServerCheck('/api/woocommerce/customers',{},30000);\n              const data=await res.json();\n              if(data.success&&Array.isArray(data.customers)){\n                setCustomers(data.customers);\n                localStorage.setItem('pos_cached_customers',JSON.stringify(data.customers));\n              }\n            }catch(err){console.warn('[CUSTOMERS] Online refresh mislukt; lokale cache blijft beschikbaar.',err.message);}\n          };"""
-          if old not in text:
-              raise SystemExit('fetchCustomers block not found')
-          text = text.replace(old, new, 1)
+          old_customers = """const fetchCustomers=async()=>{try{const res=await fetchWithServerCheck('/api/woocommerce/customers',{},30000);const data=await res.json();if(data.success&&Array.isArray(data.customers)){setCustomers(data.customers);localStorage.setItem('pos_cached_customers',JSON.stringify(data.customers));}}catch(err){console.error('Fout bij ophalen klanten:',err);}};"""
+          new_customers = """const fetchCustomers=async()=>{\n            let cached=[];\n            try{const raw=localStorage.getItem('pos_cached_customers');const parsed=raw?JSON.parse(raw):[];cached=Array.isArray(parsed)?parsed:[];}catch(_){}\n            if(cached.length)setCustomers(cached);\n            if(typeof navigator!=='undefined'&&navigator.onLine===false)return;\n            try{\n              const res=await fetchWithServerCheck('/api/woocommerce/customers',{},30000);\n              const data=await res.json();\n              if(data.success&&Array.isArray(data.customers)){\n                setCustomers(data.customers);\n                localStorage.setItem('pos_cached_customers',JSON.stringify(data.customers));\n              }\n            }catch(err){console.warn('[CUSTOMERS] Online refresh mislukt; lokale klantencache blijft behouden.',err.message);}\n          };"""
+          if old_customers in text:
+              text = text.replace(old_customers, new_customers, 1)
+          elif "const fetchCustomers=async()=>{" not in text:
+              raise SystemExit('fetchCustomers not found')
 
-          replacement = """const handleRedeemPoints=async()=>{\n            if(!selectedCustomer){alert('Koppel eerst een klant voordat je punten kunt inwisselen.');return;}\n            const requested=Math.max(0,parseInt(pointsToRedeem,10)||0);\n            if(requested<=0){alert('Voer minimaal 1 punt in om in te wisselen.');return;}\n            const cachedBalance=Math.max(0,parseInt(selectedCustomer.points_balance ?? selectedCustomer.points ?? 0,10)||0);\n            const applyLocalRedemption=()=>{\n              if(requested>cachedBalance){alert(`Onvoldoende punten. Deze klant heeft ${cachedBalance} punten.`);return false;}\n              const discount=Number((requested*0.05).toFixed(2));\n              const updated={...selectedCustomer,points_balance:cachedBalance-requested};\n              setSelectedCustomer(updated);\n              setRedeemedDiscount(discount);\n              setPointsToRedeem(requested);\n              localStorage.setItem('pos_selected_customer',JSON.stringify(updated));\n              setCheckoutStatus({success:true,message:`✅ ${requested} punten ingewisseld (€${discount.toFixed(2)} korting).`});\n              return true;\n            };\n            if(typeof navigator!=='undefined'&&navigator.onLine===false){applyLocalRedemption();return;}\n            try{\n              const res=await fetchWithServerCheck('/api/woocommerce/points',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({customerId:selectedCustomer.id,action:'redeem',pointsToRedeem:requested,orderTotal:finalTotal})},5000);\n              const data=await res.json();\n              if(res.ok&&data.success){\n                const balance=Math.max(0,parseInt(data.pointsBalance,10)||0);\n                const updated={...selectedCustomer,points_balance:balance};\n                setSelectedCustomer(updated);\n                setRedeemedDiscount(parseFloat(data.discountAmount)||0);\n                setPointsToRedeem(requested);\n                localStorage.setItem('pos_selected_customer',JSON.stringify(updated));\n              }else if((res.status===502||res.status===503)||data.offline){applyLocalRedemption();}else{alert(data.message||data.error||'Punten konden niet worden ingewisseld.');}\n            }catch(err){\n              applyLocalRedemption();\n            }\n          };"""
+          replacement = """const handleRedeemPoints=async()=>{\n            if(!selectedCustomer){alert('Koppel eerst een klant voordat je punten kunt inwisselen.');return;}\n            const requested=Math.max(0,parseInt(pointsToRedeem,10)||0);\n            if(requested<=0){alert('Voer minimaal 1 punt in om in te wisselen.');return;}\n            const cachedBalance=Math.max(0,parseInt(selectedCustomer.points_balance ?? selectedCustomer.points ?? 0,10)||0);\n            const applyLocal=()=>{\n              if(requested>cachedBalance){alert(`Onvoldoende punten. Deze klant heeft ${cachedBalance} punten.`);return;}\n              const discount=Number((requested*0.05).toFixed(2));\n              const updated={...selectedCustomer,points_balance:cachedBalance-requested};\n              setSelectedCustomer(updated);\n              setRedeemedDiscount(discount);\n              setPointsToRedeem(requested);\n              try{localStorage.setItem('pos_selected_customer',JSON.stringify(updated));}catch(_){}\n              try{\n                const all=JSON.parse(localStorage.getItem('pos_cached_customers')||'[]');\n                if(Array.isArray(all)){\n                  const next=all.map(c=>String(c.id)===String(updated.id)?{...c,points_balance:updated.points_balance}:c);\n                  localStorage.setItem('pos_cached_customers',JSON.stringify(next));\n                  setCustomers(next);\n                }\n              }catch(_){}\n              return true;\n            };\n            if(typeof navigator!=='undefined'&&navigator.onLine===false){applyLocal();return;}\n            try{\n              const res=await fetchWithServerCheck('/api/woocommerce/points',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({customerId:selectedCustomer.id,pointsToRedeem:requested,action:'redeem',orderTotal:finalTotal})},5000);\n              const data=await res.json();\n              if(res.ok&&data.success){\n                const balance=Math.max(0,parseInt(data.pointsBalance,10)||0);\n                const updated={...selectedCustomer,points_balance:balance};\n                setSelectedCustomer(updated);\n                setRedeemedDiscount(parseFloat(data.discountAmount)||0);\n                setPointsToRedeem(requested);\n                localStorage.setItem('pos_selected_customer',JSON.stringify(updated));\n                try{\n                  const all=JSON.parse(localStorage.getItem('pos_cached_customers')||'[]');\n                  if(Array.isArray(all)){const next=all.map(c=>String(c.id)===String(updated.id)?{...c,points_balance:balance}:c);localStorage.setItem('pos_cached_customers',JSON.stringify(next));setCustomers(next);}\n                }catch(_){}\n              }else if(data?.offline||res.status===502||res.status===503){applyLocal();}\n              else{alert(data.message||data.error||'Punten konden niet worden ingewisseld.');}\n            }catch(_){applyLocal();}\n          };"""
           text = replace_arrow_function(text, 'handleRedeemPoints', replacement)
+          path.write_text(text, encoding='utf-8')
 
-          # Keep the offline-selected customer balance visible immediately after a cache refresh.
-          marker = "const checkOfflineQueue=()=>{const q=JSON.parse(localStorage.getItem('pos_offline_orders')||'[]');setPendingOfflineCount(q.length);};"
-          bridge = marker + "\n  useEffect(()=>{\n    const onLocalCustomerUpdate=()=>{try{const raw=localStorage.getItem('pos_selected_customer');if(raw)setSelectedCustomer(JSON.parse(raw));}catch(_){}};\n    window.addEventListener('pos:customer-updated',onLocalCustomerUpdate);\n    return()=>window.removeEventListener('pos:customer-updated',onLocalCustomerUpdate);\n  },[]);"
-          if marker in text and 'pos:customer-updated' not in text:
-              text = text.replace(marker, bridge, 1)
+          # Remove this temporary patcher before committing.
+          Path('.github/workflows/fix-customer-points.yml').unlink(missing_ok=True)
+          PY
 
-          p.write_text(text, encoding='utf-8')
-
-          # Clean temporary workflow on this run.
-          wf = Path('.github/workflows/fix-customer-points.yml')
-          wf.unlink(missing_ok=True)
-
-      - name: Update service worker for points cache
-        shell: python
-        run: |
-          from pathlib import Path
-          p=Path('public/sw.js')
-          text=p.read_text(encoding='utf-8')
-          text=text.replace("const CACHE_NAME = 'bendemen-pos-v4';", "const CACHE_NAME = 'bendemen-pos-v5';", 1)
-          old="  '/api/woocommerce/pickup-order',\n"
-          new="  '/api/woocommerce/pickup-order',\n  '/api/woocommerce/points',\n"
-          if "'/api/woocommerce/points'" not in text:
-              if old not in text: raise SystemExit('pickup cache marker not found')
-              text=text.replace(old,new,1)
-          p.write_text(text,encoding='utf-8')
-
-      - name: Commit patched files
+      - name: Commit patched POS
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add pages/index.js public/sw.js .github/workflows/fix-customer-points.yml
-          git diff --cached --quiet && exit 0
+          git add pages/index.js .github/workflows/fix-customer-points.yml
+          if git diff --cached --quiet; then exit 0; fi
           git commit -m "fix: offline customer points integration"
           git push
