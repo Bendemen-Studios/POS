@@ -1,0 +1,115 @@
+name: Patch admin offline cache view
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.pull_request.head.ref == 'fix/admin-offline-cache-view'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch admin offline loading and SumUp cache
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          p = Path('pages/admin.js')
+          s = p.read_text(encoding='utf-8')
+
+          old = """  const fetchAllData = async () => {
+    setLoading(true);
+    await Promise.all([
+      fetchUsers(),
+      fetchStores(),
+      fetchOrders(),
+      fetchSumUpReaders()
+    ]);
+    
+    const savedProducts = localStorage.getItem('admin_products');
+    const savedPosProducts = localStorage.getItem('pos_cached_products');
+    const adminCount = savedProducts ? JSON.parse(savedProducts).length : 0;
+    const posCount = savedPosProducts ? JSON.parse(savedPosProducts).length : 0;
+    if (adminCount === 0 && posCount === 0) {
+      await fetchProductsSilently();
+    }
+    setLoading(false);
+  };"""
+          new = """  const fetchAllData = async () => {
+    setLoading(true);
+    try {
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 2500);
+      try {
+        const health = await fetch('/api/admin/store?healthcheck=1&_admin=' + Date.now(), { cache: 'no-store', signal: controller.signal });
+        if (!health.ok) return;
+      } catch (_) {
+        return;
+      } finally {
+        clearTimeout(timer);
+      }
+
+      await Promise.all([fetchUsers(), fetchStores(), fetchOrders(), fetchSumUpReaders()]);
+      const savedProducts = localStorage.getItem('admin_products');
+      const savedPosProducts = localStorage.getItem('pos_cached_products');
+      const adminCount = savedProducts ? JSON.parse(savedProducts).length : 0;
+      const posCount = savedPosProducts ? JSON.parse(savedPosProducts).length : 0;
+      if (adminCount === 0 && posCount === 0) await fetchProductsSilently();
+    } finally {
+      setLoading(false);
+    }
+  };"""
+          if old not in s: raise SystemExit('fetchAllData block not found')
+          s = s.replace(old, new, 1)
+
+          old = """  const fetchSumUpReaders = async () => {
+    try {
+      const res = await fetch('/api/sumup/proxy?action=readers');
+      const data = await res.json();
+      if (data.success) {
+        setSumUpReaders(data.readers || []);
+      }
+    } catch (err) {
+      console.error('Kan geen SumUp apparaten ophalen via proxy:', err);
+    }
+  };"""
+          new = """  const fetchSumUpReaders = async () => {
+    try {
+      const cached = localStorage.getItem('admin_cached_sumup_readers');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed)) setSumUpReaders(parsed);
+      }
+    } catch (_) {}
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+    try {
+      const res = await fetch('/api/sumup/proxy?action=readers', { cache: 'no-store' });
+      const data = await res.json();
+      if (data.success) {
+        const readers = Array.isArray(data.readers) ? data.readers : [];
+        setSumUpReaders(readers);
+        localStorage.setItem('admin_cached_sumup_readers', JSON.stringify(readers));
+      }
+    } catch (_) {}
+  };"""
+          if old not in s: raise SystemExit('fetchSumUpReaders block not found')
+          s = s.replace(old, new, 1)
+
+          p.write_text(s, encoding='utf-8')
+          Path('.github/workflows/pr-admin-offline-cache.yml').unlink(missing_ok=True)
+          PY
+
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pages/admin.js .github/workflows/pr-admin-offline-cache.yml
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "fix: show cached admin data offline"
+          git push
