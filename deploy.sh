@@ -14,19 +14,15 @@ fi
 
 cd "$APP_DIR"
 
-# Zorg dat git en Node/npm beschikbaar zijn voordat we wijzigingen uitvoeren.
 command -v git >/dev/null || { echo "❌ git ontbreekt."; exit 1; }
 command -v npm >/dev/null || { echo "❌ npm ontbreekt."; exit 1; }
 command -v pm2 >/dev/null || { echo "❌ pm2 ontbreekt."; exit 1; }
 
-# Het script zelf kan na git reset worden vervangen; maak de lokale kopie
-# daarom opnieuw uitvoerbaar nadat de repository is bijgewerkt.
 git fetch --prune origin "$BRANCH"
 git reset --hard "origin/$BRANCH"
 git clean -fd -e .env -e .env.local
 chmod +x "$APP_DIR/deploy.sh" 2>/dev/null || true
 
-# Bewaar productieconfiguratie altijd buiten Git.
 if [ ! -f .env ]; then
   if [ -f .env.example ]; then
     cp .env.example .env
@@ -39,24 +35,21 @@ if [ ! -f .env ]; then
   fi
 fi
 
-# Controleer package.json voordat npm draait.
 if [ ! -f package.json ]; then
   echo "❌ package.json ontbreekt na git update. Deployment gestopt."
   exit 1
 fi
 
-# npm ci is reproduceerbaar wanneer package-lock aanwezig is.
-if [ -f package-lock.json ]; then
-  npm ci --omit=dev
-else
-  npm install --omit=dev
-fi
+# package-lock wordt bewust niet uit Git gebruikt. De vorige lockfile was
+# incompleet en liet Next.js 14 de ontbrekende SWC dependencies patchen,
+# waarna de build faalde. Maak daarom op de VPS altijd een verse lockfile.
+rm -f package-lock.json
+npm install --omit=dev --no-audit --no-fund
 
-# Verwijder een oude Next build zodat geen oude chunks/404's kunnen blijven hangen.
+# Volledig nieuwe Next build zodat oude chunks/404's niet blijven hangen.
 rm -rf .next
 npm run build
 
-# Start/restart PM2 met de actuele build en productieomgeving.
 if pm2 describe "$APP_NAME" >/dev/null 2>&1; then
   pm2 restart "$APP_NAME" --update-env
 else
@@ -69,7 +62,6 @@ fi
 
 pm2 save
 
-# Controleer dat de applicatie daadwerkelijk online is.
 sleep 2
 if ! pm2 describe "$APP_NAME" | grep -q "online"; then
   echo "❌ PM2 kon $APP_NAME niet online krijgen."
