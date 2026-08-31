@@ -5,6 +5,7 @@ APP_DIR="/var/www/bendemen-pos"
 APP_NAME="bendemen-pos"
 BRANCH="main"
 REPO_URL="https://github.com/Bendemen-Studios/POS.git"
+ENV_BACKUP="/tmp/bendemen-pos-env.$$.backup"
 
 printf '\n🚀 BENDEMEN POS deployment starten...\n'
 
@@ -19,18 +20,34 @@ command -v git >/dev/null || { echo "❌ git ontbreekt."; exit 1; }
 command -v npm >/dev/null || { echo "❌ npm ontbreekt."; exit 1; }
 command -v pm2 >/dev/null || { echo "❌ pm2 ontbreekt."; exit 1; }
 
+# Bescherm de VPS-specifieke environment-bestanden tegen git reset/clean.
+# Ze worden nooit naar GitHub gepusht of verwijderd door deze deployment.
+for env_file in .env .env.local; do
+  if [ -f "$env_file" ]; then
+    cp -f "$env_file" "$ENV_BACKUP.$(basename "$env_file")"
+  fi
+done
+
 # Zorg dat deze VPS altijd de juiste Bendemen-Studios repository gebruikt.
 git remote set-url origin "$REPO_URL"
 echo "📦 Repository: $REPO_URL"
 
-# Haal de actuele main op. Lokale wijzigingen mogen worden overschreven:
-# de GitHub main branch is de bron van waarheid voor deze deployment.
+# GitHub main is de bron van waarheid. Forceer de lokale werkboom naar main,
+# ook wanneer een vorige deployment het lokale deploy.sh heeft aangepast.
 git fetch --prune origin "$BRANCH"
-git checkout -B "$BRANCH" "origin/$BRANCH"
 git reset --hard "origin/$BRANCH"
 git clean -fd -e .env -e .env.local
-chmod +x "$APP_DIR/deploy.sh" 2>/dev/null || true
 
+# Herstel beschermde environment-bestanden indien git clean/reset ze raakte.
+for env_file in .env .env.local; do
+  backup="$ENV_BACKUP.$(basename "$env_file")"
+  if [ -f "$backup" ]; then
+    cp -f "$backup" "$env_file"
+    rm -f "$backup"
+  fi
+done
+
+chmod +x "$APP_DIR/deploy.sh" 2>/dev/null || true
 echo "✅ Code bijgewerkt naar $(git rev-parse --short HEAD)"
 
 if [ ! -f package.json ]; then
@@ -38,20 +55,7 @@ if [ ! -f package.json ]; then
   exit 1
 fi
 
-# POS polling bewust op 5 seconden zetten.
-# Dit houdt de serverstatus en offline-order synchronisatie actueel zonder
-# dat hiervoor handmatig een reload nodig is.
-if grep -q "}, 15000);" pages/index.js; then
-  sed -i '0,/}, 15000);/s//}, 5000);/' pages/index.js
-  echo "🔄 POS status/offline-order polling ingesteld op 5 seconden."
-elif grep -q "}, 5000);" pages/index.js; then
-  echo "✅ POS polling staat al op 5 seconden."
-else
-  echo "⚠️ POS polling-regel niet gevonden; bestaande code blijft ongewijzigd."
-fi
-
-# Next.js 14 probeert een incomplete/out-of-sync lockfile te patchen voor SWC.
-# Daarom maken we op de VPS eerst een volledig schone dependency-installatie.
+# Volledig schone dependency-installatie voorkomt Next.js/SWC lockfile-corruptie.
 rm -rf node_modules package-lock.json
 npm cache verify >/dev/null 2>&1 || true
 npm install --include=dev --no-audit --no-fund --package-lock=true
