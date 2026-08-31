@@ -9,12 +9,10 @@ export default async function handler(req, res) {
   try {
     const customerId = req.method === 'GET' ? req.query.customerId : req.body?.customerId;
 
-    // Een klant is altijd verplicht voor de puntencheck: we moeten
-    // de actuele WooCommerce-puntenbalans van die specifieke klant ophalen.
-    if (!customerId) {
+    if (!customerId || !/^\d+$/.test(String(customerId))) {
       return res.status(400).json({
         success: false,
-        message: 'Koppel eerst een klant voordat je punten kunt gebruiken.'
+        message: 'Koppel eerst een geldige klant voordat je punten kunt gebruiken.',
       });
     }
 
@@ -38,18 +36,14 @@ export default async function handler(req, res) {
       });
     }
 
-    if (action === 'calculate_earned') {
-      const pointsEarned = Math.floor(parseFloat(orderTotal) || 0);
-      return res.status(200).json({ success: true, pointsEarned, pointsBalance: currentPoints });
-    }
-
     if (action === 'redeem') {
-      const redeemPoints = parseInt(pointsToRedeem, 10) || 0;
+      const redeemPoints = Math.max(0, parseInt(pointsToRedeem, 10) || 0);
 
       if (redeemPoints <= 0) {
         return res.status(400).json({
           success: false,
-          message: 'Voer minimaal 1 punt in om in te wisselen.'
+          message: 'Voer minimaal 1 punt in om in te wisselen.',
+          pointsBalance: currentPoints,
         });
       }
 
@@ -69,20 +63,21 @@ export default async function handler(req, res) {
         pointsBalance: Math.max(0, currentPoints - redeemPoints),
         feeLines: [{
           name: `Punteninwisseling (${redeemPoints} punten)`,
-          total: (-discountValue).toFixed(2)
-        }]
+          total: (-discountValue).toFixed(2),
+        }],
       });
     }
 
     return res.status(400).json({
       success: false,
-      message: 'Onbekende actie opgegeven.'
+      message: 'Onbekende actie opgegeven.',
+      pointsBalance: currentPoints,
     });
   } catch (error) {
-    console.error("Points API Error:", error);
-    return res.status(500).json({
+    console.error('Points API Error:', error);
+    return res.status(502).json({
       success: false,
-      error: error.message
+      error: error.message || 'Fout bij ophalen of verwerken van punten.',
     });
   }
 }
