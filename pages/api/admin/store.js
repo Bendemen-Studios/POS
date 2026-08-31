@@ -3,6 +3,12 @@ import db from '../../../lib/db';
 export default async function handler(req, res) {
   const { method } = req;
 
+  // Lightweight probe used by the POS to determine whether the VPS itself
+  // is reachable. It deliberately does not touch MySQL or WooCommerce.
+  if (method === 'GET' && (req.query.healthcheck === '1' || req.query._pos_health === '1')) {
+    return res.status(200).json({ success: true, online: true, timestamp: Date.now() });
+  }
+
   if (method === 'GET') {
     try {
       const [rows] = await db.query('SELECT * FROM stores');
@@ -31,7 +37,7 @@ export default async function handler(req, res) {
 
   if (method === 'POST') {
     const { store_name, address, receipt_header, receipt_footer, pickup_id, terminal_id, kvk, btw, payment_methods } = req.body;
-    
+
     if (!store_name || !store_name.trim()) {
       return res.status(400).json({ success: false, error: 'De filiaalnaam (store_name) is verplicht.' });
     }
@@ -98,5 +104,5 @@ export default async function handler(req, res) {
   }
 
   res.setHeader('Allow', ['GET', 'POST', 'PUT', 'DELETE']);
-  res.status(405).end(`Method ${method} Not Allowed`);
+  return res.status(405).end(`Method ${method} Not Allowed`);
 }
