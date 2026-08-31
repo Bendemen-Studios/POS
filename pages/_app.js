@@ -68,14 +68,89 @@ async function syncProductsToCacheAndNotify() {
     localStorage.setItem('pos_cached_products_version', PRODUCT_CACHE_VERSION);
 
     const changed = previousProducts !== serializedProducts;
-    if (changed) {
-      window.dispatchEvent(new CustomEvent('pos:products-updated'));
-    }
+    if (changed) window.dispatchEvent(new CustomEvent('pos:products-updated'));
     return changed;
   } catch (error) {
     console.warn('[PRODUCT SYNC] tijdelijke syncfout:', error.message);
     return false;
   }
+}
+
+function getCachedCustomerForPoints(customerId) {
+  try {
+    const selectedRaw = localStorage.getItem('pos_selected_customer');
+    const selected = selectedRaw ? JSON.parse(selectedRaw) : null;
+    if (selected && String(selected.id) === String(customerId)) return selected;
+
+    const raw = localStorage.getItem('pos_cached_customers');
+    const customers = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(customers)) return null;
+    return customers.find((customer) => String(customer?.id) === String(customerId)) || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function updateCachedCustomerPoints(customerId, pointsBalance) {
+  try {
+    const raw = localStorage.getItem('pos_cached_customers');
+    const customers = raw ? JSON.parse(raw) : [];
+    if (Array.isArray(customers)) {
+      const updated = customers.map((customer) => String(customer?.id) === String(customerId)
+        ? { ...customer, points_balance: pointsBalance }
+        : customer);
+      localStorage.setItem('pos_cached_customers', JSON.stringify(updated));
+    }
+
+    const selectedRaw = localStorage.getItem('pos_selected_customer');
+    const selected = selectedRaw ? JSON.parse(selectedRaw) : null;
+    if (selected && String(selected.id) === String(customerId)) {
+      localStorage.setItem('pos_selected_customer', JSON.stringify({ ...selected, points_balance: pointsBalance }));
+    }
+
+    window.dispatchEvent(new CustomEvent('pos:customer-points-updated', {
+      detail: { customerId, pointsBalance },
+    }));
+  } catch (_) {}
+}
+
+function buildOfflinePointsResponse(body) {
+  const customerId = body?.customerId;
+  if (!customerId || !/^\d+$/.test(String(customerId))) {
+    return jsonResponse({ success: false, message: 'Koppel eerst een geldige klant voordat je punten kunt gebruiken.' }, 400);
+  }
+
+  const customer = getCachedCustomerForPoints(customerId);
+  const balance = Math.max(0, parseInt(customer?.points_balance ?? customer?.points ?? 0, 10) || 0);
+
+  if (body?.action === 'redeem') {
+    const requested = Math.max(0, parseInt(body?.pointsToRedeem, 10) || 0);
+    if (requested <= 0) return jsonResponse({ success: false, message: 'Voer minimaal 1 punt in om in te wisselen.', pointsBalance: balance }, 400);
+    if (requested > balance) return jsonResponse({ success: false, message: `Onvoldoende punten. Deze klant heeft ${balance} punten.`, pointsBalance: balance }, 400);
+
+    const pointsBalance = Math.max(0, balance - requested);
+    const discountAmount = (requested * 0.05).toFixed(2);
+    updateCachedCustomerPoints(customerId, pointsBalance);
+    return jsonResponse({
+      success: true,
+      offline: true,
+      pointsRedeemed: requested,
+      discountAmount,
+      pointsBalance,
+      feeLines: [{ name: `Punteninwisseling (${requested} punten)`, total: `-${discountAmount}` }],
+    });
+  }
+
+  if (body?.action === 'calculate_earned') {
+    return jsonResponse({
+      success: true,
+      offline: true,
+      pointsEarned: Math.floor(parseFloat(body?.orderTotal) || 0),
+      pointsBalance: balance,
+    });
+  }
+
+  return jsonResponse({ success: true, offline: true, pointsBalance: balance });
 }
 
 function installSumUpGatewayFetch() {
@@ -88,6 +163,31 @@ function installSumUpGatewayFetch() {
     if (!rawUrl) return originalFetch(input, init);
     let url;
     try { url = new URL(rawUrl, window.location.origin); } catch { return originalFetch(input, init); }
+
+    // Customer points: online blijft server-authoritative; offline wordt
+    // direct uit de klantencache afgehandeld zodat punten niet blijven laden.
+    if (url.pathname === '/api/woocommerce/points') {
+      const method = (init?.method || 'GET').toUpperCase();
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        let body = {};
+        try { body = typeof init.body === 'string' ? JSON.parse(init.body) : {}; } catch (_) {}
+        if (method === 'POST') return buildOfflinePointsResponse(body);
+        const customer = getCachedCustomerForPoints(url.searchParams.get('customerId'));
+        const pointsBalance = Math.max(0, parseInt(customer?.points_balance ?? customer?.points ?? 0, 10) || 0);
+        return jsonResponse({ success: true, offline: true, pointsBalance });
+      }
+
+      try {
+        return await originalFetch(input, init);
+      } catch (error) {
+        let body = {};
+        try { body = typeof init.body === 'string' ? JSON.parse(init.body) : {}; } catch (_) {}
+        if (method === 'POST') return buildOfflinePointsResponse(body);
+        const customer = getCachedCustomerForPoints(url.searchParams.get('customerId'));
+        const pointsBalance = Math.max(0, parseInt(customer?.points_balance ?? customer?.points ?? 0, 10) || 0);
+        return jsonResponse({ success: true, offline: true, pointsBalance });
+      }
+    }
 
     if (url.pathname !== '/api/sumup/proxy') return originalFetch(input, init);
     if (url.searchParams.get('action') === 'assign-store') return originalFetch(input, init);
@@ -282,8 +382,6 @@ export default function App({ Component, pageProps }) {
       if (changed && !stopped) setProductSyncVersion((version) => version + 1);
     };
 
-    // Directe synchronisatie zodra de POS na login wordt geopend.
-    // Daarna iedere 30 seconden opnieuw.
     sync();
     const interval = window.setInterval(sync, PRODUCT_SYNC_INTERVAL);
     return () => {
