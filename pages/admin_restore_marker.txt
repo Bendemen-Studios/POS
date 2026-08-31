@@ -1,0 +1,1 @@
+Restore admin.js from known-good commit 9120b620.
