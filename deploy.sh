@@ -4,6 +4,7 @@ set -Eeuo pipefail
 APP_DIR="/var/www/bendemen-pos"
 APP_NAME="bendemen-pos"
 BRANCH="main"
+REPO_URL="https://github.com/Bendemen-Studios/POS.git"
 
 printf '\n🚀 BENDEMEN POS deployment starten...\n'
 
@@ -18,10 +19,19 @@ command -v git >/dev/null || { echo "❌ git ontbreekt."; exit 1; }
 command -v npm >/dev/null || { echo "❌ npm ontbreekt."; exit 1; }
 command -v pm2 >/dev/null || { echo "❌ pm2 ontbreekt."; exit 1; }
 
+# Zorg dat deze VPS altijd de juiste Bendemen-Studios repository gebruikt.
+git remote set-url origin "$REPO_URL"
+echo "📦 Repository: $REPO_URL"
+
+# Haal de actuele main op. Lokale wijzigingen mogen worden overschreven:
+# de GitHub main branch is de bron van waarheid voor deze deployment.
 git fetch --prune origin "$BRANCH"
+git checkout -B "$BRANCH" "origin/$BRANCH"
 git reset --hard "origin/$BRANCH"
 git clean -fd -e .env -e .env.local
 chmod +x "$APP_DIR/deploy.sh" 2>/dev/null || true
+
+echo "✅ Code bijgewerkt naar $(git rev-parse --short HEAD)"
 
 if [ ! -f package.json ]; then
   echo "❌ package.json ontbreekt na git update. Deployment gestopt."
@@ -34,8 +44,7 @@ rm -rf node_modules package-lock.json
 npm cache verify >/dev/null 2>&1 || true
 npm install --include=dev --no-audit --no-fund --package-lock=true
 
-# De door npm aangemaakte lockfile is nu compleet genoeg voor Next om direct
-# te bouwen zonder patch-incorrect-lockfile.
+# Volledig schone Next build.
 rm -rf .next
 npm run build
 
