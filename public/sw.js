@@ -1,19 +1,11 @@
-const CACHE_NAME = 'bendemen-pos-v12';
+const CACHE_NAME = 'bendemen-pos-v13';
 const OFFLINE_URL = '/login';
 const NAVIGATION_TIMEOUT = 3500;
 const API_TIMEOUT = 15000;
-const PRODUCT_API_TIMEOUT = 120000;
+const PRODUCT_API_TIMEOUT = 180000;
 const CHECKOUT_TIMEOUT = 10000;
 
-const APP_SHELL = [
-  '/',
-  '/login',
-  '/select-store',
-  '/pickup',
-  '/admin',
-  '/manifest.json',
-  '/favicon.ico',
-];
+const APP_SHELL = ['/', '/login', '/select-store', '/pickup', '/admin', '/manifest.json', '/favicon.ico'];
 
 const CACHEABLE_API_PREFIXES = [
   '/api/auth/store-selection',
@@ -29,8 +21,7 @@ const CACHEABLE_API_PREFIXES = [
 function timeoutFetch(request, timeout = NAVIGATION_TIMEOUT) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
-  return fetch(request, { cache: 'no-store', signal: controller.signal })
-    .finally(() => clearTimeout(timer));
+  return fetch(request, { cache: 'no-store', signal: controller.signal }).finally(() => clearTimeout(timer));
 }
 
 async function cacheResponse(cache, request, response) {
@@ -53,9 +44,7 @@ async function refreshApiCache(request) {
       const cache = await caches.open(CACHE_NAME);
       await cache.put(request, response.clone());
       if (url.pathname === '/api/woocommerce/products') {
-        try {
-          await cache.put(new Request('/api/woocommerce/products'), response.clone());
-        } catch (_) {}
+        try { await cache.put(new Request('/api/woocommerce/products'), response.clone()); } catch (_) {}
       }
     }
     return response;
@@ -84,10 +73,10 @@ async function handleServerStatusRequest(request) {
   try {
     return await timeoutFetch(request, 3000);
   } catch (_) {
-    return new Response(
-      JSON.stringify({ success: false, offline: true, error: 'POS-server offline of niet bereikbaar.' }),
-      { status: 503, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } }
-    );
+    return new Response(JSON.stringify({ success: false, offline: true, error: 'POS-server offline of niet bereikbaar.' }), {
+      status: 503,
+      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+    });
   }
 }
 
@@ -95,10 +84,10 @@ async function handleCheckoutRequest(request) {
   try {
     return await timeoutFetch(request, CHECKOUT_TIMEOUT);
   } catch (_) {
-    return new Response(
-      JSON.stringify({ success: false, offline: true, queued: true, error: 'POS-server offline of niet bereikbaar. De bestelling wordt lokaal opgeslagen.' }),
-      { status: 503, headers: { 'Content-Type': 'application/json' } }
-    );
+    return new Response(JSON.stringify({ success: false, offline: true, queued: true, error: 'POS-server offline of niet bereikbaar. De bestelling wordt lokaal opgeslagen.' }), {
+      status: 503,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
 }
 
@@ -120,9 +109,7 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(
-        keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
-      ))
+      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))))
       .then(() => self.clients.claim())
   );
 });
@@ -160,10 +147,10 @@ self.addEventListener('fetch', (event) => {
       if (fresh) return fresh;
       const cached = await caches.match(request);
       if (cached) return cached;
-      return new Response(
-        JSON.stringify({ success: false, offline: true, error: 'Offline en geen lokale cache beschikbaar.' }),
-        { status: 503, headers: { 'Content-Type': 'application/json' } }
-      );
+      return new Response(JSON.stringify({ success: false, offline: true, error: 'Offline en geen lokale cache beschikbaar.' }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' },
+      });
     })());
     return;
   }
@@ -202,10 +189,9 @@ self.addEventListener('fetch', (event) => {
         if (rootCached) return rootCached;
         const loginCached = await caches.match(OFFLINE_URL);
         if (loginCached) return loginCached;
-        return new Response(
-          '<!doctype html><html><body style="margin:0;background:#fff;display:flex;align-items:center;justify-content:center;height:100vh;font-family:Arial"><div style="text-align:center"><strong>BENDEMEN POS</strong><p>Offline modus wordt gestart...</p></div></body></html>',
-          { headers: { 'Content-Type': 'text/html; charset=utf-8' } }
-        );
+        return new Response('<!doctype html><html><body style="margin:0;background:#fff;display:flex;align-items:center;justify-content:center;height:100vh;font-family:Arial"><div style="text-align:center"><strong>BENDEMEN POS</strong><p>Offline modus wordt gestart...</p></div></body></html>', {
+          headers: { 'Content-Type': 'text/html; charset=utf-8' },
+        });
       }
     })());
     return;
