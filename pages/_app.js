@@ -5,6 +5,7 @@ import '../styles/globals.css';
 
 const SUMUP_GATEWAY = 'https://pos-sumup.vercel.app';
 const SUMUP_FINAL_STATUSES = new Set(['SUCCESSFUL', 'FAILED', 'CANCELLED', 'REFUNDED']);
+const PRODUCT_SYNC_TIMEOUT = 60000;
 
 function jsonResponse(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -49,6 +50,31 @@ function installSumUpGatewayFetch() {
     if (!rawUrl) return originalFetch(input, init);
     let url;
     try { url = new URL(rawUrl, window.location.origin); } catch { return originalFetch(input, init); }
+
+    // Producten mogen langer laden dan de algemene POS-timeout. De
+    // WooCommerce endpoint haalt producten in batches op en kan daardoor
+    // meerdere seconden nodig hebben. De oorspronkelijke AbortSignal van
+    // index.js wordt hier bewust niet doorgestuurd.
+    if (url.pathname === '/api/woocommerce/products' && (init?.method || 'GET').toUpperCase() === 'GET') {
+      const productUrl = new URL(url.toString());
+      productUrl.searchParams.set('_sync', String(Date.now()));
+      const productController = new AbortController();
+      const productTimer = setTimeout(() => productController.abort(), PRODUCT_SYNC_TIMEOUT);
+      try {
+        return await originalFetch(productUrl.toString(), {
+          ...init,
+          cache: 'no-store',
+          signal: productController.signal,
+          headers: {
+            ...(init?.headers || {}),
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+          },
+        });
+      } finally {
+        clearTimeout(productTimer);
+      }
+    }
+
     if (url.pathname !== '/api/sumup/proxy') return originalFetch(input, init);
     if (url.searchParams.get('action') === 'assign-store') return originalFetch(input, init);
 
