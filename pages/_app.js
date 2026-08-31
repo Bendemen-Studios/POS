@@ -1,5 +1,6 @@
 import Head from 'next/head';
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/router';
 import '../styles/globals.css';
 
 const SUMUP_GATEWAY = 'https://pos-sumup.vercel.app';
@@ -22,7 +23,6 @@ async function pollSumUpTransaction(clientTransactionId, originalFetch) {
       const statusUrl = new URL('/api/proxy', SUMUP_GATEWAY);
       statusUrl.searchParams.set('action', 'transaction');
       statusUrl.searchParams.set('clientTransactionId', clientTransactionId);
-
       const response = await originalFetch(statusUrl.toString(), { method: 'GET', cache: 'no-store' });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) lastStatus = data?.status || lastStatus;
@@ -165,6 +165,7 @@ function installFastServerWatcher() {
   let stopped = false;
   let timer = null;
   let lastOnline = false;
+  let failures = 0;
 
   const check = async () => {
     if (stopped) return;
@@ -172,26 +173,23 @@ function installFastServerWatcher() {
     const timeout = setTimeout(() => controller.abort(), 2500);
     try {
       const response = await fetch('/api/admin/store?_pos_health=' + Date.now(), {
-        method: 'GET',
-        cache: 'no-store',
-        credentials: 'same-origin',
-        signal: controller.signal,
+        method: 'GET', cache: 'no-store', credentials: 'same-origin', signal: controller.signal,
         headers: { 'Cache-Control': 'no-cache', 'X-POS-Health-Check': '1' },
       });
-      const online = response.ok;
-      if (online) {
+      if (response.ok) {
+        failures = 0;
         lastOnline = true;
-        // Laat de POS zijn bestaande online-handler direct uitvoeren.
-        // Hierdoor wachten offline orders niet meer op de oude 15s interval.
-        window.dispatchEvent(new Event('online'));
       } else {
-        lastOnline = false;
+        failures += 1;
+        if (failures >= 2) lastOnline = false;
       }
     } catch {
-      lastOnline = false;
+      failures += 1;
+      if (failures >= 2) lastOnline = false;
     } finally {
       clearTimeout(timeout);
-      if (!stopped) timer = window.setTimeout(check, lastOnline ? 3000 : 1500);
+      window.dispatchEvent(new CustomEvent('pos:server-status', { detail: { online: lastOnline } }));
+      if (!stopped) timer = window.setTimeout(check, 5000);
     }
   };
 
@@ -210,7 +208,9 @@ function installFastServerWatcher() {
 }
 
 export default function App({ Component, pageProps }) {
+  const router = useRouter();
   const [offlineSyncMessage, setOfflineSyncMessage] = useState(null);
+  const [serverOnline, setServerOnline] = useState(true);
 
   useEffect(() => {
     installSumUpGatewayFetch();
@@ -222,11 +222,16 @@ export default function App({ Component, pageProps }) {
         window.setTimeout(() => setOfflineSyncMessage(null), 4500);
       }
     });
+    const statusHandler = (event) => setServerOnline(Boolean(event.detail?.online));
+    window.addEventListener('pos:server-status', statusHandler);
     return () => {
       stopServerWatcher();
       stopOfflineBridge();
+      window.removeEventListener('pos:server-status', statusHandler);
     };
   }, []);
+
+  const adminOffline = router.pathname === '/admin' && !serverOnline;
 
   return (
     <>
@@ -245,6 +250,18 @@ export default function App({ Component, pageProps }) {
         </div>
       )}
       <Component {...pageProps} />
+      {adminOffline && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 100000, background: 'rgba(17,24,39,.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <div style={{ maxWidth: 440, width: '100%', background: '#fff', borderRadius: 14, padding: 28, boxShadow: '0 18px 60px rgba(0,0,0,.3)', textAlign: 'center' }}>
+            <div style={{ fontSize: 42, marginBottom: 10 }}>🔒</div>
+            <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 8 }}>Admin alleen-lezen</div>
+            <div style={{ color: '#6b7280', fontSize: 14, lineHeight: 1.5 }}>
+              De VPS is offline. Admin is tijdelijk geblokkeerd zodat er offline geen wijzigingen kunnen worden gemaakt.
+              Je lokaal gecachte Admin-gegevens blijven beschikbaar zodra de server weer bereikbaar is.
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
