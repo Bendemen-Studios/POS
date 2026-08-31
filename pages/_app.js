@@ -7,6 +7,7 @@ const SUMUP_GATEWAY = 'https://pos-sumup.vercel.app';
 const SUMUP_FINAL_STATUSES = new Set(['SUCCESSFUL', 'FAILED', 'CANCELLED', 'REFUNDED']);
 const PRODUCT_SYNC_TIMEOUT = 60000;
 const PRODUCT_SYNC_INTERVAL = 30000;
+const PRODUCT_CACHE_VERSION = 'v3-variations';
 
 function jsonResponse(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -46,7 +47,13 @@ async function syncProductsToCacheAndNotify() {
   if (!localStorage.getItem('pos_user')) return false;
 
   try {
-    const response = await fetch('/api/woocommerce/products', {
+    const cacheVersion = localStorage.getItem('pos_cached_products_version');
+    if (cacheVersion !== PRODUCT_CACHE_VERSION) {
+      localStorage.removeItem('pos_cached_products');
+      localStorage.setItem('pos_cached_products_version', PRODUCT_CACHE_VERSION);
+    }
+
+    const response = await fetch('/api/woocommerce/products?_sync=' + Date.now(), {
       method: 'GET',
       cache: 'no-store',
       headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' },
@@ -58,6 +65,7 @@ async function syncProductsToCacheAndNotify() {
     const previousProducts = localStorage.getItem('pos_cached_products');
     localStorage.setItem('pos_cached_products', serializedProducts);
     localStorage.setItem('pos_cached_products_updated_at', String(Date.now()));
+    localStorage.setItem('pos_cached_products_version', PRODUCT_CACHE_VERSION);
 
     const changed = previousProducts !== serializedProducts;
     if (changed) {
@@ -81,10 +89,6 @@ function installSumUpGatewayFetch() {
     let url;
     try { url = new URL(rawUrl, window.location.origin); } catch { return originalFetch(input, init); }
 
-    // Producten mogen langer laden dan de algemene POS-timeout. De
-    // WooCommerce endpoint haalt producten in batches op en kan daardoor
-    // meerdere seconden nodig hebben. De oorspronkelijke AbortSignal van
-    // index.js wordt hier bewust niet doorgestuurd.
     if (url.pathname === '/api/woocommerce/products' && (init?.method || 'GET').toUpperCase() === 'GET') {
       const productUrl = new URL(url.toString());
       productUrl.searchParams.set('_sync', String(Date.now()));
@@ -298,6 +302,8 @@ export default function App({ Component, pageProps }) {
       if (changed && !stopped) setProductSyncVersion((version) => version + 1);
     };
 
+    // Directe synchronisatie zodra de POS na login wordt geopend.
+    // Daarna iedere 30 seconden opnieuw.
     sync();
     const interval = window.setInterval(sync, PRODUCT_SYNC_INTERVAL);
     return () => {
@@ -312,7 +318,7 @@ export default function App({ Component, pageProps }) {
     <>
       <Head>
         <title>BENDEMEN POS</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, initial-scale=1" />
         <link rel="icon" href="/favicon.ico" sizes="any" />
         <link rel="manifest" href="/manifest.json" />
         <meta name="theme-color" content="#000000" />
