@@ -5,6 +5,8 @@ export default function Document() {
     <Html lang="nl">
       <Head>
         <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
       </Head>
       <body className="bg-white text-black antialiased">
         <Main />
