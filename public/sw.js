@@ -1,8 +1,8 @@
-const CACHE_NAME = 'bendemen-pos-v11';
+const CACHE_NAME = 'bendemen-pos-v12';
 const OFFLINE_URL = '/login';
 const NAVIGATION_TIMEOUT = 3500;
 const API_TIMEOUT = 15000;
-const PRODUCT_API_TIMEOUT = 65000;
+const PRODUCT_API_TIMEOUT = 120000;
 const CHECKOUT_TIMEOUT = 10000;
 
 const APP_SHELL = [
@@ -52,9 +52,6 @@ async function refreshApiCache(request) {
     if (response.ok) {
       const cache = await caches.open(CACHE_NAME);
       await cache.put(request, response.clone());
-
-      // Product sync requests contain a unique _sync query parameter. Keep a
-      // canonical cache entry as the offline fallback as well.
       if (url.pathname === '/api/woocommerce/products') {
         try {
           await cache.put(new Request('/api/woocommerce/products'), response.clone());
@@ -71,7 +68,6 @@ async function handleProductRequest(request) {
   const fresh = await refreshApiCache(request);
   if (fresh) return fresh;
 
-  const cache = await caches.open(CACHE_NAME);
   const canonical = await caches.match('/api/woocommerce/products');
   if (canonical) return canonical;
 
