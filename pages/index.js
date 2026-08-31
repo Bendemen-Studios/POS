@@ -49,12 +49,12 @@ export default function POSHome() {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 3000);
       try {
-        const response = await fetch('/api/admin/store?healthcheck=1',{method:'GET',cache:'no-store',signal:controller.signal,headers:{'Cache-Control':'no-cache, no-store, must-revalidate'}});
-        if (response.ok) { serverCheckState.current.failures=0; setServerOnline(true); return true; }
+        const response = await fetch('/api/admin/store?_pos_health=${Date.now()}',{method:'GET',cache:'no-store',signal:controller.signal,headers:{'Cache-Control':'no-cache, no-store, must-revalidate'}});
+        if (response.ok) { serverCheckState.current.failures=0; setServerOnline(true); localStorage.setItem('pos_server_online','1'); return true; }
       } catch (_) {}
       clearTimeout(timer);
       serverCheckState.current.failures += 1;
-      if (serverCheckState.current.failures >= 2) setServerOnline(false);
+      if (serverCheckState.current.failures >= 2) { setServerOnline(false); localStorage.setItem('pos_server_online','0'); }
       return false;
     } finally { serverCheckState.current.checking=false; }
   };
