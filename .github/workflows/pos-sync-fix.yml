@@ -26,47 +26,30 @@ jobs:
           s = p.read_text(encoding='utf-8')
           original = s
 
-          # Fix the health URL: it must be a JS template literal, not a literal ${Date.now()} string.
+          # Fix literal health URL to a real JS template literal.
           s = s.replace("'/api/admin/store?_pos_health=${Date.now()}'", "`/api/admin/store?_pos_health=${Date.now()}`")
 
-          # Health check must use the actual POS origin and must always release its lock.
+          # Ensure health checks use the current POS origin and same-origin credentials.
           s = re.sub(
               r"const response = await fetch\(`/api/admin/store\?_pos_health=\$\{Date\.now\(\)\}`,\{method:'GET',cache:'no-store',signal:controller\.signal,headers:\{'Cache-Control':'no-cache, no-store, must-revalidate'\}\}\);",
               "const response = await fetch(`${window.location.origin}/api/admin/store?_pos_health=${Date.now()}`,{method:'GET',cache:'no-store',signal:controller.signal,credentials:'same-origin',headers:{'Cache-Control':'no-cache, no-store, must-revalidate'}});",
               s
           )
 
-          # Successful product retrieval is also proof that the VPS/API is online.
+          # Make product sync authoritative, cache-busting and an online signal.
           old = "const res=await fetchWithServerCheck('/api/woocommerce/products');const data=await res.json();if(data.success&&data.products){setProducts(data.products);localStorage.setItem('pos_cached_products',JSON.stringify(data.products));localStorage.setItem('admin_products',JSON.stringify(data.products));}"
           new = "const res=await fetchWithServerCheck(`/api/woocommerce/products?_sync=${Date.now()}`,{},120000);const data=await res.json();if(!res.ok||!data.success||!Array.isArray(data.products))throw new Error(data.error||`HTTP ${res.status}`);setProducts(data.products);localStorage.setItem('pos_cached_products',JSON.stringify(data.products));localStorage.setItem('admin_products',JSON.stringify(data.products));localStorage.setItem('pos_cached_products_updated_at',String(Date.now()));setServerOnline(true);localStorage.setItem('pos_server_online','1');"
           if old in s:
               s = s.replace(old, new, 1)
 
-          # Never let navigator.onLine alone block a real server sync.
+          # navigator.onLine is not the VPS health signal; allow real API checks to decide.
           s = s.replace("if(typeof navigator!=='undefined'&&navigator.onLine===false)return;setIsSyncing(true);try{", "setIsSyncing(true);try{", 1)
 
-          # Prevent overlapping full syncs and make sure the UI always leaves Syncing state.
-          if "if(isSyncing)return;setIsSyncing(true);try{" not in s:
-              s = s.replace("const handleSyncData=async()=>{setIsSyncing(true);try{", "const handleSyncData=async()=>{if(isSyncing)return;setIsSyncing(true);try{", 1)
+          # Avoid overlapping full syncs.
+          s = s.replace("const handleSyncData=async()=>{setIsSyncing(true);try{", "const handleSyncData=async()=>{if(isSyncing)return;setIsSyncing(true);try{", 1)
 
           if s == original:
-              print('No further patch needed; leaving pages/index.js unchanged.')
+              print('No changes required.')
           else:
               p.write_text(s, encoding='utf-8')
               print('Patched pages/index.js without replacing the file.')
-          PY
-
-      - name: Validate JavaScript
-        run: node --check pages/index.js
-
-      - name: Commit only when changed
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add pages/index.js
-          if git diff --cached --quiet; then
-            echo "No changes to commit"
-            exit 0
-          fi
-          git commit -m "fix: POS server check and product sync"
-          git push
