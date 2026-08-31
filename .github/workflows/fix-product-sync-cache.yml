@@ -1,0 +1,64 @@
+name: Fix product sync cache
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.event.head_commit.message != 'chore: remove temporary product sync cache workflow'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Patch product sync and cache
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('pages/index.js')
+          s = p.read_text()
+
+          old_cache = "  useEffect(()=>{ if(typeof window!=='undefined'&&products.length>0)localStorage.setItem('pos_cached_products',JSON.stringify(products)); },[products]);"
+          new_cache = "  useEffect(()=>{ if(typeof window!=='undefined'){ try { localStorage.setItem('pos_cached_products',JSON.stringify(products||[])); localStorage.setItem('pos_cached_products_updated_at',String(Date.now())); } catch(err) { console.error('Fout bij cachen van producten:',err); } } },[products]);"
+          if old_cache in s:
+              s = s.replace(old_cache, new_cache, 1)
+          elif new_cache not in s:
+              raise SystemExit('Expected product cache effect not found')
+
+          old_init = "  const [products, setProducts] = useState(() => { if (typeof window !== 'undefined') { const saved=localStorage.getItem('pos_cached_products'); return saved?JSON.parse(saved):[]; } return []; });"
+          new_init = "  const [products, setProducts] = useState(() => { if (typeof window !== 'undefined') { try { const saved=localStorage.getItem('pos_cached_products'); return saved?JSON.parse(saved):[]; } catch(err) { localStorage.removeItem('pos_cached_products'); return []; } } return []; });"
+          if old_init in s:
+              s = s.replace(old_init, new_init, 1)
+
+          marker = "  const fetchProducts=async()=>{try{const res=await fetchWithServerCheck('/api/woocommerce/products');const data=await res.json();if(data.success&&data.products){setProducts(data.products);localStorage.setItem('pos_cached_products',JSON.stringify(data.products));}}catch(err){console.error('Fout bij ophalen producten:',err);}};"
+          replacement = "  const fetchProducts=async()=>{try{const res=await fetchWithServerCheck('/api/woocommerce/products');const data=await res.json();if(data.success&&Array.isArray(data.products)){setProducts(data.products);localStorage.setItem('pos_cached_products',JSON.stringify(data.products));localStorage.setItem('pos_cached_products_updated_at',String(Date.now()));}}catch(err){console.error('Fout bij ophalen producten:',err);}};"
+          if marker in s:
+              s = s.replace(marker, replacement, 1)
+          elif replacement not in s:
+              raise SystemExit('Expected fetchProducts function not found')
+
+          interval_marker = "  const fetchCustomers=async()=>{"
+          interval = "  useEffect(()=>{ const interval=setInterval(async()=>{ if(await checkServerConnection()) await fetchProducts(); },30000); return()=>clearInterval(interval); },[]);\n\n"
+          if "setInterval(async()=>{ if(await checkServerConnection()) await fetchProducts(); },30000)" not in s:
+              if interval_marker not in s:
+                  raise SystemExit('Expected insertion point not found')
+              s = s.replace(interval_marker, interval + interval_marker, 1)
+
+          p.write_text(s)
+          print('Applied product cache + 30s product sync patch.')
+          PY
+
+      - name: Commit and remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pages/index.js
+          git diff --cached --quiet || git commit -m "fix: cache products and sync every 30 seconds"
+          git rm -f .github/workflows/fix-product-sync-cache.yml
+          git commit -m "chore: remove temporary product sync cache workflow" || true
+          git push
