@@ -8,6 +8,13 @@ export default async function handler(req, res) {
 
   try {
     const customerId = req.method === 'GET' ? req.query.customerId : req.body?.customerId;
+    const { orderTotal, pointsToRedeem, action } = req.body || {};
+
+    // Calculeren van verdiende punten heeft geen klantbalans nodig.
+    if (req.method === 'POST' && action === 'calculate_earned') {
+      const pointsEarned = Math.floor(parseFloat(orderTotal) || 0);
+      return res.status(200).json({ success: true, pointsEarned });
+    }
 
     if (!customerId) {
       return res.status(400).json({
@@ -23,13 +30,6 @@ export default async function handler(req, res) {
         success: true,
         pointsBalance: currentPoints,
       });
-    }
-
-    const { orderTotal, pointsToRedeem, action } = req.body || {};
-
-    if (action === 'calculate_earned') {
-      const pointsEarned = Math.floor(parseFloat(orderTotal) || 0);
-      return res.status(200).json({ success: true, pointsEarned, pointsBalance: currentPoints });
     }
 
     if (action === 'redeem') {
