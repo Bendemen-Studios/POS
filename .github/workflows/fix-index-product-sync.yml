@@ -1,0 +1,50 @@
+name: Fix index product sync
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.event.head_commit.message != 'chore: remove temporary product sync workflow'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Give product sync enough time
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('pages/index.js')
+          s = p.read_text()
+          old = "const fetchProducts=async()=>{try{const res=await fetchWithServerCheck('/api/woocommerce/products');"
+          new = "const fetchProducts=async()=>{try{const res=await fetchWithServerCheck('/api/woocommerce/products',{},60000);"
+          if old in s:
+              s = s.replace(old, new, 1)
+              p.write_text(s)
+          elif new not in s:
+              raise SystemExit('Expected product sync function not found')
+          PY
+
+      - name: Commit fix
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pages/index.js
+          git diff --cached --quiet || git commit -m "fix: allow product sync up to 60 seconds"
+          git push
+
+      - name: Remove temporary workflow
+        if: always()
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -f .github/workflows/fix-index-product-sync.yml || true
+          git commit -m "chore: remove temporary product sync workflow" || true
+          git push || true
