@@ -1,8 +1,10 @@
-const CACHE_NAME = 'bendemen-pos-v6';
+const CACHE_NAME = 'bendemen-pos-v7';
 const OFFLINE_URL = '/login';
 const NAVIGATION_TIMEOUT = 3500;
 const API_TIMEOUT = 4000;
-const CHECKOUT_TIMEOUT = 4000;
+// Checkout is explicitly online-first. Give a reachable VPS enough time to
+// answer before the POS falls back to its local offline queue.
+const CHECKOUT_TIMEOUT = 10000;
 
 const APP_SHELL = [
   '/',
@@ -56,8 +58,10 @@ async function refreshApiCache(request) {
 
 async function handleCheckoutRequest(request) {
   try {
+    // Never read a cached checkout response. The real VPS must be tried first.
     return await timeoutFetch(request, CHECKOUT_TIMEOUT);
   } catch (_) {
+    // Let the page's existing offline-order queue handle the failed checkout.
     return new Response(
       JSON.stringify({ success: false, offline: true, queued: true, error: 'POS-server offline of niet bereikbaar. De bestelling wordt lokaal opgeslagen.' }),
       { status: 503, headers: { 'Content-Type': 'application/json' } }
@@ -100,6 +104,9 @@ self.addEventListener('fetch', (event) => {
 
   if (url.origin !== self.location.origin) return;
 
+  // Checkout is always network-first, even when navigator.onLine is false.
+  // This is important when the browser's connection state is stale while the
+  // POS server is actually reachable.
   if (request.method === 'POST' && url.pathname === '/api/woocommerce/checkout') {
     event.respondWith(handleCheckoutRequest(request));
     return;
