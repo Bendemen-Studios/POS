@@ -11,12 +11,28 @@ function getWooCommerceApi() {
     url,
     consumerKey,
     consumerSecret,
-    version: 'wc/v3'
+    version: 'wc/v3',
+    axiosConfig: { timeout: 15000 },
   });
 }
 
 function sendApiError(res, status, message) {
   return res.status(status).json({ success: false, error: message });
+}
+
+function isPickupOrder(order) {
+  return Array.isArray(order.shipping_lines) && order.shipping_lines.some((line) => {
+    const methodId = String(line.method_id || '').toLowerCase();
+    const methodTitle = String(line.method_title || '').toLowerCase();
+    return methodId.includes('local_pickup') || methodTitle.includes('afhalen') || methodTitle.includes('afhaal');
+  });
+}
+
+function matchesPickupId(order, pickupId) {
+  if (!pickupId) return false;
+  return Array.isArray(order.meta_data) && order.meta_data.some((meta) =>
+    String(meta.key || '').toLowerCase().includes('pickup') && String(meta.value ?? '') === String(pickupId)
+  );
 }
 
 export default async function handler(req, res) {
@@ -30,34 +46,47 @@ export default async function handler(req, res) {
   if (method === 'GET') {
     try {
       const { pickup_id } = req.query;
+      const allOrders = [];
+      const perPage = 100;
+      let page = 1;
 
-      const response = await api.get('orders', {
-        per_page: 50,
-        status: 'processing,pending'
-      });
+      // Haal alle relevante orders op in pagina's zodat oudere/latere afhaalorders niet ontbreken.
+      while (page <= 100) {
+        const response = await api.get('orders', {
+          per_page: perPage,
+          page,
+          status: 'processing,pending',
+          orderby: 'date',
+          order: 'asc',
+        });
 
-      const orders = response.data || [];
+        const orders = Array.isArray(response.data) ? response.data : [];
+        allOrders.push(...orders);
 
-      const filteredOrders = orders.filter(order => {
-        const isPickup = order.shipping_lines?.some(line =>
-          String(line.method_id || '').includes('local_pickup') ||
-          String(line.method_title || '').toLowerCase().includes('afhalen')
+        const totalPages = Number(
+          response.headers?.['x-wp-totalpages'] ||
+          response.headers?.['X-WP-TotalPages'] ||
+          0
         );
 
-        if (!isPickup && !pickup_id) return false;
+        if (orders.length < perPage || (totalPages > 0 && page >= totalPages)) break;
+        page += 1;
+      }
 
-        if (pickup_id) {
-          const matchesMeta = order.meta_data?.some(meta =>
-            String(meta.key || '').toLowerCase().includes('pickup') &&
-            String(meta.value) === String(pickup_id)
-          );
-          return matchesMeta || isPickup;
-        }
-
-        return true;
+      const filteredOrders = allOrders.filter((order) => {
+        const pickup = isPickupOrder(order);
+        if (pickup_id) return pickup || matchesPickupId(order, pickup_id);
+        return pickup;
       });
 
-      res.setHeader('Cache-Control', 'no-store, max-age=0');
+      // Nieuwste afhaalbestellingen eerst in de POS.
+      filteredOrders.sort((a, b) => {
+        const da = new Date(a.date_created || 0).getTime();
+        const db = new Date(b.date_created || 0).getTime();
+        return db - da;
+      });
+
+      res.setHeader('Cache-Control', 'private, max-age=0, no-cache, no-store, must-revalidate');
       return res.status(200).json({ success: true, orders: filteredOrders });
     } catch (error) {
       console.error('WooCommerce Pickup Orders Error:', error.response?.data || error.message);
@@ -68,16 +97,17 @@ export default async function handler(req, res) {
   if (method === 'PUT') {
     try {
       const { order_id, status } = req.body || {};
-
-      if (!order_id) {
-        return sendApiError(res, 400, 'Order ID is verplicht.');
-      }
+      if (!order_id) return sendApiError(res, 400, 'Order ID is verplicht.');
 
       const response = await api.put(`orders/${order_id}`, {
         status: status || 'completed'
       });
 
-      return res.status(200).json({ success: true, order: response.data, message: 'Afhaalbestelling succesvol afgerond!' });
+      return res.status(200).json({
+        success: true,
+        order: response.data,
+        message: 'Afhaalbestelling succesvol afgerond!'
+      });
     } catch (error) {
       console.error('WooCommerce Update Order Error:', error.response?.data || error.message);
       return sendApiError(res, 502, `Kon de status van de afhaalbestelling niet bijwerken: ${error.response?.data?.message || error.message || 'onbekende fout'}`);
