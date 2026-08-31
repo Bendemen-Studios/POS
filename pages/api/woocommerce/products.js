@@ -51,8 +51,9 @@ export default async function handler(req, res) {
     const maxPages = 1000;
     const products = [];
 
-    // WooCommerce REST API pagination: haal alle producten batch voor batch op.
-    // We stoppen zodra een batch kleiner is dan de batch size.
+    // WooCommerce REST API pagination: haal alle gepubliceerde producten batch voor batch op.
+    // Geen variation-requests meer per product: dat maakte de sync onnodig traag en kon
+    // de browser/Vercel request laten afbreken met een AbortError.
     for (let page = 1; page <= maxPages; page += 1) {
       const endpoint = `${url}/wp-json/wc/v3/products?per_page=${batchSize}&page=${page}&status=publish&orderby=id&order=asc`;
       let rawProducts;
@@ -87,66 +88,31 @@ export default async function handler(req, res) {
       products.push(...rawProducts);
       console.log(`[PRODUCTS API]: batch ${page} geladen (${rawProducts.length}), totaal ${products.length}`);
       if (rawProducts.length < batchSize) break;
-      await sleep(75);
+      await sleep(50);
     }
 
-    // Variaties worden eveneens in batches per product opgehaald. Alleen variabele
-    // producten hebben een extra request nodig.
-    const variableProducts = products.filter((product) => product.type === 'variable' && Array.isArray(product.variations) && product.variations.length > 0);
-    const variationMap = new Map();
-
-    for (let index = 0; index < variableProducts.length; index += 1) {
-      const product = variableProducts[index];
-      try {
-        const variations = await fetchJson(
-          `${url}/wp-json/wc/v3/products/${product.id}/variations?per_page=${batchSize}&page=1`,
-          {},
-          20000
-        );
-        variationMap.set(product.id, Array.isArray(variations) ? variations : []);
-      } catch (err) {
-        console.error(`[VARIATION SKIPPED] Fout bij ophalen variaties voor product #${product.id}:`, err.message);
-        variationMap.set(product.id, []);
-      }
-      if ((index + 1) % 10 === 0) await sleep(75);
-    }
-
-    const normalizedProducts = products.map((product) => {
-      const rawVariations = variationMap.get(product.id) || [];
-      const variationsData = rawVariations.map((v) => ({
-        id: v.id,
-        variation_id: v.id,
-        price: v.price || v.regular_price || 0,
-        regular_price: v.regular_price || 0,
-        sale_price: v.sale_price || null,
-        stock_quantity: v.stock_quantity,
-        in_stock: v.in_stock ?? v.stock_status === 'instock',
-        attributes: Array.isArray(v.attributes)
-          ? v.attributes.map((attr) => ({ id: attr.id, name: attr.name, option: attr.option }))
-          : []
-      }));
-
-      return {
-        id: product.id,
-        name: product.name,
-        slug: product.slug,
-        price: product.price || product.regular_price || 0,
-        regular_price: product.regular_price || 0,
-        sale_price: product.sale_price || null,
-        stock_quantity: product.stock_quantity,
-        in_stock: product.in_stock ?? product.stock_status === 'instock',
-        type: product.type,
-        categories: Array.isArray(product.categories)
-          ? product.categories.map((c) => ({ id: c.id, name: c.name, slug: c.slug }))
-          : [],
-        images: Array.isArray(product.images)
-          ? product.images.map((img) => ({ id: img.id, src: img.src, alt: img.alt }))
-          : [],
-        attributes: product.attributes || [],
-        variations: product.variations || [],
-        variations_data: variationsData
-      };
-    });
+    const normalizedProducts = products.map((product) => ({
+      id: product.id,
+      name: product.name,
+      slug: product.slug,
+      price: product.price || product.regular_price || 0,
+      regular_price: product.regular_price || 0,
+      sale_price: product.sale_price || null,
+      stock_quantity: product.stock_quantity,
+      in_stock: product.in_stock ?? product.stock_status === 'instock',
+      type: product.type,
+      categories: Array.isArray(product.categories)
+        ? product.categories.map((c) => ({ id: c.id, name: c.name, slug: c.slug }))
+        : [],
+      images: Array.isArray(product.images)
+        ? product.images.map((img) => ({ id: img.id, src: img.src, alt: img.alt }))
+        : [],
+      attributes: Array.isArray(product.attributes) ? product.attributes : [],
+      // Houd de door WooCommerce meegeleverde variatie-ID's beschikbaar.
+      // Uitgebreide variatiedata wordt niet per product opgehaald tijdens de sync.
+      variations: Array.isArray(product.variations) ? product.variations : [],
+      variations_data: []
+    }));
 
     return res.status(200).json({
       success: true,
