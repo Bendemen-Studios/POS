@@ -1,0 +1,73 @@
+name: Fix product sync
+
+on:
+  push:
+    paths:
+      - '.github/workflows/fix-product-sync.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch product sync
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          # POS: the WooCommerce products endpoint also loads variations and can
+          # legitimately take longer than the generic 5s API timeout.
+          p = Path('pages/index.js')
+          s = p.read_text()
+          old = "fetchProducts=async()=>{try{const res=await fetchWithServerCheck('/api/woocommerce/products');"
+          new = "fetchProducts=async()=>{try{const res=await fetchWithServerCheck('/api/woocommerce/products',{},60000);"
+          if old in s and new not in s:
+              s = s.replace(old, new, 1)
+          elif new not in s:
+              raise SystemExit('POS fetchProducts pattern not found')
+          p.write_text(s)
+
+          # Admin: use the POS cache as an immediate fallback, and keep both
+          # caches populated after a successful WooCommerce sync.
+          p = Path('pages/admin.js')
+          s = p.read_text()
+          old = "const [products, setProducts] = useState(() => {\n    if (typeof window !== 'undefined') {\n      const saved = localStorage.getItem('admin_products');\n      return saved ? JSON.parse(saved) : [];\n    }\n    return [];\n  });"
+          new = "const [products, setProducts] = useState(() => {\n    if (typeof window !== 'undefined') {\n      try {\n        const adminSaved = localStorage.getItem('admin_products');\n        const adminProducts = adminSaved ? JSON.parse(adminSaved) : [];\n        if (Array.isArray(adminProducts) && adminProducts.length > 0) return adminProducts;\n        const posSaved = localStorage.getItem('pos_cached_products');\n        const posProducts = posSaved ? JSON.parse(posSaved) : [];\n        return Array.isArray(posProducts) ? posProducts : [];\n      } catch (_) { return []; }\n    }\n    return [];\n  });"
+          if old in s and new not in s:
+              s = s.replace(old, new, 1)
+          elif new not in s:
+              raise SystemExit('Admin products state pattern not found')
+
+          old = "        localStorage.setItem('admin_products', JSON.stringify(data.products || []));\n"
+          new = "        localStorage.setItem('admin_products', JSON.stringify(data.products || []));\n        localStorage.setItem('pos_cached_products', JSON.stringify(data.products || []));\n"
+          # Replace both successful product-cache writes in admin.js.
+          s = s.replace(old, new)
+
+          old = "    const savedProducts = localStorage.getItem('admin_products');\n    if (!savedProducts || JSON.parse(savedProducts).length === 0) {\n      await fetchProductsSilently();\n    }"
+          new = "    const savedProducts = localStorage.getItem('admin_products');\n    const savedPosProducts = localStorage.getItem('pos_cached_products');\n    const adminCount = savedProducts ? JSON.parse(savedProducts).length : 0;\n    const posCount = savedPosProducts ? JSON.parse(savedPosProducts).length : 0;\n    if (adminCount === 0 && posCount === 0) {\n      await fetchProductsSilently();\n    }"
+          if old in s and new not in s:
+              s = s.replace(old, new, 1)
+          elif new not in s:
+              raise SystemExit('Admin startup sync pattern not found')
+
+          p.write_text(s)
+          PY
+
+      - name: Commit patch
+        run: |
+          if git diff --quiet; then
+            echo 'No product sync changes needed.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add pages/index.js pages/admin.js
+          git commit -m 'fix: repair product sync and cache fallback'
+          git push
