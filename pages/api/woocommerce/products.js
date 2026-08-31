@@ -9,8 +9,8 @@ export default async function handler(req, res) {
   }
 
   const url = process.env.WOOCOMMERCE_URL || process.env.NEXT_PUBLIC_WOOCOMMERCE_URL || 'https://www.bendemen.com';
-  const consumerKey = process.env.WOOCOMMERCE_CONSUMER_KEY || process.env.WOOCOMMERCE_KEY || process.env.NEXT_PUBLIC_WOOCOMMERCE_KEY;
-  const consumerSecret = process.env.WOOCOMMERCE_CONSUMER_SECRET || process.env.WOOCOMMERCE_SECRET || process.env.NEXT_PUBLIC_WOOCOMMERCE_SECRET;
+  const consumerKey = process.env.WOOCOMMERCE_CONSUMER_KEY || process.env.WOO_CONSUMER_KEY || process.env.WOOCOMMERCE_KEY || process.env.NEXT_PUBLIC_WOOCOMMERCE_KEY;
+  const consumerSecret = process.env.WOOCOMMERCE_CONSUMER_SECRET || process.env.WOO_CONSUMER_SECRET || process.env.WOOCOMMERCE_SECRET || process.env.NEXT_PUBLIC_WOOCOMMERCE_SECRET;
 
   if (!consumerKey || !consumerSecret) {
     console.error('[PRODUCTS API ERROR]: WooCommerce API keys ontbreken in .env');
@@ -51,9 +51,7 @@ export default async function handler(req, res) {
     const maxPages = 1000;
     const products = [];
 
-    // WooCommerce REST API pagination: haal alle gepubliceerde producten batch voor batch op.
-    // Geen variation-requests meer per product: dat maakte de sync onnodig traag en kon
-    // de browser/Vercel request laten afbreken met een AbortError.
+    // Eerst alle gepubliceerde producten batch voor batch ophalen.
     for (let page = 1; page <= maxPages; page += 1) {
       const endpoint = `${url}/wp-json/wc/v3/products?per_page=${batchSize}&page=${page}&status=publish&orderby=id&order=asc`;
       let rawProducts;
@@ -91,28 +89,75 @@ export default async function handler(req, res) {
       await sleep(50);
     }
 
-    const normalizedProducts = products.map((product) => ({
-      id: product.id,
-      name: product.name,
-      slug: product.slug,
-      price: product.price || product.regular_price || 0,
-      regular_price: product.regular_price || 0,
-      sale_price: product.sale_price || null,
-      stock_quantity: product.stock_quantity,
-      in_stock: product.in_stock ?? product.stock_status === 'instock',
-      type: product.type,
-      categories: Array.isArray(product.categories)
-        ? product.categories.map((c) => ({ id: c.id, name: c.name, slug: c.slug }))
-        : [],
-      images: Array.isArray(product.images)
-        ? product.images.map((img) => ({ id: img.id, src: img.src, alt: img.alt }))
-        : [],
-      attributes: Array.isArray(product.attributes) ? product.attributes : [],
-      // Houd de door WooCommerce meegeleverde variatie-ID's beschikbaar.
-      // Uitgebreide variatiedata wordt niet per product opgehaald tijdens de sync.
-      variations: Array.isArray(product.variations) ? product.variations : [],
-      variations_data: []
-    }));
+    // Variaties blijven onderdeel van de product-sync, zodat de POS de keuze-popup,
+    // variantprijzen en variantvoorraad kan tonen. We halen ze per variabel product
+    // in batches op en verwerken ze met beperkte concurrency om de sync stabiel te houden.
+    const variableProducts = products.filter(
+      (product) => product.type === 'variable' && Array.isArray(product.variations) && product.variations.length > 0
+    );
+    const variationMap = new Map();
+    const variationBatchSize = 8;
+
+    for (let start = 0; start < variableProducts.length; start += variationBatchSize) {
+      const batch = variableProducts.slice(start, start + variationBatchSize);
+      await Promise.all(batch.map(async (product) => {
+        try {
+          const allVariations = [];
+          for (let page = 1; page <= maxPages; page += 1) {
+            const variations = await fetchJson(
+              `${url}/wp-json/wc/v3/products/${product.id}/variations?per_page=${batchSize}&page=${page}&orderby=id&order=asc`,
+              {},
+              20000
+            );
+            if (!Array.isArray(variations) || variations.length === 0) break;
+            allVariations.push(...variations);
+            if (variations.length < batchSize) break;
+          }
+          variationMap.set(product.id, allVariations);
+        } catch (err) {
+          console.error(`[VARIATION SKIPPED] Fout bij ophalen variaties voor product #${product.id}:`, err.message);
+          variationMap.set(product.id, []);
+        }
+      }));
+      console.log(`[PRODUCTS API]: variatiebatch verwerkt (${Math.min(start + variationBatchSize, variableProducts.length)}/${variableProducts.length})`);
+    }
+
+    const normalizedProducts = products.map((product) => {
+      const rawVariations = variationMap.get(product.id) || [];
+      const variationsData = rawVariations.map((v) => ({
+        id: v.id,
+        variation_id: v.id,
+        price: v.price || v.regular_price || 0,
+        regular_price: v.regular_price || 0,
+        sale_price: v.sale_price || null,
+        stock_quantity: v.stock_quantity,
+        in_stock: v.in_stock ?? v.stock_status === 'instock',
+        attributes: Array.isArray(v.attributes)
+          ? v.attributes.map((attr) => ({ id: attr.id, name: attr.name, option: attr.option }))
+          : []
+      }));
+
+      return {
+        id: product.id,
+        name: product.name,
+        slug: product.slug,
+        price: product.price || product.regular_price || 0,
+        regular_price: product.regular_price || 0,
+        sale_price: product.sale_price || null,
+        stock_quantity: product.stock_quantity,
+        in_stock: product.in_stock ?? product.stock_status === 'instock',
+        type: product.type,
+        categories: Array.isArray(product.categories)
+          ? product.categories.map((c) => ({ id: c.id, name: c.name, slug: c.slug }))
+          : [],
+        images: Array.isArray(product.images)
+          ? product.images.map((img) => ({ id: img.id, src: img.src, alt: img.alt }))
+          : [],
+        attributes: Array.isArray(product.attributes) ? product.attributes : [],
+        variations: Array.isArray(product.variations) ? product.variations : [],
+        variations_data: variationsData
+      };
+    });
 
     return res.status(200).json({
       success: true,
