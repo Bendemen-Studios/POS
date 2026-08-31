@@ -1,0 +1,30 @@
+name: Fix POS startup
+on:
+  push:
+    branches: [main]
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch non-blocking startup
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('pages/index.js')
+          s = p.read_text()
+          old = "  useEffect(()=>{ const userStr=localStorage.getItem('pos_user'); if(!userStr){router.replace('/login');return;} try{setCurrentUser(JSON.parse(userStr));}catch(_){router.replace('/login');return;} const initialize=async()=>{checkOfflineQueue();const online=await checkServerConnection();if(online)await handleSyncData();else{const saved=localStorage.getItem('selectedStore')||localStorage.getItem('pos_selected_store');if(saved){try{handleSelectStore(JSON.parse(saved),false);}catch(_){}}}setIsChecking(false);};initialize(); },[router]);"
+          new = "  useEffect(()=>{ const userStr=localStorage.getItem('pos_user'); if(!userStr){router.replace('/login');return;} try{setCurrentUser(JSON.parse(userStr));}catch(_){router.replace('/login');return;} checkOfflineQueue(); const saved=localStorage.getItem('selectedStore')||localStorage.getItem('pos_selected_store'); if(saved){try{handleSelectStore(JSON.parse(saved),false);}catch(_){}} setIsChecking(false); const syncInBackground=async()=>{try{if(await checkServerConnection()) await handleSyncData();}catch(err){console.warn('[STARTUP SYNC] achtergrond sync mislukt:',err);}}; syncInBackground(); },[router]);"
+          if old not in s:
+              raise SystemExit('startup block not found')
+          p.write_text(s.replace(old, new, 1))
+          PY
+          rm -f .github/workflows/fix-startup.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add pages/index.js .github/workflows/fix-startup.yml
+          git commit -m 'fix: do not block POS startup on server sync' || exit 0
+          git push
