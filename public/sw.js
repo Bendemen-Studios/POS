@@ -1,4 +1,4 @@
-const CACHE_NAME = 'bendemen-pos-v14';
+const CACHE_NAME = 'bendemen-pos-v15';
 const OFFLINE_URL = '/login';
 const NAVIGATION_TIMEOUT = 3500;
 const API_TIMEOUT = 60000;
@@ -15,12 +15,14 @@ const CACHEABLE_API_PREFIXES = [
   '/api/woocommerce/customers',
   '/api/woocommerce/orders',
   '/api/woocommerce/pickup-order',
+  '/api/woocommerce/points',
   '/api/sumup/proxy',
 ];
 
 const STALE_WHILE_REVALIDATE_API = new Set([
   '/api/woocommerce/customers',
   '/api/woocommerce/pickup-order',
+  '/api/woocommerce/points',
 ]);
 
 function timeoutFetch(request, timeout = NAVIGATION_TIMEOUT) {
@@ -78,7 +80,8 @@ async function handleStaleApiRequest(request) {
   const cache = await caches.open(CACHE_NAME);
   const cached = await cache.match(request);
 
-  // Geef een bestaande lokale response onmiddellijk terug. Vernieuw tegelijk op de achtergrond.
+  // Klanten en punten worden direct uit de lokale cache geleverd. Bij online
+  // gebruik wordt op de achtergrond een verse response opgeslagen.
   if (cached) {
     void refreshApiCache(request);
     return cached;
