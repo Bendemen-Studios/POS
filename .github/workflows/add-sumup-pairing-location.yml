@@ -1,0 +1,157 @@
+name: Add SumUp pairing location
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message != 'chore: remove temporary SumUp pairing workflow'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Patch Admin SumUp pairing
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('pages/admin.js')
+          s = p.read_text()
+
+          old_state = "const [selectedStoreForReader, setSelectedStoreForReader] = useState({});"
+          new_state = old_state + "\n  const [selectedStoreForPairing, setSelectedStoreForPairing] = useState('');"
+          if "selectedStoreForPairing" not in s:
+              if old_state not in s:
+                  raise SystemExit('SumUp reader state marker not found')
+              s = s.replace(old_state, new_state, 1)
+
+          old_handler = '''  const handlePairSumUp = async (e) => {
+    e.preventDefault();
+    setSumUpStatusMsg('Bezig met SumUp koppelen...');
+    try {
+      const res = await fetch('/api/sumup/proxy?action=pair', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pairingCode, name: terminalName })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setSumUpStatusMsg('✅ SumUp apparaat succesvol gekoppeld!');
+        setPairingCode('');
+        setTerminalName('');
+        fetchSumUpReaders();
+      } else {
+        setSumUpStatusMsg(`❌ Fout: ${data.error || 'Onbekende fout'}`);
+      }
+    } catch (err) {
+      setSumUpStatusMsg('❌ Netwerkfout bij koppelen.');
+    }
+  };'''
+
+          new_handler = '''  const handlePairSumUp = async (e) => {
+    e.preventDefault();
+    if (!selectedStoreForPairing) {
+      setSumUpStatusMsg('❌ Selecteer eerst een filiaal.');
+      return;
+    }
+    setSumUpStatusMsg('Bezig met SumUp koppelen...');
+    try {
+      const res = await fetch('/api/sumup/proxy?action=pair', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pairingCode, name: terminalName, storeId: selectedStoreForPairing })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setSumUpStatusMsg(`❌ Fout: ${data.error || 'Onbekende fout'}`);
+        return;
+      }
+
+      const readerId = data?.reader?.id || data?.reader?.reader_id || data?.data?.reader?.id;
+      if (!readerId) {
+        setSumUpStatusMsg('✅ SumUp apparaat gekoppeld, maar het terminal-ID kon niet automatisch worden gelezen. Open de lijst en koppel het apparaat aan het gekozen filiaal.');
+        setPairingCode('');
+        setTerminalName('');
+        await fetchSumUpReaders();
+        return;
+      }
+
+      const assignRes = await fetch('/api/sumup/proxy?action=assign-store', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ storeId: selectedStoreForPairing, readerId })
+      });
+      const assignData = await assignRes.json().catch(() => ({}));
+
+      if (!assignRes.ok || !assignData.success) {
+        setSumUpStatusMsg(`✅ SumUp gekoppeld, maar filiaaltoewijzing mislukt: ${assignData.error || 'Onbekende fout'}`);
+      } else {
+        const selectedStore = stores.find((store) => String(store.id || store.store_id) === String(selectedStoreForPairing));
+        setSumUpStatusMsg(`✅ SumUp apparaat gekoppeld aan ${selectedStore?.store_name || selectedStore?.name || 'het gekozen filiaal'}!`);
+        setSelectedStoreForReader((prev) => ({ ...prev, [readerId]: String(selectedStoreForPairing) }));
+      }
+
+      setPairingCode('');
+      setTerminalName('');
+      await fetchSumUpReaders();
+      await fetchStores();
+    } catch (err) {
+      setSumUpStatusMsg('❌ Netwerkfout bij koppelen.');
+    }
+  };'''
+
+          if old_handler in s:
+              s = s.replace(old_handler, new_handler, 1)
+          elif "const readerId = data?.reader?.id" not in s:
+              raise SystemExit('SumUp pairing handler marker not found')
+
+          old_form = '''                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <input
+                        type="text"
+                        placeholder="Pairing Code (van scherm SumUp Solo)"'''
+          new_form = '''                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                      <select
+                        value={selectedStoreForPairing}
+                        onChange={(e) => setSelectedStoreForPairing(e.target.value)}
+                        className="p-2 border rounded text-xs font-semibold"
+                        required
+                      >
+                        <option value="">-- Kies locatie / filiaal --</option>
+                        {stores.map((s) => (
+                          <option key={s.id || s.store_id} value={s.id || s.store_id}>
+                            {s.store_name || s.name}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        type="text"
+                        placeholder="Pairing Code (van scherm SumUp Solo)"'''
+          if old_form in s:
+              s = s.replace(old_form, new_form, 1)
+          elif "-- Kies locatie / filiaal --" not in s:
+              raise SystemExit('SumUp pairing form marker not found')
+
+          p.write_text(s)
+          PY
+
+      - name: Commit patched Admin
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pages/admin.js
+          git diff --cached --quiet || git commit -m "feat: select location when pairing SumUp"
+          git push
+
+      - name: Remove temporary workflow
+        if: always()
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -f .github/workflows/add-sumup-pairing-location.yml || true
+          git commit -m "chore: remove temporary SumUp pairing workflow" || true
+          git push || true
