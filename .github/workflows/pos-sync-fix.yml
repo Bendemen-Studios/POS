@@ -1,0 +1,52 @@
+name: POS Sync Fix
+
+on:
+  workflow_dispatch:
+
+jobs:
+  patch-pos:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Patch POS sync/server status
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('pages/index.js')
+          s = p.read_text()
+          original = s
+
+          # Use the dedicated health endpoint instead of the old healthcheck query.
+          s = s.replace("/api/admin/store?healthcheck=1", "/api/admin/store?_pos_health=" + "${Date.now()}")
+
+          # Persist the known online state whenever the server is confirmed reachable.
+          s = s.replace("setServerOnline(true); return true;", "setServerOnline(true); localStorage.setItem('pos_server_online','1'); return true;")
+          s = s.replace("if (serverCheckState.current.failures >= 2) setServerOnline(false);", "if (serverCheckState.current.failures >= 2) { setServerOnline(false); localStorage.setItem('pos_server_online','0'); }")
+
+          # Make the existing product sync refresh the admin-side stock cache as well.
+          marker = "localStorage.setItem('pos_cached_products',JSON.stringify(data.products));"
+          if marker in s and "localStorage.setItem('admin_products'" not in s:
+              s = s.replace(marker, marker + " localStorage.setItem('admin_products',JSON.stringify(data.products));", 1)
+
+          if s == original:
+              raise SystemExit('No patchable POS code found; aborting without commit')
+
+          p.write_text(s)
+          PY
+
+      - name: Validate
+        run: |
+          node --check pages/index.js
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pages/index.js
+          git diff --cached --quiet && exit 0
+          git commit -m "fix: POS server status and admin stock sync"
+          git push
