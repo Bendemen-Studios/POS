@@ -1,7 +1,7 @@
-const CACHE_NAME = 'bendemen-pos-v13';
+const CACHE_NAME = 'bendemen-pos-v14';
 const OFFLINE_URL = '/login';
 const NAVIGATION_TIMEOUT = 3500;
-const API_TIMEOUT = 15000;
+const API_TIMEOUT = 60000;
 const PRODUCT_API_TIMEOUT = 180000;
 const CHECKOUT_TIMEOUT = 10000;
 
@@ -17,6 +17,11 @@ const CACHEABLE_API_PREFIXES = [
   '/api/woocommerce/pickup-order',
   '/api/sumup/proxy',
 ];
+
+const STALE_WHILE_REVALIDATE_API = new Set([
+  '/api/woocommerce/customers',
+  '/api/woocommerce/pickup-order',
+]);
 
 function timeoutFetch(request, timeout = NAVIGATION_TIMEOUT) {
   const controller = new AbortController();
@@ -65,6 +70,25 @@ async function handleProductRequest(request) {
 
   return new Response(
     JSON.stringify({ success: false, offline: true, error: 'Producten konden niet worden opgehaald en er is nog geen lokale productcache beschikbaar.' }),
+    { status: 503, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } }
+  );
+}
+
+async function handleStaleApiRequest(request) {
+  const cache = await caches.open(CACHE_NAME);
+  const cached = await cache.match(request);
+
+  // Geef een bestaande lokale response onmiddellijk terug. Vernieuw tegelijk op de achtergrond.
+  if (cached) {
+    void refreshApiCache(request);
+    return cached;
+  }
+
+  const fresh = await refreshApiCache(request);
+  if (fresh) return fresh;
+
+  return new Response(
+    JSON.stringify({ success: false, offline: true, error: 'Offline en geen lokale cache beschikbaar.' }),
     { status: 503, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } }
   );
 }
@@ -131,6 +155,11 @@ self.addEventListener('fetch', (event) => {
 
   if (request.method === 'GET' && url.pathname === '/api/woocommerce/products') {
     event.respondWith(handleProductRequest(request));
+    return;
+  }
+
+  if (request.method === 'GET' && STALE_WHILE_REVALIDATE_API.has(url.pathname)) {
+    event.respondWith(handleStaleApiRequest(request));
     return;
   }
 
