@@ -1,8 +1,8 @@
-const CACHE_NAME = 'bendemen-pos-v5';
+const CACHE_NAME = 'bendemen-pos-v6';
 const OFFLINE_URL = '/login';
-const NAVIGATION_TIMEOUT = 2500;
-const API_TIMEOUT = 1800;
-const CHECKOUT_TIMEOUT = 1800;
+const NAVIGATION_TIMEOUT = 3500;
+const API_TIMEOUT = 4000;
+const CHECKOUT_TIMEOUT = 4000;
 
 const APP_SHELL = [
   '/',
@@ -32,9 +32,7 @@ function timeoutFetch(request, timeout = NAVIGATION_TIMEOUT) {
 
 async function cacheResponse(cache, request, response) {
   if (response && response.ok && response.type !== 'opaqueredirect') {
-    try {
-      await cache.put(request, response.clone());
-    } catch (_) {}
+    try { await cache.put(request, response.clone()); } catch (_) {}
   }
   return response;
 }
@@ -61,12 +59,7 @@ async function handleCheckoutRequest(request) {
     return await timeoutFetch(request, CHECKOUT_TIMEOUT);
   } catch (_) {
     return new Response(
-      JSON.stringify({
-        success: false,
-        offline: true,
-        queued: true,
-        error: 'POS-server offline of niet bereikbaar. De bestelling wordt lokaal opgeslagen.',
-      }),
+      JSON.stringify({ success: false, offline: true, queued: true, error: 'POS-server offline of niet bereikbaar. De bestelling wordt lokaal opgeslagen.' }),
       { status: 503, headers: { 'Content-Type': 'application/json' } }
     );
   }
@@ -107,29 +100,23 @@ self.addEventListener('fetch', (event) => {
 
   if (url.origin !== self.location.origin) return;
 
-  // Checkout mag nooit blijven hangen wanneer de VPS offline is.
-  // De POS-pagina ontvangt bewust een 503 zodat zijn bestaande offline
-  // fallback de bestelling direct in localStorage zet.
   if (request.method === 'POST' && url.pathname === '/api/woocommerce/checkout') {
     event.respondWith(handleCheckoutRequest(request));
     return;
   }
 
-  // Andere API POST/PUT/DELETE requests worden niet door de service worker
-  // nagebootst of gecached.
   if (request.method !== 'GET') return;
 
+  // API-data is NETWORK-FIRST. Een oude API-cache mag nooit een echte online
+  // server verbergen. Eerst wordt de VPS geprobeerd; alleen bij een echte
+  // timeout/netwerkfout gebruiken we de lokale cache.
   if (url.pathname.startsWith('/api/') && isCacheableApi(url.pathname)) {
     event.respondWith((async () => {
-      const cached = await caches.match(request);
-
-      if (cached) {
-        event.waitUntil(refreshApiCache(request));
-        return cached;
-      }
-
       const fresh = await refreshApiCache(request);
       if (fresh) return fresh;
+
+      const cached = await caches.match(request);
+      if (cached) return cached;
 
       return new Response(
         JSON.stringify({ success: false, offline: true, error: 'Offline en geen lokale cache beschikbaar.' }),
@@ -157,26 +144,19 @@ self.addEventListener('fetch', (event) => {
   if (request.mode === 'navigate') {
     event.respondWith((async () => {
       const cache = await caches.open(CACHE_NAME);
-
       try {
         const response = await timeoutFetch(request);
-        if (response.ok && response.type !== 'opaqueredirect') {
-          await cache.put(request, response.clone());
-        }
+        if (response.ok && response.type !== 'opaqueredirect') await cache.put(request, response.clone());
         return response;
       } catch (_) {
         const cached = await caches.match(request, { ignoreSearch: true });
         if (cached) return cached;
-
         const pathCached = await caches.match(url.pathname, { ignoreSearch: true });
         if (pathCached) return pathCached;
-
         const rootCached = await caches.match('/');
         if (rootCached) return rootCached;
-
         const loginCached = await caches.match(OFFLINE_URL);
         if (loginCached) return loginCached;
-
         return new Response(
           '<!doctype html><html><body style="margin:0;background:#fff;display:flex;align-items:center;justify-content:center;height:100vh;font-family:Arial"><div style="text-align:center"><strong>BENDEMEN POS</strong><p>Offline modus wordt gestart...</p></div></body></html>',
           { headers: { 'Content-Type': 'text/html; charset=utf-8' } }
