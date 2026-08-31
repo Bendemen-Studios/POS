@@ -23,30 +23,19 @@ git reset --hard "origin/$BRANCH"
 git clean -fd -e .env -e .env.local
 chmod +x "$APP_DIR/deploy.sh" 2>/dev/null || true
 
-if [ ! -f .env ]; then
-  if [ -f .env.example ]; then
-    cp .env.example .env
-    chmod 600 .env
-    echo "⚠️ .env aangemaakt vanuit .env.example. Controleer je productiegegevens."
-  else
-    touch .env
-    chmod 600 .env
-    echo "⚠️ .env bestaat nog niet; leeg bestand aangemaakt."
-  fi
-fi
-
 if [ ! -f package.json ]; then
   echo "❌ package.json ontbreekt na git update. Deployment gestopt."
   exit 1
 fi
 
-# package-lock wordt bewust niet uit Git gebruikt. De vorige lockfile was
-# incompleet en liet Next.js 14 de ontbrekende SWC dependencies patchen,
-# waarna de build faalde. Maak daarom op de VPS altijd een verse lockfile.
-rm -f package-lock.json
-npm install --omit=dev --no-audit --no-fund
+# Next.js 14 probeert een incomplete/out-of-sync lockfile te patchen voor SWC.
+# Daarom maken we op de VPS eerst een volledig schone dependency-installatie.
+rm -rf node_modules package-lock.json
+npm cache verify >/dev/null 2>&1 || true
+npm install --include=dev --no-audit --no-fund --package-lock=true
 
-# Volledig nieuwe Next build zodat oude chunks/404's niet blijven hangen.
+# De door npm aangemaakte lockfile is nu compleet genoeg voor Next om direct
+# te bouwen zonder patch-incorrect-lockfile.
 rm -rf .next
 npm run build
 
@@ -61,8 +50,8 @@ else
 fi
 
 pm2 save
-
 sleep 2
+
 if ! pm2 describe "$APP_NAME" | grep -q "online"; then
   echo "❌ PM2 kon $APP_NAME niet online krijgen."
   pm2 logs "$APP_NAME" --lines 30 --nostream || true
