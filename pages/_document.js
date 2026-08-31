@@ -4,8 +4,7 @@ export default function Document() {
   return (
     <Html lang="nl">
       <Head>
-        {/* Directe Tailwind Play CDN laden via server-side HTML Head */}
-        <script src="https://cdn.tailwindcss.com"></script>
+        <meta name="mobile-web-app-capable" content="yes" />
       </Head>
       <body className="bg-white text-black antialiased">
         <Main />
