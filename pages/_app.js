@@ -6,6 +6,7 @@ import '../styles/globals.css';
 const SUMUP_GATEWAY = 'https://pos-sumup.vercel.app';
 const SUMUP_FINAL_STATUSES = new Set(['SUCCESSFUL', 'FAILED', 'CANCELLED', 'REFUNDED']);
 const PRODUCT_SYNC_TIMEOUT = 60000;
+const PRODUCT_SYNC_INTERVAL = 30000;
 
 function jsonResponse(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -38,6 +39,35 @@ async function pollSumUpTransaction(clientTransactionId, originalFetch) {
   }
 
   return { success: false, pending: true, clientTransactionId, status: lastStatus, error: 'De SumUp-betaling is nog niet definitief bevestigd. Probeer niet opnieuw te betalen; controleer eerst de Solo en de transactiegeschiedenis.' };
+}
+
+async function syncProductsToCacheAndNotify() {
+  if (typeof window === 'undefined') return false;
+  if (!localStorage.getItem('pos_user')) return false;
+
+  try {
+    const response = await fetch('/api/woocommerce/products', {
+      method: 'GET',
+      cache: 'no-store',
+      headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' },
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data?.success || !Array.isArray(data.products)) return false;
+
+    const serializedProducts = JSON.stringify(data.products);
+    const previousProducts = localStorage.getItem('pos_cached_products');
+    localStorage.setItem('pos_cached_products', serializedProducts);
+    localStorage.setItem('pos_cached_products_updated_at', String(Date.now()));
+
+    const changed = previousProducts !== serializedProducts;
+    if (changed) {
+      window.dispatchEvent(new CustomEvent('pos:products-updated'));
+    }
+    return changed;
+  } catch (error) {
+    console.warn('[PRODUCT SYNC] tijdelijke syncfout:', error.message);
+    return false;
+  }
 }
 
 function installSumUpGatewayFetch() {
@@ -237,6 +267,7 @@ export default function App({ Component, pageProps }) {
   const router = useRouter();
   const [offlineSyncMessage, setOfflineSyncMessage] = useState(null);
   const [serverOnline, setServerOnline] = useState(true);
+  const [productSyncVersion, setProductSyncVersion] = useState(0);
 
   useEffect(() => {
     installSumUpGatewayFetch();
@@ -257,6 +288,24 @@ export default function App({ Component, pageProps }) {
     };
   }, []);
 
+  useEffect(() => {
+    if (router.pathname !== '/' || typeof window === 'undefined') return undefined;
+    if (!localStorage.getItem('pos_user')) return undefined;
+
+    let stopped = false;
+    const sync = async () => {
+      const changed = await syncProductsToCacheAndNotify();
+      if (changed && !stopped) setProductSyncVersion((version) => version + 1);
+    };
+
+    sync();
+    const interval = window.setInterval(sync, PRODUCT_SYNC_INTERVAL);
+    return () => {
+      stopped = true;
+      window.clearInterval(interval);
+    };
+  }, [router.pathname]);
+
   const adminOffline = router.pathname === '/admin' && !serverOnline;
 
   return (
@@ -275,7 +324,7 @@ export default function App({ Component, pageProps }) {
           {offlineSyncMessage}
         </div>
       )}
-      <Component {...pageProps} />
+      <Component key={router.pathname === '/' ? productSyncVersion : undefined} {...pageProps} />
       {adminOffline && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 100000, background: 'rgba(17,24,39,.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
           <div style={{ maxWidth: 440, width: '100%', background: '#fff', borderRadius: 14, padding: 28, boxShadow: '0 18px 60px rgba(0,0,0,.3)', textAlign: 'center' }}>
