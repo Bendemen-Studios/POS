@@ -1,4 +1,4 @@
-const CACHE_NAME = 'bendemen-pos-v7';
+const CACHE_NAME = 'bendemen-pos-v8';
 const OFFLINE_URL = '/login';
 const NAVIGATION_TIMEOUT = 3500;
 const API_TIMEOUT = 4000;
@@ -17,7 +17,6 @@ const APP_SHELL = [
 ];
 
 const CACHEABLE_API_PREFIXES = [
-  '/api/admin/store',
   '/api/auth/store-selection',
   '/api/woocommerce/products',
   '/api/woocommerce/customers',
@@ -53,6 +52,20 @@ async function refreshApiCache(request) {
     return response;
   } catch (_) {
     return null;
+  }
+}
+
+async function handleServerStatusRequest(request) {
+  try {
+    // IMPORTANT: the health/status request is NEVER allowed to use the
+    // service-worker cache. A cached 200 response would incorrectly show
+    // "Server online" while the VPS is actually down.
+    return await timeoutFetch(request, 3000);
+  } catch (_) {
+    return new Response(
+      JSON.stringify({ success: false, offline: true, error: 'POS-server offline of niet bereikbaar.' }),
+      { status: 503, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } }
+    );
   }
 }
 
@@ -104,6 +117,12 @@ self.addEventListener('fetch', (event) => {
 
   if (url.origin !== self.location.origin) return;
 
+  // Server status is ALWAYS a real network check. Never answer it from cache.
+  if (request.method === 'GET' && url.pathname === '/api/admin/store') {
+    event.respondWith(handleServerStatusRequest(request));
+    return;
+  }
+
   // Checkout is always network-first, even when navigator.onLine is false.
   // This is important when the browser's connection state is stale while the
   // POS server is actually reachable.
@@ -114,9 +133,8 @@ self.addEventListener('fetch', (event) => {
 
   if (request.method !== 'GET') return;
 
-  // API-data is NETWORK-FIRST. Een oude API-cache mag nooit een echte online
-  // server verbergen. Eerst wordt de VPS geprobeerd; alleen bij een echte
-  // timeout/netwerkfout gebruiken we de lokale cache.
+  // API-data is NETWORK-FIRST. An old API-cache may only be used when the
+  // actual VPS request fails. The server-status endpoint above is excluded.
   if (url.pathname.startsWith('/api/') && isCacheableApi(url.pathname)) {
     event.respondWith((async () => {
       const fresh = await refreshApiCache(request);
