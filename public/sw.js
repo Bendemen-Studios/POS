@@ -1,7 +1,8 @@
-const CACHE_NAME = 'bendemen-pos-v10';
+const CACHE_NAME = 'bendemen-pos-v11';
 const OFFLINE_URL = '/login';
 const NAVIGATION_TIMEOUT = 3500;
-const API_TIMEOUT = 10000;
+const API_TIMEOUT = 15000;
+const PRODUCT_API_TIMEOUT = 65000;
 const CHECKOUT_TIMEOUT = 10000;
 
 const APP_SHELL = [
@@ -14,7 +15,6 @@ const APP_SHELL = [
   '/favicon.ico',
 ];
 
-// GET-data die in Admin offline als alleen-lezen beschikbaar mag zijn.
 const CACHEABLE_API_PREFIXES = [
   '/api/auth/store-selection',
   '/api/admin/users',
@@ -45,16 +45,43 @@ function isCacheableApi(pathname) {
 }
 
 async function refreshApiCache(request) {
+  const url = new URL(request.url);
+  const timeout = url.pathname === '/api/woocommerce/products' ? PRODUCT_API_TIMEOUT : API_TIMEOUT;
   try {
-    const response = await timeoutFetch(request, API_TIMEOUT);
+    const response = await timeoutFetch(request, timeout);
     if (response.ok) {
       const cache = await caches.open(CACHE_NAME);
       await cache.put(request, response.clone());
+
+      // Product sync requests contain a unique _sync query parameter. Keep a
+      // canonical cache entry as the offline fallback as well.
+      if (url.pathname === '/api/woocommerce/products') {
+        try {
+          await cache.put(new Request('/api/woocommerce/products'), response.clone());
+        } catch (_) {}
+      }
     }
     return response;
   } catch (_) {
     return null;
   }
+}
+
+async function handleProductRequest(request) {
+  const fresh = await refreshApiCache(request);
+  if (fresh) return fresh;
+
+  const cache = await caches.open(CACHE_NAME);
+  const canonical = await caches.match('/api/woocommerce/products');
+  if (canonical) return canonical;
+
+  const cached = await caches.match(request);
+  if (cached) return cached;
+
+  return new Response(
+    JSON.stringify({ success: false, offline: true, error: 'Producten konden niet worden opgehaald en er is nog geen lokale productcache beschikbaar.' }),
+    { status: 503, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } }
+  );
 }
 
 async function handleServerStatusRequest(request) {
@@ -119,6 +146,11 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  if (request.method === 'GET' && url.pathname === '/api/woocommerce/products') {
+    event.respondWith(handleProductRequest(request));
+    return;
+  }
+
   if (request.method === 'POST' && url.pathname === '/api/woocommerce/checkout') {
     event.respondWith(handleCheckoutRequest(request));
     return;
@@ -126,9 +158,6 @@ self.addEventListener('fetch', (event) => {
 
   if (request.method !== 'GET') return;
 
-  // Admin/POS data is network-first, with cached data available only when
-  // the real server cannot be reached. This makes Admin usable offline but
-  // never turns stale data into a write source.
   if (url.pathname.startsWith('/api/') && isCacheableApi(url.pathname)) {
     event.respondWith((async () => {
       const fresh = await refreshApiCache(request);
