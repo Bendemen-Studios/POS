@@ -5,8 +5,8 @@ import '../styles/globals.css';
 
 const SUMUP_GATEWAY = 'https://pos-sumup.vercel.app';
 const SUMUP_FINAL_STATUSES = new Set(['SUCCESSFUL', 'FAILED', 'CANCELLED', 'REFUNDED']);
-const PRODUCT_SYNC_TIMEOUT = 60000;
-const PRODUCT_SYNC_INTERVAL = 30000;
+const PRODUCT_SYNC_TIMEOUT = 8000;
+const PRODUCT_SYNC_INTERVAL = 60000;
 const PRODUCT_CACHE_VERSION = 'v3-variations';
 
 function jsonResponse(data, status = 200) {
@@ -53,11 +53,15 @@ async function syncProductsToCacheAndNotify() {
       localStorage.setItem('pos_cached_products_version', PRODUCT_CACHE_VERSION);
     }
 
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), PRODUCT_SYNC_TIMEOUT);
     const response = await fetch('/api/woocommerce/products?_sync=' + Date.now(), {
       method: 'GET',
       cache: 'no-store',
+      signal: controller.signal,
       headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' },
     });
+    window.clearTimeout(timer);
     const data = await response.json().catch(() => ({}));
     if (!response.ok || !data?.success || !Array.isArray(data.products)) return false;
 
@@ -282,13 +286,20 @@ export default function App({ Component, pageProps }) {
       if (changed && !stopped) setProductSyncVersion((version) => version + 1);
     };
 
-    // Directe synchronisatie zodra de POS na login wordt geopend.
-    // Daarna iedere 30 seconden opnieuw.
+    // Directe synchronisatie bij openen/login, daarna iedere minuut.
+    // Bij terugkeer online/focus/zichtbaarheid direct opnieuw synchroniseren.
     sync();
     const interval = window.setInterval(sync, PRODUCT_SYNC_INTERVAL);
+    const wake = () => { if (!document.hidden) sync(); };
+    window.addEventListener('online', wake);
+    window.addEventListener('focus', wake);
+    document.addEventListener('visibilitychange', wake);
     return () => {
       stopped = true;
       window.clearInterval(interval);
+      window.removeEventListener('online', wake);
+      window.removeEventListener('focus', wake);
+      document.removeEventListener('visibilitychange', wake);
     };
   }, [router.pathname]);
 

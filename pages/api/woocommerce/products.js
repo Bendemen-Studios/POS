@@ -22,7 +22,6 @@ export default async function handler(req, res) {
     Authorization: authHeader,
     'Content-Type': 'application/json',
     'User-Agent': 'BDM-POS-Client/1.0',
-    Connection: 'close',
     'Cache-Control': 'no-cache'
   };
 
@@ -47,7 +46,7 @@ export default async function handler(req, res) {
   };
 
   try {
-    const batchSize = 50;
+    const batchSize = 100;
     const maxPages = 1000;
     const products = [];
 
@@ -100,7 +99,7 @@ export default async function handler(req, res) {
       (product) => product.type === 'variable' && Array.isArray(product.variations) && product.variations.length > 0
     );
     const variationMap = new Map();
-    const variationBatchSize = 8;
+    const variationBatchSize = 20;
 
     for (let start = 0; start < variableProducts.length; start += variationBatchSize) {
       const batch = variableProducts.slice(start, start + variationBatchSize);
