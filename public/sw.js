@@ -1,4 +1,4 @@
-const CACHE_NAME = 'bendemen-pos-v17';
+const CACHE_NAME = 'bendemen-pos-v18';
 const OFFLINE_URL = '/login';
 const NAVIGATION_TIMEOUT = 1200;
 const API_TIMEOUT = 8000;
@@ -19,7 +19,6 @@ const CACHEABLE_API_PREFIXES = [
 
 const STALE_WHILE_REVALIDATE_API = new Set([
   '/api/admin/users',
-  '/api/woocommerce/customers',
   '/api/woocommerce/orders',
   '/api/woocommerce/pickup-order',
 ]);
@@ -119,8 +118,6 @@ async function handleCheckoutRequest(request) {
 }
 
 async function warmShell(cache) {
-  // Gebruik korte timeouts en Promise.allSettled: één onbereikbare pagina mag
-  // nooit de installatie van de PWA blokkeren.
   await Promise.allSettled(APP_SHELL.map(async url => {
     try {
       const response = await timeoutFetch(url, 1500);
@@ -204,10 +201,6 @@ self.addEventListener('fetch', event => {
       const cache = await caches.open(CACHE_NAME);
       const cached = await cache.match(request, { ignoreSearch: true }) || await cache.match(url.pathname, { ignoreSearch: true });
 
-      // OFFLINE-FIRST voor navigatie: als de pagina al lokaal beschikbaar is,
-      // toon hem onmiddellijk. De server wordt alleen op de achtergrond
-      // bijgewerkt. Hierdoor blijft de PWA niet hangen op het Android-startscherm
-      // terwijl een offline VPS timeout afwacht.
       if (cached) {
         event.waitUntil((async () => {
           try {
