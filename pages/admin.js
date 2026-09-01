@@ -154,6 +154,34 @@ export default function AdminDashboard() {
     setLoading(false);
   };
 
+  useEffect(() => {
+    let stopped = false;
+    const refreshInventory = async () => {
+      if (stopped || typeof navigator !== 'undefined' && navigator.onLine === false) return;
+      try {
+        await fetchProductsSilently();
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('pos:ajax-refresh'));
+        }
+      } catch (_) {}
+    };
+    refreshInventory();
+    const timer = setInterval(refreshInventory, 300000);
+    const onInventorySync = (event) => {
+      const synced = event?.detail?.products;
+      if (Array.isArray(synced)) {
+        setProducts(synced);
+        localStorage.setItem('admin_products', JSON.stringify(synced));
+      }
+    };
+    window.addEventListener('pos:inventory-synced', onInventorySync);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+      window.removeEventListener('pos:inventory-synced', onInventorySync);
+    };
+  }, []);
+
   const fetchUsers = async () => {
     try {
       const res = await fetch('/api/admin/users');
@@ -200,11 +228,13 @@ export default function AdminDashboard() {
 
   const fetchProductsSilently = async () => {
     try {
-      const res = await fetch('/api/woocommerce/products');
+      const res = await fetch(`/api/woocommerce/products?_sync=${Date.now()}`, { cache: 'no-store' });
       const data = await res.json();
       if (data.success) {
         setProducts(data.products || []);
         localStorage.setItem('admin_products', JSON.stringify(data.products || []));
+        localStorage.setItem('pos_cached_products', JSON.stringify(data.products || []));
+        localStorage.setItem('pos_cached_products_updated_at', String(Date.now()));
       }
     } catch (err) {
       console.error('Fout bij ophalen producten:', err);
@@ -214,7 +244,7 @@ export default function AdminDashboard() {
   const handleManualSyncProducts = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/woocommerce/products');
+      const res = await fetch(`/api/woocommerce/products?_sync=${Date.now()}`, { cache: 'no-store' });
       const data = await res.json();
       if (data.success) {
         setProducts(data.products || []);

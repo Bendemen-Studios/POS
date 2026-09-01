@@ -278,7 +278,7 @@ export default function POSHome() {
     // Eerste sync na render: geen startup-knop meer nodig.
     backgroundSync(true);
     healthTimer = setInterval(() => backgroundSync(false), 10000);
-    fullSyncTimer = setInterval(() => backgroundSync(true), 120000);
+    fullSyncTimer = setInterval(() => backgroundSync(true), 300000);
     const wake = () => { if (!document.hidden) backgroundSync(true); };
     const online = () => backgroundSync(true);
     window.addEventListener('online', online);
@@ -306,7 +306,9 @@ export default function POSHome() {
     };
     window.addEventListener('storage', refreshLocalState);
     window.addEventListener('pos:ajax-refresh', refreshLocalState);
-    return () => { window.removeEventListener('storage', refreshLocalState); window.removeEventListener('pos:ajax-refresh', refreshLocalState); };
+    window.addEventListener('pos:inventory-synced', refreshLocalState);
+    return () => { window.removeEventListener('storage', refreshLocalState); window.removeEventListener('pos:ajax-refresh', refreshLocalState);
+      window.removeEventListener('pos:inventory-synced', refreshLocalState); };
   }, []);
 
   const fetchStores = async () => {
@@ -346,6 +348,8 @@ export default function POSHome() {
         localStorage.setItem('pos_cached_products', JSON.stringify(data.products));
         localStorage.setItem('admin_products', JSON.stringify(data.products));
         localStorage.setItem('pos_cached_products_updated_at', String(Date.now()));
+        localStorage.setItem('admin_products', JSON.stringify(data.products));
+        window.dispatchEvent(new CustomEvent('pos:inventory-synced', { detail: { products: data.products } }));
         setServerOnline(true);
         localStorage.setItem('pos_server_online', '1');
       }
