@@ -1,6 +1,6 @@
-const CACHE_NAME = 'bendemen-pos-v16';
+const CACHE_NAME = 'bendemen-pos-v17';
 const OFFLINE_URL = '/login';
-const NAVIGATION_TIMEOUT = 2500;
+const NAVIGATION_TIMEOUT = 1200;
 const API_TIMEOUT = 8000;
 const PRODUCT_API_TIMEOUT = 5000;
 const CHECKOUT_TIMEOUT = 10000;
@@ -54,7 +54,6 @@ async function refreshApiCache(request, timeout = API_TIMEOUT) {
   }
 }
 
-// ONLINE-FIRST: probeer altijd eerst de server. Alleen bij timeout/offline gebruiken we cache.
 async function onlineFirstApi(request, timeout = API_TIMEOUT) {
   const fresh = await refreshApiCache(request, timeout);
   if (fresh) return fresh;
@@ -70,7 +69,6 @@ async function onlineFirstApi(request, timeout = API_TIMEOUT) {
 }
 
 async function handleProductRequest(request) {
-  // Online-first: nieuwe WooCommerce-productdata heeft altijd voorrang.
   const fresh = await refreshApiCache(request, PRODUCT_API_TIMEOUT);
   if (fresh) {
     const cache = await caches.open(CACHE_NAME);
@@ -91,19 +89,16 @@ async function handleProductRequest(request) {
 async function handleStaleApiRequest(request) {
   const cache = await caches.open(CACHE_NAME);
   const cached = await cache.match(request);
-
-  // Deze minder kritieke datasets blijven snel beschikbaar; de server wordt tegelijk bijgewerkt.
   if (cached) {
     refreshApiCache(request, API_TIMEOUT).catch(() => {});
     return cached;
   }
-
   return onlineFirstApi(request, API_TIMEOUT);
 }
 
 async function handleServerStatusRequest(request) {
   try {
-    return await timeoutFetch(request, 2500);
+    return await timeoutFetch(request, 1000);
   } catch (_) {
     return new Response(JSON.stringify({ success: false, offline: true, error: 'POS-server offline of niet bereikbaar.' }), {
       status: 503,
@@ -123,19 +118,21 @@ async function handleCheckoutRequest(request) {
   }
 }
 
+async function warmShell(cache) {
+  // Gebruik korte timeouts en Promise.allSettled: één onbereikbare pagina mag
+  // nooit de installatie van de PWA blokkeren.
+  await Promise.allSettled(APP_SHELL.map(async url => {
+    try {
+      const response = await timeoutFetch(url, 1500);
+      if (response.ok) await cache.put(url, response);
+    } catch (_) {}
+  }));
+}
+
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then(async cache => {
-        // Alleen de noodzakelijke PWA-shell lokaal beschikbaar maken.
-        // Er wordt niets op de VPS voorgepreload.
-        await Promise.allSettled(APP_SHELL.map(async url => {
-          try {
-            const response = await timeoutFetch(url, 4000);
-            if (response.ok) await cache.put(url, response);
-          } catch (_) {}
-        }));
-      })
+      .then(cache => warmShell(cache))
       .then(() => self.skipWaiting())
   );
 });
@@ -207,14 +204,25 @@ self.addEventListener('fetch', event => {
       const cache = await caches.open(CACHE_NAME);
       const cached = await cache.match(request, { ignoreSearch: true }) || await cache.match(url.pathname, { ignoreSearch: true });
 
-      // ONLINE-FIRST navigatie: de actuele site/VPS krijgt altijd voorrang.
+      // OFFLINE-FIRST voor navigatie: als de pagina al lokaal beschikbaar is,
+      // toon hem onmiddellijk. De server wordt alleen op de achtergrond
+      // bijgewerkt. Hierdoor blijft de PWA niet hangen op het Android-startscherm
+      // terwijl een offline VPS timeout afwacht.
+      if (cached) {
+        event.waitUntil((async () => {
+          try {
+            const fresh = await timeoutFetch(request, NAVIGATION_TIMEOUT);
+            if (fresh.ok && fresh.type !== 'opaqueredirect') await cache.put(request, fresh.clone());
+          } catch (_) {}
+        })());
+        return cached;
+      }
+
       try {
         const response = await timeoutFetch(request, NAVIGATION_TIMEOUT);
         if (response.ok && response.type !== 'opaqueredirect') await cache.put(request, response.clone());
         return response;
       } catch (_) {
-        // Alleen wanneer de server/site niet bereikbaar is, terugvallen op lokale PWA-cache.
-        if (cached) return cached;
         const rootCached = await cache.match('/');
         if (rootCached) return rootCached;
         const loginCached = await cache.match(OFFLINE_URL);
