@@ -1,6 +1,7 @@
 {
   "name": "bendemen-pos",
   "version": "1.0.0",
+  "description": "Bendemen POS",
   "private": true,
   "scripts": {
     "dev": "next dev",
