@@ -1,0 +1,41 @@
+name: Fix POS points label
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, 'fix: correct POS points label') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Correct points preview
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('pages/index.js')
+          s = p.read_text()
+          old = "const finalTotal = Math.max(0, subtotal - totalDiscount);"
+          new = "const finalTotal = Math.max(0, subtotal - totalDiscount);\n  // Keep the customer-facing preview identical to the server earning rule.\n  const earnedPointsPreview = (() => {\n    const euros = Number(finalTotal);\n    if (!Number.isFinite(euros) || euros <= 0) return 0;\n    const wholeEuros = Math.floor(euros);\n    const centsRemainder = Math.round((euros - wholeEuros) * 100);\n    return wholeEuros + (centsRemainder >= 51 ? 1 : 0);\n  })();"
+          if "const earnedPointsPreview = (() =>" not in s:
+              if old not in s:
+                  raise SystemExit('finalTotal marker not found')
+              s = s.replace(old, new, 1)
+          old_ui = "Deze bestelling levert {Math.floor(finalTotal)} punten op voor {selectedCustomer.first_name || selectedCustomer.username}."
+          new_ui = "Deze bestelling levert {earnedPointsPreview} punt{earnedPointsPreview === 1 ? '' : 'en'} op voor {selectedCustomer.first_name || selectedCustomer.username}."
+          if old_ui not in s:
+              raise SystemExit('points preview text not found')
+          s = s.replace(old_ui, new_ui, 1)
+          p.write_text(s)
+          PY
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add pages/index.js
+          git diff --cached --quiet || git commit -m "fix: correct POS points label"
+          git push
