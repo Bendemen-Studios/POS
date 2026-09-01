@@ -20,25 +20,18 @@ command -v git >/dev/null || { echo "❌ git ontbreekt."; exit 1; }
 command -v npm >/dev/null || { echo "❌ npm ontbreekt."; exit 1; }
 command -v pm2 >/dev/null || { echo "❌ pm2 ontbreekt."; exit 1; }
 
-# Bescherm de VPS-specifieke environment-bestanden tegen git reset/clean.
-# Ze worden nooit naar GitHub gepusht of verwijderd door deze deployment.
 for env_file in .env .env.local; do
   if [ -f "$env_file" ]; then
     cp -f "$env_file" "$ENV_BACKUP.$(basename "$env_file")"
   fi
 done
 
-# Zorg dat deze VPS altijd de juiste Bendemen-Studios repository gebruikt.
 git remote set-url origin "$REPO_URL"
 echo "📦 Repository: $REPO_URL"
-
-# GitHub main is de bron van waarheid. Forceer de lokale werkboom naar main,
-# ook wanneer een vorige deployment het lokale deploy.sh heeft aangepast.
 git fetch --prune origin "$BRANCH"
 git reset --hard "origin/$BRANCH"
 git clean -fd -e .env -e .env.local
 
-# Herstel beschermde environment-bestanden indien git clean/reset ze raakte.
 for env_file in .env .env.local; do
   backup="$ENV_BACKUP.$(basename "$env_file")"
   if [ -f "$backup" ]; then
@@ -55,12 +48,10 @@ if [ ! -f package.json ]; then
   exit 1
 fi
 
-# Volledig schone dependency-installatie voorkomt Next.js/SWC lockfile-corruptie.
 rm -rf node_modules package-lock.json
 npm cache verify >/dev/null 2>&1 || true
 npm install --include=dev --no-audit --no-fund --package-lock=true
 
-# Volledig schone Next build.
 rm -rf .next
 npm run build
 
@@ -81,6 +72,18 @@ if ! pm2 describe "$APP_NAME" | grep -q "online"; then
   echo "❌ PM2 kon $APP_NAME niet online krijgen."
   pm2 logs "$APP_NAME" --lines 30 --nostream || true
   exit 1
+fi
+
+# Warm de VPS-productcache direct na een succesvolle deployment.
+# Next draait standaard op poort 3000; als deze endpoint niet direct beschikbaar is,
+# blijft de deployment alsnog geslaagd en warmt de eerste POS-request de cache.
+if command -v curl >/dev/null 2>&1; then
+  echo "🔥 VPS productcache preload starten..."
+  if curl -fsS --max-time 90 -H 'Cache-Control: no-cache' 'http://127.0.0.1:3000/api/woocommerce/products?preload=1' >/dev/null; then
+    echo "✅ VPS productcache is voorgeladen."
+  else
+    echo "⚠️ VPS preload kon nog niet worden uitgevoerd; de eerste POS-request warmt de cache automatisch."
+  fi
 fi
 
 printf '\n✨ Deployment succesvol voltooid!\n'
