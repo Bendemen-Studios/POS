@@ -1,8 +1,9 @@
-name: One-shot POS points fix
+name: POS points checkout patch
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
 
 permissions:
   contents: write
@@ -11,41 +12,33 @@ jobs:
   patch:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Patch checkout points award
+      - name: Patch checkout
+        shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
-
           p = Path('pages/api/woocommerce/checkout.js')
           s = p.read_text()
           marker = '// BDM_POS_EARNED_POINTS_SYNC_V2'
-          if marker not in s:
-              s = s.replace(
-                  "import { redeemCustomerPoints } from '../../../lib/customerPoints';",
-                  "import { redeemCustomerPoints, syncEarnedCustomerPoints, calculateEarnedPoints } from '../../../lib/customerPoints';"
-              )
-              old = """    // WooCommerce Points & Rewards now handles earned points from the completed
-    // and paid order. The POS only performs the separate redemption when points were used.
-    let pointsSyncPending = false;
-    let pointsResult = null;
-    if (customerId && Number.isFinite(Number(customerId)) && Number(customerId) > 0 && Number(totals?.pointsUsed || 0) > 0) {
-      try {
-        pointsResult = await redeemCustomerPoints({
-          customerId: Number(customerId),
-          pointsUsed: Number(totals.pointsUsed),
-          orderId: Number(responseOrder.id),
-        });
-      } catch (pointsError) {
-        pointsSyncPending = true;
-        console.error('[CHECKOUT POINTS REDEEM]:', pointsError.message);
-      }
-    }
-"""
-              new = """    // BDM_POS_EARNED_POINTS_SYNC_V2
-    // The POS owns the earning rule: full euros + 1 point for cents 51-99.
-    // This is required for fee/custom-item orders where P&R has no product lines.
+          if marker in s:
+              print('points patch already installed')
+              raise SystemExit(0)
+
+          old_import = "import { redeemCustomerPoints } from '../../../lib/customerPoints';"
+          new_import = "import { redeemCustomerPoints, syncEarnedCustomerPoints, calculateEarnedPoints } from '../../../lib/customerPoints';"
+          if old_import not in s:
+              raise SystemExit('checkout import marker not found')
+          s = s.replace(old_import, new_import, 1)
+
+          start = s.index('    // WooCommerce Points & Rewards now handles earned points')
+          end_marker = '    if (claimed) await completeOrder(clientOrderId, responseOrder.id);'
+          end = s.index(end_marker, start)
+
+          new_block = '''    // BDM_POS_EARNED_POINTS_SYNC_V2
+    // POS earning is authoritative: full euros + 1 point for cents 51-99.
     let pointsEarned = 0;
     let pointsSyncPending = false;
     let pointsResult = null;
@@ -53,24 +46,15 @@ jobs:
       pointsEarned = calculateEarnedPoints(totals?.totalPaid ?? responseOrder.total ?? 0);
       if (pointsEarned > 0) {
         try {
-          pointsResult = await syncEarnedCustomerPoints({
-            customerId: Number(customerId),
-            pointsEarned,
-            orderId: Number(responseOrder.id),
-          });
+          pointsResult = await syncEarnedCustomerPoints({ customerId: Number(customerId), pointsEarned, orderId: Number(responseOrder.id) });
         } catch (pointsError) {
           pointsSyncPending = true;
           console.error('[CHECKOUT POINTS EARN]:', pointsError.message);
         }
       }
-
       if (Number(totals?.pointsUsed || 0) > 0) {
         try {
-          const redeemResult = await redeemCustomerPoints({
-            customerId: Number(customerId),
-            pointsUsed: Number(totals.pointsUsed),
-            orderId: Number(responseOrder.id),
-          });
+          const redeemResult = await redeemCustomerPoints({ customerId: Number(customerId), pointsUsed: Number(totals.pointsUsed), orderId: Number(responseOrder.id) });
           pointsResult = { ...(pointsResult || {}), redemption: redeemResult };
         } catch (pointsError) {
           pointsSyncPending = true;
@@ -78,23 +62,22 @@ jobs:
         }
       }
     }
-"""
-              if old not in s:
-                  raise SystemExit('Expected checkout points block not found')
-              s = s.replace(old, new, 1)
-              s = s.replace(
-                  "return res.status(200).json({ success: true, order: responseOrder, pointsSyncPending, pointsResult });",
-                  "return res.status(200).json({ success: true, order: responseOrder, pointsEarned, pointsSyncPending, pointsResult });",
-                  1
-              )
-              p.write_text(s)
+
+'''
+          s = s[:start] + new_block + s[end:]
+          s = s.replace(
+              'return res.status(200).json({ success: true, order: responseOrder, pointsSyncPending, pointsResult });',
+              'return res.status(200).json({ success: true, order: responseOrder, pointsEarned, pointsSyncPending, pointsResult });',
+              1,
+          )
+          p.write_text(s)
+          print('checkout points patch applied')
           PY
 
-      - name: Commit patch and remove one-shot workflow
+      - name: Commit
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add pages/api/woocommerce/checkout.js
-          git rm .github/workflows/one-shot-fix-pos-points.yml
           git diff --cached --quiet || git commit -m "fix: award POS earned points after checkout"
           git push
