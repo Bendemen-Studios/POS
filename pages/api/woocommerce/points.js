@@ -9,8 +9,6 @@ export default async function handler(req, res) {
   try {
     const customerId = req.method === 'GET' ? req.query.customerId : req.body?.customerId;
 
-    // Een klant is altijd verplicht voor de puntencheck: we moeten
-    // de actuele WooCommerce-puntenbalans van die specifieke klant ophalen.
     if (!customerId) {
       return res.status(400).json({
         success: false,
@@ -21,10 +19,8 @@ export default async function handler(req, res) {
     const currentPoints = await getCustomerPoints(customerId);
 
     if (req.method === 'GET') {
-      return res.status(200).json({
-        success: true,
-        pointsBalance: currentPoints,
-      });
+      res.setHeader('Cache-Control', 'private, no-store, max-age=0, must-revalidate');
+      return res.status(200).json({ success: true, pointsBalance: currentPoints });
     }
 
     const { orderTotal, pointsToRedeem, action } = req.body || {};
@@ -36,11 +32,6 @@ export default async function handler(req, res) {
         pointsEarned,
         pointsBalance: currentPoints,
       });
-    }
-
-    if (action === 'calculate_earned') {
-      const pointsEarned = Math.floor(parseFloat(orderTotal) || 0);
-      return res.status(200).json({ success: true, pointsEarned, pointsBalance: currentPoints });
     }
 
     if (action === 'redeem') {
