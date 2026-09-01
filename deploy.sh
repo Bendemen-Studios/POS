@@ -6,6 +6,8 @@ APP_NAME="bendemen-pos"
 BRANCH="main"
 REPO_URL="https://github.com/Bendemen-Studios/POS.git"
 ENV_BACKUP="/tmp/bendemen-pos-env.$$.backup"
+PRELOAD_SCRIPT="$APP_DIR/scripts/preload-products.sh"
+CRON_MARKER="# BDM POS product preload"
 
 printf '\n🚀 BENDEMEN POS deployment starten...\n'
 
@@ -74,16 +76,26 @@ if ! pm2 describe "$APP_NAME" | grep -q "online"; then
   exit 1
 fi
 
-# Warm de VPS-productcache direct na een succesvolle deployment.
-# Next draait standaard op poort 3000; als deze endpoint niet direct beschikbaar is,
-# blijft de deployment alsnog geslaagd en warmt de eerste POS-request de cache.
-if command -v curl >/dev/null 2>&1; then
+# VPS productcache direct én iedere 5 minuten warm houden.
+# De cronjob draait lokaal op de VPS en gebruikt dus geen publieke DNS/proxy.
+if command -v curl >/dev/null 2>&1 && [ -f "$PRELOAD_SCRIPT" ]; then
+  chmod +x "$PRELOAD_SCRIPT"
+  CRON_LINE="*/5 * * * * $PRELOAD_SCRIPT >> /var/log/bendemen-pos-preload.log 2>&1"
+  TMP_CRON="$(mktemp)"
+  crontab -l 2>/dev/null | grep -v "$CRON_MARKER" | grep -v "preload-products.sh" > "$TMP_CRON" || true
+  printf '%s\n' "$CRON_MARKER" >> "$TMP_CRON"
+  printf '%s\n' "$CRON_LINE" >> "$TMP_CRON"
+  crontab "$TMP_CRON"
+  rm -f "$TMP_CRON"
+
   echo "🔥 VPS productcache preload starten..."
-  if curl -fsS --max-time 90 -H 'Cache-Control: no-cache' 'http://127.0.0.1:3000/api/woocommerce/products?preload=1' >/dev/null; then
+  if "$PRELOAD_SCRIPT"; then
     echo "✅ VPS productcache is voorgeladen."
   else
-    echo "⚠️ VPS preload kon nog niet worden uitgevoerd; de eerste POS-request warmt de cache automatisch."
+    echo "⚠️ VPS preload kon nog niet worden uitgevoerd; cron probeert dit opnieuw."
   fi
+else
+  echo "⚠️ curl of preload-script ontbreekt; automatische VPS preload niet ingesteld."
 fi
 
 printf '\n✨ Deployment succesvol voltooid!\n'
