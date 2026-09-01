@@ -31,49 +31,6 @@ async function fetchJsonWithTimeout(url, options, timeoutMs = 15000) {
   return data;
 }
 
-async function ensureBackordersForPos({ url, authHeader, lineItems }) {
-  const changed = [];
-  for (const item of lineItems) {
-    const productId = Number(item.product_id);
-    const variationId = Number(item.variation_id || 0);
-    const quantity = Math.max(1, Number(item.quantity || 1));
-    const endpoint = variationId > 0
-      ? `${url}/wp-json/wc/v3/products/${productId}/variations/${variationId}`
-      : `${url}/wp-json/wc/v3/products/${productId}`;
-    try {
-      const product = await fetchJsonWithTimeout(endpoint, { headers: { Authorization: authHeader, 'Content-Type': 'application/json' } });
-      const stock = product.stock_quantity;
-      const managing = product.manage_stock === true || product.manage_stock === 'yes' || product.manage_stock === 'parent';
-      if (!managing || stock === null || stock === undefined) continue;
-      if (Number(stock) < quantity && product.backorders !== 'yes') {
-        changed.push({ endpoint, backorders: product.backorders || 'no' });
-        await fetchJsonWithTimeout(endpoint, {
-          method: 'PUT',
-          headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ backorders: 'yes' })
-        });
-      }
-    } catch (error) {
-      console.warn('[CHECKOUT STOCK]: kon backorders niet tijdelijk inschakelen:', error.message);
-    }
-  }
-  return changed;
-}
-
-async function restoreBackordersForPos({ authHeader, changed }) {
-  for (const item of changed) {
-    try {
-      await fetchJsonWithTimeout(item.endpoint, {
-        method: 'PUT',
-        headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ backorders: item.backorders })
-      });
-    } catch (error) {
-      console.warn('[CHECKOUT STOCK]: kon oorspronkelijke backorder-instelling niet herstellen:', error.message);
-    }
-  }
-}
-
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', ['POST']);
@@ -82,8 +39,6 @@ export default async function handler(req, res) {
 
   const clientOrderId = getClientOrderId(req);
   let claimed = false;
-  let temporaryBackorderChanges = [];
-
   const url = process.env.WOOCOMMERCE_URL || process.env.NEXT_PUBLIC_WOOCOMMERCE_URL || 'https://www.bendemen.com';
   const consumerKey = process.env.WOOCOMMERCE_CONSUMER_KEY || process.env.WOOCOMMERCE_KEY || process.env.NEXT_PUBLIC_WOOCOMMERCE_KEY;
   const consumerSecret = process.env.WOOCOMMERCE_CONSUMER_SECRET || process.env.WOOCOMMERCE_SECRET || process.env.NEXT_PUBLIC_WOOCOMMERCE_SECRET;
@@ -106,7 +61,6 @@ export default async function handler(req, res) {
     claimed = claim.claimed;
 
     const { orderItems, paymentMethod, storeId, cashierId, customerId, totals, cashDetails, created_at } = req.body;
-
     const authHeader = 'Basic ' + Buffer.from(`${consumerKey}:${consumerSecret}`).toString('base64');
     const customHeaders = {
       Authorization: authHeader,
@@ -162,11 +116,15 @@ export default async function handler(req, res) {
       ? 'Contant (Kassa Direct)'
       : (paymentMethod === 'manual_pin' ? 'Handmatige Pin (Kassa Direct)' : 'SumUp Pin (Kassa Direct)');
 
+    // Create the order unpaid/pending first. This mirrors the WooCommerce admin
+    // order workflow: an admin can create an order even when stock is 0, then
+    // mark it completed. Completing the order performs the normal WooCommerce
+    // stock reduction, without changing the product's backorder setting.
     const orderData = {
       payment_method: paymentMethod || 'pos_checkout',
       payment_method_title: paymentTitle,
-      set_paid: true,
-      status: 'completed',
+      set_paid: false,
+      status: 'pending',
       customer_id: customerId ? Number(customerId) : 0,
       line_items: lineItems,
       fee_lines: feeLines,
@@ -189,8 +147,6 @@ export default async function handler(req, res) {
 
     let responseOrder;
     try {
-      temporaryBackorderChanges = await ensureBackordersForPos({ url, authHeader, lineItems });
-
       const fetchRes = await fetchWithTimeout(`${url}/wp-json/wc/v3/orders`, {
         method: 'POST',
         headers: customHeaders,
@@ -214,8 +170,35 @@ export default async function handler(req, res) {
 
     if (!responseOrder?.id) throw new Error('WooCommerce gaf geen order-ID terug.');
 
-    await restoreBackordersForPos({ authHeader, changed: temporaryBackorderChanges });
-    temporaryBackorderChanges = [];
+    // Now perform the paid/completed transition. WooCommerce's normal order
+    // status transition reduces managed stock. Crucially, no backorder field
+    // is modified at any point, so a product with backorders='no' stays that way.
+    try {
+      const completeData = { status: 'completed' };
+      const completeRes = await fetchWithTimeout(`${url}/wp-json/wc/v3/orders/${responseOrder.id}`, {
+        method: 'PUT',
+        headers: customHeaders,
+        body: JSON.stringify(completeData)
+      }, 15000);
+      const completeText = await completeRes.text();
+      if (!completeRes.ok) throw new Error(`HTTP ${completeRes.status}: ${completeText}`);
+      responseOrder = JSON.parse(completeText);
+    } catch (completeErr) {
+      console.warn('[CHECKOUT API]: Direct complete faalt/time-out, probeert SDK fallback...', completeErr.message);
+      const api = new WooCommerceRestApi({
+        url,
+        consumerKey,
+        consumerSecret,
+        version: 'wc/v3',
+        axiosConfig: { timeout: 15000, headers: customHeaders }
+      });
+      const { data } = await api.put(`orders/${responseOrder.id}`, { status: 'completed' });
+      responseOrder = data;
+    }
+
+    if (!responseOrder?.id || responseOrder.status !== 'completed') {
+      throw new Error('WooCommerce kon de POS-bestelling niet naar completed zetten.');
+    }
 
     if (claimed) await completeOrder(clientOrderId, responseOrder.id);
 
@@ -235,9 +218,6 @@ export default async function handler(req, res) {
 
     return res.status(200).json({ success: true, order: responseOrder, pointsSyncPending });
   } catch (error) {
-    if (temporaryBackorderChanges.length) {
-      try { await restoreBackordersForPos({ authHeader, changed: temporaryBackorderChanges }); } catch (_) {}
-    }
     if (claimed) {
       try { await releaseOrder(clientOrderId); } catch (releaseError) {
         console.error('[CHECKOUT IDEMPOTENCY RELEASE ERROR]:', releaseError.message);
