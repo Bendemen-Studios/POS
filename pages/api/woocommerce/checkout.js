@@ -82,6 +82,7 @@ export default async function handler(req, res) {
 
   const clientOrderId = getClientOrderId(req);
   let claimed = false;
+  let temporaryBackorderChanges = [];
 
   const url = process.env.WOOCOMMERCE_URL || process.env.NEXT_PUBLIC_WOOCOMMERCE_URL || 'https://www.bendemen.com';
   const consumerKey = process.env.WOOCOMMERCE_CONSUMER_KEY || process.env.WOOCOMMERCE_KEY || process.env.NEXT_PUBLIC_WOOCOMMERCE_KEY;
@@ -187,11 +188,7 @@ export default async function handler(req, res) {
     }
 
     let responseOrder;
-    let temporaryBackorderChanges = [];
     try {
-      // De POS mag bewust verkopen onder nul. WooCommerce laat negatieve voorraad alleen toe
-      // wanneer backorders voor het betreffende product/variatie zijn toegestaan. We zetten dit
-      // uitsluitend rond deze POS-transactie tijdelijk aan en herstellen daarna de oorspronkelijke instelling.
       temporaryBackorderChanges = await ensureBackordersForPos({ url, authHeader, lineItems });
 
       const fetchRes = await fetchWithTimeout(`${url}/wp-json/wc/v3/orders`, {
@@ -218,6 +215,7 @@ export default async function handler(req, res) {
     if (!responseOrder?.id) throw new Error('WooCommerce gaf geen order-ID terug.');
 
     await restoreBackordersForPos({ authHeader, changed: temporaryBackorderChanges });
+    temporaryBackorderChanges = [];
 
     if (claimed) await completeOrder(clientOrderId, responseOrder.id);
 
@@ -237,7 +235,7 @@ export default async function handler(req, res) {
 
     return res.status(200).json({ success: true, order: responseOrder, pointsSyncPending });
   } catch (error) {
-    if (typeof temporaryBackorderChanges !== 'undefined' && temporaryBackorderChanges.length) {
+    if (temporaryBackorderChanges.length) {
       try { await restoreBackordersForPos({ authHeader, changed: temporaryBackorderChanges }); } catch (_) {}
     }
     if (claimed) {
