@@ -1,4 +1,5 @@
 name: Fix POS sync and admin inventory
+# Admin offline popup guard + dismissible read-only notice
 
 on:
   push:
