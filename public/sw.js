@@ -1,10 +1,11 @@
-const CACHE_NAME = 'bendemen-pos-v15';
+const CACHE_NAME = 'bendemen-pos-v16';
 const OFFLINE_URL = '/login';
 const NAVIGATION_TIMEOUT = 2500;
 const API_TIMEOUT = 8000;
 const PRODUCT_API_TIMEOUT = 5000;
 const CHECKOUT_TIMEOUT = 10000;
 
+// Alleen browser/PWA-cache. Geen preload of permanente cache op de VPS.
 const APP_SHELL = ['/', '/login', '/select-store', '/pickup', '/admin', '/manifest.json', '/favicon.ico'];
 
 const CACHEABLE_API_PREFIXES = [
@@ -53,28 +54,35 @@ async function refreshApiCache(request, timeout = API_TIMEOUT) {
   }
 }
 
-async function handleProductRequest(request) {
+// ONLINE-FIRST: probeer altijd eerst de server. Alleen bij timeout/offline gebruiken we cache.
+async function onlineFirstApi(request, timeout = API_TIMEOUT) {
+  const fresh = await refreshApiCache(request, timeout);
+  if (fresh) return fresh;
+
   const cache = await caches.open(CACHE_NAME);
-  const canonical = await cache.match('/api/woocommerce/products');
-  const cached = canonical || await cache.match(request);
+  const cached = await cache.match(request);
+  if (cached) return cached;
 
-  // Productdata is read-first from local cache. De kassa hoeft nooit op WooCommerce te wachten.
-  if (cached) {
-    refreshApiCache(request, PRODUCT_API_TIMEOUT).then(async fresh => {
-      if (fresh) {
-        try { await cache.put('/api/woocommerce/products', fresh.clone()); } catch (_) {}
-      }
-    }).catch(() => {});
-    return cached;
-  }
+  return new Response(JSON.stringify({ success: false, offline: true, error: 'Server niet bereikbaar en geen lokale cache beschikbaar.' }), {
+    status: 503,
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
+  });
+}
 
+async function handleProductRequest(request) {
+  // Online-first: nieuwe WooCommerce-productdata heeft altijd voorrang.
   const fresh = await refreshApiCache(request, PRODUCT_API_TIMEOUT);
   if (fresh) {
+    const cache = await caches.open(CACHE_NAME);
     try { await cache.put('/api/woocommerce/products', fresh.clone()); } catch (_) {}
     return fresh;
   }
 
-  return new Response(JSON.stringify({ success: false, offline: true, error: 'Geen lokale productcache beschikbaar.' }), {
+  const cache = await caches.open(CACHE_NAME);
+  const cached = await cache.match('/api/woocommerce/products') || await cache.match(request);
+  if (cached) return cached;
+
+  return new Response(JSON.stringify({ success: false, offline: true, error: 'Server niet bereikbaar en geen lokale productcache beschikbaar.' }), {
     status: 503,
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
   });
@@ -83,16 +91,14 @@ async function handleProductRequest(request) {
 async function handleStaleApiRequest(request) {
   const cache = await caches.open(CACHE_NAME);
   const cached = await cache.match(request);
+
+  // Deze minder kritieke datasets blijven snel beschikbaar; de server wordt tegelijk bijgewerkt.
   if (cached) {
     refreshApiCache(request, API_TIMEOUT).catch(() => {});
     return cached;
   }
-  const fresh = await refreshApiCache(request, API_TIMEOUT);
-  if (fresh) return fresh;
-  return new Response(JSON.stringify({ success: false, offline: true, error: 'Offline en geen lokale cache beschikbaar.' }), {
-    status: 503,
-    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
-  });
+
+  return onlineFirstApi(request, API_TIMEOUT);
 }
 
 async function handleServerStatusRequest(request) {
@@ -121,6 +127,8 @@ self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(async cache => {
+        // Alleen de noodzakelijke PWA-shell lokaal beschikbaar maken.
+        // Er wordt niets op de VPS voorgepreload.
         await Promise.allSettled(APP_SHELL.map(async url => {
           try {
             const response = await timeoutFetch(url, 4000);
@@ -172,7 +180,7 @@ self.addEventListener('fetch', event => {
   if (request.method !== 'GET') return;
 
   if (url.pathname.startsWith('/api/') && isCacheableApi(url.pathname)) {
-    event.respondWith(handleStaleApiRequest(request));
+    event.respondWith(onlineFirstApi(request, API_TIMEOUT));
     return;
   }
 
@@ -199,21 +207,13 @@ self.addEventListener('fetch', event => {
       const cache = await caches.open(CACHE_NAME);
       const cached = await cache.match(request, { ignoreSearch: true }) || await cache.match(url.pathname, { ignoreSearch: true });
 
-      // Homepage/login eerst uit cache: openen is onmiddellijk, ook als VPS/site offline is.
-      if (url.pathname === '/' || url.pathname === '/login') {
-        if (cached) {
-          event.waitUntil(timeoutFetch(request, NAVIGATION_TIMEOUT).then(async response => {
-            if (response.ok && response.type !== 'opaqueredirect') await cache.put(request, response.clone());
-          }).catch(() => {}));
-          return cached;
-        }
-      }
-
+      // ONLINE-FIRST navigatie: de actuele site/VPS krijgt altijd voorrang.
       try {
         const response = await timeoutFetch(request, NAVIGATION_TIMEOUT);
         if (response.ok && response.type !== 'opaqueredirect') await cache.put(request, response.clone());
         return response;
       } catch (_) {
+        // Alleen wanneer de server/site niet bereikbaar is, terugvallen op lokale PWA-cache.
         if (cached) return cached;
         const rootCached = await cache.match('/');
         if (rootCached) return rootCached;
