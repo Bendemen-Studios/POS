@@ -1,7 +1,7 @@
 import WooCommerceRestApi from '@woocommerce/woocommerce-rest-api';
 import { createHash } from 'crypto';
 import { claimOrder, completeOrder, releaseOrder } from '../../../lib/orderIdempotency';
-import { updateCustomerPoints } from '../../../lib/customerPoints';
+import { redeemCustomerPoints } from '../../../lib/customerPoints';
 
 function getClientOrderId(req) {
   const headerId = req.headers['idempotency-key'];
@@ -116,10 +116,6 @@ export default async function handler(req, res) {
       ? 'Contant (Kassa Direct)'
       : (paymentMethod === 'manual_pin' ? 'Handmatige Pin (Kassa Direct)' : 'SumUp Pin (Kassa Direct)');
 
-    // Create the order unpaid/pending first. This mirrors the WooCommerce admin
-    // order workflow: an admin can create an order even when stock is 0, then
-    // mark it completed. Completing the order performs the normal WooCommerce
-    // stock reduction, without changing the product's backorder setting.
     const orderData = {
       payment_method: paymentMethod || 'pos_checkout',
       payment_method_title: paymentTitle,
@@ -170,9 +166,6 @@ export default async function handler(req, res) {
 
     if (!responseOrder?.id) throw new Error('WooCommerce gaf geen order-ID terug.');
 
-    // Now perform the paid/completed transition. WooCommerce's normal order
-    // status transition reduces managed stock. Crucially, no backorder field
-    // is modified at any point, so a product with backorders='no' stays that way.
     try {
       const completeData = { status: 'completed' };
       const completeRes = await fetchWithTimeout(`${url}/wp-json/wc/v3/orders/${responseOrder.id}`, {
@@ -200,23 +193,26 @@ export default async function handler(req, res) {
       throw new Error('WooCommerce kon de POS-bestelling niet naar completed zetten.');
     }
 
-    if (claimed) await completeOrder(clientOrderId, responseOrder.id);
-
+    // WooCommerce Points & Rewards now handles earned points from the completed
+    // order. The POS only performs the separate redemption when points were used.
     let pointsSyncPending = false;
-    if (customerId && Number.isFinite(Number(customerId)) && Number(customerId) > 0) {
+    let pointsResult = null;
+    if (customerId && Number.isFinite(Number(customerId)) && Number(customerId) > 0 && Number(totals?.pointsUsed || 0) > 0) {
       try {
-        await updateCustomerPoints({
+        pointsResult = await redeemCustomerPoints({
           customerId: Number(customerId),
-          pointsUsed: totals?.pointsUsed || 0,
-          totalPaid: totals?.totalPaid || 0,
+          pointsUsed: Number(totals.pointsUsed),
+          orderId: Number(responseOrder.id),
         });
       } catch (pointsError) {
         pointsSyncPending = true;
-        console.error('[CHECKOUT POINTS SYNC]:', pointsError.message);
+        console.error('[CHECKOUT POINTS REDEEM]:', pointsError.message);
       }
     }
 
-    return res.status(200).json({ success: true, order: responseOrder, pointsSyncPending });
+    if (claimed) await completeOrder(clientOrderId, responseOrder.id);
+
+    return res.status(200).json({ success: true, order: responseOrder, pointsSyncPending, pointsResult });
   } catch (error) {
     if (claimed) {
       try { await releaseOrder(clientOrderId); } catch (releaseError) {
