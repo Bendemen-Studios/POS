@@ -10,7 +10,8 @@ export default async function handler(req, res) {
     const action = req.method === 'POST' ? String(req.body?.action || '') : 'balance';
     const customerId = req.method === 'GET' ? req.query.customerId : req.body?.customerId;
 
-    // Earning points is independent of a customer balance and is always 1 point per full €1.
+    // Preview: 1 point per €1. A fractional euro advances to the next point
+    // only when it is strictly above €0.50: €2.50 = 2, €2.51 = 3.
     if (req.method === 'POST' && action === 'calculate_earned') {
       const pointsEarned = calculateEarnedPoints(req.body?.orderTotal);
       return res.status(200).json({ success: true, pointsEarned, pointsPerEuro: 1 });
