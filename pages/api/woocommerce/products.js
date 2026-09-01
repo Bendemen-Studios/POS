@@ -1,6 +1,16 @@
 import WooCommerceRestApi from '@woocommerce/woocommerce-rest-api';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const SERVER_CACHE_TTL = 5 * 60 * 1000;
+
+// VPS-side warm cache. Next/PM2 processes keep this in memory so the POS
+// does not have to wait for WooCommerce on every request.
+const getCache = () => {
+  if (!globalThis.__bdmPosProductsCache) {
+    globalThis.__bdmPosProductsCache = { data: null, updatedAt: 0, loading: null };
+  }
+  return globalThis.__bdmPosProductsCache;
+};
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
@@ -8,50 +18,69 @@ export default async function handler(req, res) {
     return res.status(405).json({ success: false, error: `Method ${req.method} Not Allowed` });
   }
 
-  const url = process.env.WOOCOMMERCE_URL || process.env.NEXT_PUBLIC_WOOCOMMERCE_URL || 'https://www.bendemen.com';
-  const consumerKey = process.env.WOOCOMMERCE_CONSUMER_KEY || process.env.WOO_CONSUMER_KEY || process.env.WOOCOMMERCE_KEY || process.env.NEXT_PUBLIC_WOOCOMMERCE_KEY;
-  const consumerSecret = process.env.WOOCOMMERCE_CONSUMER_SECRET || process.env.WOO_CONSUMER_SECRET || process.env.WOOCOMMERCE_SECRET || process.env.NEXT_PUBLIC_WOOCOMMERCE_SECRET;
+  const cache = getCache();
+  const forceRefresh = req.query?.refresh === '1' || req.query?.preload === '1';
+  const cacheAge = Date.now() - cache.updatedAt;
 
-  if (!consumerKey || !consumerSecret) {
-    console.error('[PRODUCTS API ERROR]: WooCommerce API keys ontbreken in .env');
-    return res.status(500).json({ success: false, error: 'WooCommerce API sleutels zijn niet geconfigureerd in .env' });
+  // Normal POS requests get the warmed VPS cache immediately. Explicit
+  // refresh/preload requests rebuild it from WooCommerce.
+  if (!forceRefresh && cache.data && cacheAge < SERVER_CACHE_TTL) {
+    res.setHeader('Cache-Control', 'private, max-age=0, stale-while-revalidate=300');
+    res.setHeader('X-POS-Product-Cache', 'HIT');
+    return res.status(200).json(cache.data);
   }
 
-  const authHeader = 'Basic ' + Buffer.from(`${consumerKey}:${consumerSecret}`).toString('base64');
-  const customHeaders = {
-    Authorization: authHeader,
-    'Content-Type': 'application/json',
-    'User-Agent': 'BDM-POS-Client/1.0',
-    'Cache-Control': 'no-cache'
-  };
-
-  const fetchJson = async (endpoint, options = {}, timeoutMs = 20000) => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+  // Prevent 10 POS terminals from all rebuilding the same WooCommerce cache.
+  if (cache.loading) {
     try {
-      const response = await fetch(endpoint, {
-        ...options,
-        headers: { ...customHeaders, ...(options.headers || {}) },
-        cache: 'no-store',
-        signal: controller.signal
-      });
-      const text = await response.text();
-      let data = null;
-      try { data = text ? JSON.parse(text) : null; } catch (_) { data = null; }
-      if (!response.ok) throw new Error(`HTTP ${response.status}: ${text.slice(0, 500)}`);
-      return data;
-    } finally {
-      clearTimeout(timer);
+      const data = await cache.loading;
+      res.setHeader('Cache-Control', 'private, max-age=0, stale-while-revalidate=300');
+      res.setHeader('X-POS-Product-Cache', 'WAIT');
+      return res.status(200).json(data);
+    } catch (_) {
+      // Continue and try a fresh request below.
     }
-  };
+  }
 
-  try {
+  cache.loading = (async () => {
+    const url = process.env.WOOCOMMERCE_URL || process.env.NEXT_PUBLIC_WOOCOMMERCE_URL || 'https://www.bendemen.com';
+    const consumerKey = process.env.WOOCOMMERCE_CONSUMER_KEY || process.env.WOO_CONSUMER_KEY || process.env.WOOCOMMERCE_KEY || process.env.NEXT_PUBLIC_WOOCOMMERCE_KEY;
+    const consumerSecret = process.env.WOOCOMMERCE_CONSUMER_SECRET || process.env.WOO_CONSUMER_SECRET || process.env.WOOCOMMERCE_SECRET || process.env.NEXT_PUBLIC_WOOCOMMERCE_SECRET;
+
+    if (!consumerKey || !consumerSecret) throw new Error('WooCommerce API sleutels zijn niet geconfigureerd in .env');
+
+    const authHeader = 'Basic ' + Buffer.from(`${consumerKey}:${consumerSecret}`).toString('base64');
+    const customHeaders = {
+      Authorization: authHeader,
+      'Content-Type': 'application/json',
+      'User-Agent': 'BDM-POS-Client/1.0',
+      'Cache-Control': 'no-cache'
+    };
+
+    const fetchJson = async (endpoint, options = {}, timeoutMs = 20000) => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const response = await fetch(endpoint, {
+          ...options,
+          headers: { ...customHeaders, ...(options.headers || {}) },
+          cache: 'no-store',
+          signal: controller.signal
+        });
+        const text = await response.text();
+        let data = null;
+        try { data = text ? JSON.parse(text) : null; } catch (_) { data = null; }
+        if (!response.ok) throw new Error(`HTTP ${response.status}: ${text.slice(0, 500)}`);
+        return data;
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+
     const batchSize = 100;
     const maxPages = 1000;
     const products = [];
 
-    // WooCommerce-beheer gebruikt menu_order als de handmatig ingestelde volgorde.
-    // Gebruik die volgorde ook in de POS/Admin en sorteer ID als stabiele fallback.
     for (let page = 1; page <= maxPages; page += 1) {
       const endpoint = `${url}/wp-json/wc/v3/products?per_page=${batchSize}&page=${page}&status=publish&orderby=menu_order&order=asc`;
       let rawProducts;
@@ -169,16 +198,30 @@ export default async function handler(req, res) {
       };
     });
 
-    return res.status(200).json({
+    return {
       success: true,
       count: normalizedProducts.length,
-      products: normalizedProducts
-    });
+      products: normalizedProducts,
+      cached_at: new Date().toISOString()
+    };
+  })();
+
+  try {
+    const data = await cache.loading;
+    cache.data = data;
+    cache.updatedAt = Date.now();
+    res.setHeader('Cache-Control', 'private, max-age=0, stale-while-revalidate=300');
+    res.setHeader('X-POS-Product-Cache', 'MISS');
+    return res.status(200).json(data);
   } catch (error) {
+    // If WooCommerce is temporarily down, serve the last VPS cache rather than failing the POS.
+    if (cache.data) {
+      res.setHeader('X-POS-Product-Cache', 'STALE');
+      return res.status(200).json({ ...cache.data, stale: true });
+    }
     console.error('Fout bij ophalen WooCommerce producten:', error);
-    return res.status(500).json({
-      success: false,
-      error: error.message || 'Fout bij ophalen producten'
-    });
+    return res.status(500).json({ success: false, error: error.message || 'Fout bij ophalen producten' });
+  } finally {
+    cache.loading = null;
   }
 }
