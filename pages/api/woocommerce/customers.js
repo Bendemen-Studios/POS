@@ -1,5 +1,5 @@
 import WooCommerceRestApi from "@woocommerce/woocommerce-rest-api";
-import { extractCustomerPoints } from "../../../lib/customerPoints";
+import { extractCustomerPoints, getCustomersPoints } from "../../../lib/customerPoints";
 
 const WooCommerce = WooCommerceRestApi.default || WooCommerceRestApi;
 
@@ -26,11 +26,27 @@ export default async function handler(req, res) {
       const response = await api.get("customers", { per_page: perPage, page });
       const customers = Array.isArray(response.data) ? response.data : [];
 
+      let authoritativeBalances = {};
+      try {
+        authoritativeBalances = await getCustomersPoints(customers.map((customer) => customer.id));
+      } catch (pointsError) {
+        // Keep the customer list usable if the optional bridge is temporarily unavailable.
+        console.error("WooCommerce Customer Points Fetch Error:", pointsError.message);
+      }
+
       allCustomers.push(
-        ...customers.map((customer) => ({
-          ...customer,
-          points_balance: extractCustomerPoints(customer),
-        }))
+        ...customers.map((customer) => {
+          const fallbackPoints = extractCustomerPoints(customer);
+          const authoritative = authoritativeBalances[String(customer.id)];
+          return {
+            ...customer,
+            // Points & Rewards is the source of truth. Only fall back to customer
+            // metadata when the bridge is unavailable for this customer.
+            points_balance: Number.isFinite(Number(authoritative))
+              ? Math.max(0, Number(authoritative))
+              : fallbackPoints,
+          };
+        })
       );
 
       const totalPages = Number(
