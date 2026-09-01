@@ -22,6 +22,58 @@ async function fetchWithTimeout(url, options, timeoutMs = 15000) {
   }
 }
 
+async function fetchJsonWithTimeout(url, options, timeoutMs = 15000) {
+  const response = await fetchWithTimeout(url, options, timeoutMs);
+  const text = await response.text();
+  let data = {};
+  try { data = JSON.parse(text); } catch (_) {}
+  if (!response.ok) throw new Error(`HTTP ${response.status}: ${text}`);
+  return data;
+}
+
+async function ensureBackordersForPos({ url, authHeader, lineItems }) {
+  const changed = [];
+  for (const item of lineItems) {
+    const productId = Number(item.product_id);
+    const variationId = Number(item.variation_id || 0);
+    const quantity = Math.max(1, Number(item.quantity || 1));
+    const endpoint = variationId > 0
+      ? `${url}/wp-json/wc/v3/products/${productId}/variations/${variationId}`
+      : `${url}/wp-json/wc/v3/products/${productId}`;
+    try {
+      const product = await fetchJsonWithTimeout(endpoint, { headers: { Authorization: authHeader, 'Content-Type': 'application/json' } });
+      const stock = product.stock_quantity;
+      const managing = product.manage_stock === true || product.manage_stock === 'yes' || product.manage_stock === 'parent';
+      if (!managing || stock === null || stock === undefined) continue;
+      if (Number(stock) < quantity && product.backorders !== 'yes') {
+        changed.push({ endpoint, backorders: product.backorders || 'no' });
+        await fetchJsonWithTimeout(endpoint, {
+          method: 'PUT',
+          headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ backorders: 'yes' })
+        });
+      }
+    } catch (error) {
+      console.warn('[CHECKOUT STOCK]: kon backorders niet tijdelijk inschakelen:', error.message);
+    }
+  }
+  return changed;
+}
+
+async function restoreBackordersForPos({ authHeader, changed }) {
+  for (const item of changed) {
+    try {
+      await fetchJsonWithTimeout(item.endpoint, {
+        method: 'PUT',
+        headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ backorders: item.backorders })
+      });
+    } catch (error) {
+      console.warn('[CHECKOUT STOCK]: kon oorspronkelijke backorder-instelling niet herstellen:', error.message);
+    }
+  }
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', ['POST']);
@@ -135,8 +187,13 @@ export default async function handler(req, res) {
     }
 
     let responseOrder;
-
+    let temporaryBackorderChanges = [];
     try {
+      // De POS mag bewust verkopen onder nul. WooCommerce laat negatieve voorraad alleen toe
+      // wanneer backorders voor het betreffende product/variatie zijn toegestaan. We zetten dit
+      // uitsluitend rond deze POS-transactie tijdelijk aan en herstellen daarna de oorspronkelijke instelling.
+      temporaryBackorderChanges = await ensureBackordersForPos({ url, authHeader, lineItems });
+
       const fetchRes = await fetchWithTimeout(`${url}/wp-json/wc/v3/orders`, {
         method: 'POST',
         headers: customHeaders,
@@ -160,6 +217,8 @@ export default async function handler(req, res) {
 
     if (!responseOrder?.id) throw new Error('WooCommerce gaf geen order-ID terug.');
 
+    await restoreBackordersForPos({ authHeader, changed: temporaryBackorderChanges });
+
     if (claimed) await completeOrder(clientOrderId, responseOrder.id);
 
     let pointsSyncPending = false;
@@ -178,6 +237,9 @@ export default async function handler(req, res) {
 
     return res.status(200).json({ success: true, order: responseOrder, pointsSyncPending });
   } catch (error) {
+    if (typeof temporaryBackorderChanges !== 'undefined' && temporaryBackorderChanges.length) {
+      try { await restoreBackordersForPos({ authHeader, changed: temporaryBackorderChanges }); } catch (_) {}
+    }
     if (claimed) {
       try { await releaseOrder(clientOrderId); } catch (releaseError) {
         console.error('[CHECKOUT IDEMPOTENCY RELEASE ERROR]:', releaseError.message);
