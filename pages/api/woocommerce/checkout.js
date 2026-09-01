@@ -167,7 +167,10 @@ export default async function handler(req, res) {
     if (!responseOrder?.id) throw new Error('WooCommerce gaf geen order-ID terug.');
 
     try {
-      const completeData = { status: 'completed' };
+      // Mark the POS order as actually paid as part of the transition to
+      // completed. This is required for WooCommerce payment-completion hooks,
+      // including WooCommerce Points & Rewards, to award earned points.
+      const completeData = { status: 'completed', set_paid: true };
       const completeRes = await fetchWithTimeout(`${url}/wp-json/wc/v3/orders/${responseOrder.id}`, {
         method: 'PUT',
         headers: customHeaders,
@@ -185,7 +188,7 @@ export default async function handler(req, res) {
         version: 'wc/v3',
         axiosConfig: { timeout: 15000, headers: customHeaders }
       });
-      const { data } = await api.put(`orders/${responseOrder.id}`, { status: 'completed' });
+      const { data } = await api.put(`orders/${responseOrder.id}`, { status: 'completed', set_paid: true });
       responseOrder = data;
     }
 
@@ -194,7 +197,7 @@ export default async function handler(req, res) {
     }
 
     // WooCommerce Points & Rewards now handles earned points from the completed
-    // order. The POS only performs the separate redemption when points were used.
+    // and paid order. The POS only performs the separate redemption when points were used.
     let pointsSyncPending = false;
     let pointsResult = null;
     if (customerId && Number.isFinite(Number(customerId)) && Number(customerId) > 0 && Number(totals?.pointsUsed || 0) > 0) {
@@ -219,12 +222,7 @@ export default async function handler(req, res) {
         console.error('[CHECKOUT IDEMPOTENCY RELEASE ERROR]:', releaseError.message);
       }
     }
-
-    console.error('[CHECKOUT API ERROR]:', error.message);
-    return res.status(500).json({
-      success: false,
-      retryable: true,
-      error: error.message || 'Fout bij direct aanmaken van bestelling in WooCommerce.'
-    });
+    console.error('[CHECKOUT API ERROR]:', error);
+    return res.status(500).json({ success: false, error: error.message || 'Checkout mislukt.' });
   }
 }
