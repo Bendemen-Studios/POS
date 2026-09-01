@@ -22,9 +22,14 @@ add_action( 'rest_api_init', function () {
                 'permission_callback' => 'bdm_pos_points_permission',
                 'args'                => array(
                     'customer_id' => array(
-                        'required'          => true,
+                        'required'          => false,
                         'type'              => 'integer',
                         'sanitize_callback' => 'absint',
+                    ),
+                    'customer_ids' => array(
+                        'required'          => false,
+                        'type'              => 'string',
+                        'sanitize_callback' => 'sanitize_text_field',
                     ),
                 ),
             ),
@@ -79,19 +84,49 @@ function bdm_pos_points_permission() {
 }
 
 function bdm_pos_points_balance( WP_REST_Request $request ) {
-    $customer_id = absint( $request->get_param( 'customer_id' ) );
+    $customer_ids_raw = $request->get_param( 'customer_ids' );
+    $customer_id      = absint( $request->get_param( 'customer_id' ) );
 
-    if ( ! $customer_id ) {
-        return new WP_Error( 'bdm_invalid_customer', 'Invalid customer ID.', array( 'status' => 400 ) );
+    $customer_ids = array();
+    if ( is_string( $customer_ids_raw ) && '' !== trim( $customer_ids_raw ) ) {
+        foreach ( explode( ',', $customer_ids_raw ) as $id ) {
+            $id = absint( trim( $id ) );
+            if ( $id > 0 ) {
+                $customer_ids[] = $id;
+            }
+        }
+        $customer_ids = array_values( array_unique( $customer_ids ) );
     }
 
-    $points = (int) WC_Points_Rewards_Manager::get_users_points( $customer_id );
+    if ( $customer_id > 0 && empty( $customer_ids ) ) {
+        $customer_ids = array( $customer_id );
+    }
+
+    if ( empty( $customer_ids ) ) {
+        return new WP_Error( 'bdm_invalid_customer', 'A customer ID is required.', array( 'status' => 400 ) );
+    }
+
+    $balances = array();
+    foreach ( $customer_ids as $id ) {
+        $balances[ (string) $id ] = max( 0, (int) WC_Points_Rewards_Manager::get_users_points( $id ) );
+    }
+
+    if ( count( $balances ) === 1 ) {
+        $single_id = (int) array_key_first( $balances );
+        return rest_ensure_response(
+            array(
+                'success'        => true,
+                'customerId'     => $single_id,
+                'pointsBalance'  => $balances[ (string) $single_id ],
+            )
+        );
+    }
 
     return rest_ensure_response(
         array(
-            'success'      => true,
-            'customerId'   => $customer_id,
-            'pointsBalance' => max( 0, $points ),
+            'success'   => true,
+            'balances'  => $balances,
+            'count'     => count( $balances ),
         )
     );
 }
@@ -119,22 +154,18 @@ function bdm_pos_points_mutation( WP_REST_Request $request ) {
         return new WP_Error( 'bdm_customer_mismatch', 'Order customer does not match the points customer.', array( 'status' => 400 ) );
     }
 
-    // Idempotency: a POS retry for the same WooCommerce order must never
-    // deduct the same points twice.
     $already_redeemed = (int) $order->get_meta( '_bdm_points_redeemed', true );
     if ( $already_redeemed > 0 ) {
         return rest_ensure_response(
             array(
-                'success'       => true,
-                'idempotent'    => true,
+                'success'        => true,
+                'idempotent'     => true,
                 'pointsRedeemed' => $already_redeemed,
-                'pointsBalance' => (int) WC_Points_Rewards_Manager::get_users_points( $customer_id ),
+                'pointsBalance'  => (int) WC_Points_Rewards_Manager::get_users_points( $customer_id ),
             )
         );
     }
 
-    // A unique post meta acts as a small per-order lock. If another request
-    // is already processing this exact order, do not deduct twice.
     if ( ! add_post_meta( $order_id, '_bdm_points_redeem_lock', gmdate( 'c' ), true ) ) {
         return new WP_Error( 'bdm_points_processing', 'Points redemption for this order is already being processed.', array( 'status' => 409 ) );
     }
@@ -153,8 +184,8 @@ function bdm_pos_points_mutation( WP_REST_Request $request ) {
         }
 
         $event_data = array(
-            'source'        => 'bendemen-pos',
-            'order_id'      => $order_id,
+            'source'          => 'bendemen-pos',
+            'order_id'        => $order_id,
             'points_redeemed' => $points,
         );
 
@@ -170,8 +201,6 @@ function bdm_pos_points_mutation( WP_REST_Request $request ) {
             throw new Exception( 'WooCommerce Points & Rewards rejected the points deduction.' );
         }
 
-        // Keep the standard Points & Rewards order meta in sync as well,
-        // because the POS creates orders directly instead of using checkout.
         $order->update_meta_data( '_wc_points_redeemed', $points );
         $order->update_meta_data( '_bdm_points_redeemed', $points );
         $order->update_meta_data( '_bdm_points_source', 'woocommerce-points-and-rewards' );
