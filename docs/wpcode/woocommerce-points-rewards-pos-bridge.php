@@ -5,6 +5,50 @@
  */
 if ( ! defined( 'ABSPATH' ) ) exit;
 
+/* POS orders are awarded after they become completed. Priority 99 lets the
+ * normal Points & Rewards order hook run first; we then top-up only the
+ * difference needed to reach the POS earning rule. */
+add_action( 'woocommerce_order_status_completed', 'bdm_pos_award_completed_order_points', 99, 1 );
+function bdm_pos_award_completed_order_points( $order_id ) {
+    if ( ! class_exists( 'WC_Points_Rewards_Manager' ) ) return;
+    $order = wc_get_order( $order_id );
+    if ( ! $order ) return;
+    if ( 'true' !== (string) $order->get_meta( '_pos_direct_checkout', true ) ) return;
+
+    $customer_id = absint( $order->get_customer_id() );
+    if ( ! $customer_id ) return;
+
+    $total = (float) $order->get_total();
+    if ( $total <= 0 ) return;
+
+    $whole = (int) floor( $total );
+    $cents = (int) round( ( $total - $whole ) * 100 );
+    $target = $whole + ( $cents >= 51 ? 1 : 0 );
+    if ( $target <= 0 ) return;
+
+    $plugin_earned = max( 0, (int) $order->get_meta( '_wc_points_earned', true ) );
+    $pos_awarded = max( 0, (int) $order->get_meta( '_bdm_pos_points_awarded', true ) );
+    $already_counted = max( $plugin_earned, $pos_awarded );
+    $missing = max( 0, $target - $already_counted );
+
+    if ( $missing > 0 ) {
+        $result = WC_Points_Rewards_Manager::increase_points(
+            $customer_id,
+            $missing,
+            'bdm-pos-order-earned',
+            array( 'source' => 'bendemen-pos', 'order_id' => $order_id, 'target_points' => $target, 'missing_points' => $missing ),
+            $order_id
+        );
+        if ( ! $result ) return;
+        $pos_awarded += $missing;
+    }
+
+    $order->update_meta_data( '_wc_points_earned', $target );
+    $order->update_meta_data( '_bdm_pos_points_awarded', $pos_awarded );
+    $order->update_meta_data( '_bdm_pos_points_source', 'bendemen-pos' );
+    $order->save();
+}
+
 add_action( 'rest_api_init', function () {
     register_rest_route( 'wc/v3', '/bdm-points', array(
         array(
@@ -67,52 +111,31 @@ function bdm_pos_points_mutation( WP_REST_Request $request ) {
     $points = absint($request->get_param('points'));
     $order_id = absint($request->get_param('order_id'));
     if (!$customer_id || !$points || !$order_id) return new WP_Error('bdm_invalid_points_request', 'Customer, points and order ID are required.', array('status' => 400));
-
     $order = wc_get_order($order_id);
     if (!$order) return new WP_Error('bdm_order_not_found', 'WooCommerce order not found.', array('status' => 404));
     if ((int)$order->get_customer_id() !== $customer_id) return new WP_Error('bdm_customer_mismatch', 'Order customer does not match the points customer.', array('status' => 400));
 
     if ('sync_earned' === $action) {
-        // POS earning is authoritative. If P&R already awarded some points,
-        // only add the missing difference. This fixes fee/custom-item orders.
         $target = $points;
         $plugin_earned = max(0, (int)$order->get_meta('_wc_points_earned', true));
         $pos_awarded = max(0, (int)$order->get_meta('_bdm_pos_points_awarded', true));
-        $already_counted = max($plugin_earned, $pos_awarded);
-        $missing = max(0, $target - $already_counted);
-
+        $missing = max(0, $target - max($plugin_earned, $pos_awarded));
         if ($missing > 0) {
-            $result = WC_Points_Rewards_Manager::increase_points(
-                $customer_id,
-                $missing,
-                'bdm-pos-order-earned',
-                array('source' => 'bendemen-pos', 'order_id' => $order_id, 'target_points' => $target, 'missing_points' => $missing),
-                $order_id
-            );
+            $result = WC_Points_Rewards_Manager::increase_points($customer_id, $missing, 'bdm-pos-order-earned', array('source' => 'bendemen-pos', 'order_id' => $order_id, 'target_points' => $target, 'missing_points' => $missing), $order_id);
             if (!$result) return new WP_Error('bdm_points_earn_failed', 'WooCommerce Points & Rewards rejected the points increase.', array('status' => 500));
             $pos_awarded += $missing;
         }
-
-        // Also update the order meta used by the WooCommerce P&R order view.
         $order->update_meta_data('_wc_points_earned', $target);
         $order->update_meta_data('_bdm_pos_points_awarded', $pos_awarded);
         $order->update_meta_data('_bdm_pos_points_source', 'bendemen-pos');
         $order->save();
-
-        return rest_ensure_response(array(
-            'success' => true,
-            'pointsTarget' => $target,
-            'pointsAdded' => $missing,
-            'pointsPluginAlreadyEarned' => $plugin_earned,
-            'pointsBalance' => max(0, (int)WC_Points_Rewards_Manager::get_users_points($customer_id)),
-        ));
+        return rest_ensure_response(array('success' => true, 'pointsTarget' => $target, 'pointsAdded' => $missing, 'pointsPluginAlreadyEarned' => $plugin_earned, 'pointsBalance' => max(0, (int)WC_Points_Rewards_Manager::get_users_points($customer_id))));
     }
 
     if ('redeem' !== $action) return new WP_Error('bdm_invalid_action', 'Unsupported points action.', array('status' => 400));
     $already_redeemed = (int)$order->get_meta('_bdm_points_redeemed', true);
     if ($already_redeemed > 0) return rest_ensure_response(array('success' => true, 'idempotent' => true, 'pointsRedeemed' => $already_redeemed, 'pointsBalance' => (int)WC_Points_Rewards_Manager::get_users_points($customer_id)));
     if (!add_post_meta($order_id, '_bdm_points_redeem_lock', gmdate('c'), true)) return new WP_Error('bdm_points_processing', 'Points redemption for this order is already being processed.', array('status' => 409));
-
     try {
         $current_points = (int)WC_Points_Rewards_Manager::get_users_points($customer_id);
         if ($points > $current_points) throw new Exception(sprintf('Insufficient points. Customer has %d points, requested %d.', $current_points, $points));
