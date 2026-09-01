@@ -277,7 +277,7 @@ export default function App({ Component, pageProps }) {
   const router = useRouter();
   const [offlineSyncMessage, setOfflineSyncMessage] = useState(null);
   const [serverOnline, setServerOnline] = useState(true);
-  const [adminOfflinePopupDismissed, setAdminOfflinePopupDismissed] = useState(false);
+  const [adminOfflinePopupDismissed, setAdminOfflinePopupDismissed] = useState(true);
   const [productSyncVersion, setProductSyncVersion] = useState(0);
 
   useEffect(() => {
@@ -295,7 +295,7 @@ export default function App({ Component, pageProps }) {
       const online = Boolean(event.detail?.online);
       window.__bendemenAdminOffline = !online;
       setServerOnline(online);
-      if (!online) setAdminOfflinePopupDismissed(false);
+      if (online) setAdminOfflinePopupDismissed(true);
     };
     const blockedHandler = () => setAdminOfflinePopupDismissed(false);
     window.addEventListener('pos:server-status', statusHandler);
