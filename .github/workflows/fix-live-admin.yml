@@ -1,3 +1,4 @@
+# Live Admin patch trigger: SumUp branch selector + 5s order polling
 name: Fix live Admin SumUp and orders
 
 on:
@@ -24,14 +25,12 @@ jobs:
           p = Path('pages/admin.js')
           s = p.read_text()
 
-          # SumUp: filiaal selector for pairing a new reader.
           if 'selectedStoreForPairing' not in s:
               marker = "  const [selectedStoreForReader, setSelectedStoreForReader] = useState({});\n"
               if marker not in s:
                   raise SystemExit('SumUp reader state not found')
               s = s.replace(marker, marker + "  const [selectedStoreForPairing, setSelectedStoreForPairing] = useState('');\n", 1)
 
-          # Make the SumUp reader request return the current readers without browser caching.
           old_fetch = """  const fetchSumUpReaders = async () => {
     try {
       const res = await fetch('/api/sumup/proxy?action=readers');
@@ -60,7 +59,6 @@ jobs:
           if old_fetch in s:
               s = s.replace(old_fetch, new_fetch, 1)
 
-          # Pairing: require the selected store and assign the newly paired reader to it.
           pair_start = s.find("  const handlePairSumUp = async (e) => {")
           pair_end = s.find("\n\n  const handleUnlinkSumUp", pair_start)
           if pair_start != -1 and pair_end != -1 and 'selectedStoreForPairing' in s:
@@ -121,7 +119,6 @@ jobs:
   };"""
                   s = s[:pair_start] + pair_new + s[pair_end:]
 
-          # New pairing form: add a store selector before the Koppelen button.
           if 'value={selectedStoreForPairing}' not in s:
               button_marker = """                      <button type=\"submit\" className=\"bg-red-600 hover:bg-red-700 text-white font-bold p-2 rounded text-xs uppercase\">Koppelen</button>"""
               selector = """                      <select
@@ -142,7 +139,6 @@ jobs:
                   raise SystemExit('SumUp pairing button not found')
               s = s.replace(button_marker, selector + button_marker, 1)
 
-          # Orders: poll every 5 seconds only while the Bestellingen tab is open.
           if 'setInterval(refreshOrders, 5000)' not in s:
               marker = "  const fetchUsers = async () => {"
               effect = """  useEffect(() => {
@@ -168,7 +164,6 @@ jobs:
                   raise SystemExit('fetchUsers marker not found')
               s = s.replace(marker, effect + marker, 1)
 
-          # Orders: force a real AJAX/no-cache request.
           old_orders = """  const fetchOrders = async () => {
     try {
       const res = await fetch('/api/woocommerce/orders');
