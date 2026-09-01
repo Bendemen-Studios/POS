@@ -42,6 +42,20 @@ for env_file in .env .env.local; do
   fi
 done
 
+# Safety check: POS physical payments must create a paid WooCommerce order so
+# WooCommerce Points & Rewards can award points for the remaining paid amount.
+CHECKOUT_FILE="$APP_DIR/pages/api/woocommerce/checkout.js"
+if [ -f "$CHECKOUT_FILE" ]; then
+  if ! grep -Eq "set_paid:[[:space:]]*true" "$CHECKOUT_FILE"; then
+    echo "❌ Checkout-puntenfix ontbreekt: set_paid moet true zijn."
+    exit 1
+  fi
+  echo "✅ Checkout points earning fix aanwezig (set_paid=true)."
+else
+  echo "❌ Checkout-bestand ontbreekt: $CHECKOUT_FILE"
+  exit 1
+fi
+
 # Apply the active POS queue fix to pages/index.js. The POS currently contains
 # the queue implementation directly in the page, so the reusable hook alone
 # is not sufficient. Keep this idempotent: if the source is already patched,
