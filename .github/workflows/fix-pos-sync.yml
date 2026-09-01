@@ -1,0 +1,75 @@
+name: Fix POS sync and admin inventory
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch POS synchronization
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          index = Path('pages/index.js')
+          s = index.read_text()
+
+          # Full POS refresh every 5 minutes instead of every 2 minutes.
+          s = s.replace("fullSyncTimer = setInterval(() => backgroundSync(true), 120000);", "fullSyncTimer = setInterval(() => backgroundSync(true), 300000);")
+
+          # Keep the admin inventory cache in lockstep with the POS product cache.
+          old = "localStorage.setItem('pos_cached_products_updated_at', String(Date.now()));"
+          new = "localStorage.setItem('pos_cached_products_updated_at', String(Date.now()));\n        localStorage.setItem('admin_products', JSON.stringify(data.products));\n        window.dispatchEvent(new CustomEvent('pos:inventory-synced', { detail: { products: data.products } }));"
+          if old in s and "pos:inventory-synced" not in s:
+              s = s.replace(old, new, 1)
+
+          # Refresh the visible POS immediately when another POS/admin tab syncs.
+          old = "window.addEventListener('pos:ajax-refresh', refreshLocalState);"
+          new = "window.addEventListener('pos:ajax-refresh', refreshLocalState);\n    window.addEventListener('pos:inventory-synced', refreshLocalState);"
+          if old in s and "window.addEventListener('pos:inventory-synced'" not in s:
+              s = s.replace(old, new, 1)
+
+          old = "window.removeEventListener('pos:ajax-refresh', refreshLocalState);"
+          new = "window.removeEventListener('pos:ajax-refresh', refreshLocalState);\n      window.removeEventListener('pos:inventory-synced', refreshLocalState);"
+          if old in s and "window.removeEventListener('pos:inventory-synced'" not in s:
+              s = s.replace(old, new, 1)
+
+          index.write_text(s)
+
+          admin = Path('pages/admin.js')
+          s = admin.read_text()
+
+          # Admin page must refresh inventory even when a cache already exists.
+          marker = "  const fetchUsers = async () => {"
+          effect = """  useEffect(() => {\n    let stopped = false;\n    const refreshInventory = async () => {\n      if (stopped || typeof navigator !== 'undefined' && navigator.onLine === false) return;\n      try {\n        await fetchProductsSilently();\n        if (typeof window !== 'undefined') {\n          window.dispatchEvent(new CustomEvent('pos:ajax-refresh'));\n        }\n      } catch (_) {}\n    };\n    refreshInventory();\n    const timer = setInterval(refreshInventory, 300000);\n    const onInventorySync = (event) => {\n      const synced = event?.detail?.products;\n      if (Array.isArray(synced)) {\n        setProducts(synced);\n        localStorage.setItem('admin_products', JSON.stringify(synced));\n      }\n    };\n    window.addEventListener('pos:inventory-synced', onInventorySync);\n    return () => {\n      stopped = true;\n      clearInterval(timer);\n      window.removeEventListener('pos:inventory-synced', onInventorySync);\n    };\n  }, []);\n\n"""
+          if "setInterval(refreshInventory, 300000)" not in s:
+              s = s.replace(marker, effect + marker, 1)
+
+          # Make product fetches cache-busting and safe for offline startup.
+          s = s.replace("fetch('/api/woocommerce/products');", "fetch(`/api/woocommerce/products?_sync=${Date.now()}`, { cache: 'no-store' });")
+          s = s.replace("localStorage.setItem('admin_products', JSON.stringify(data.products || []));", "localStorage.setItem('admin_products', JSON.stringify(data.products || []));\n        localStorage.setItem('pos_cached_products', JSON.stringify(data.products || []));\n        localStorage.setItem('pos_cached_products_updated_at', String(Date.now()));", 1)
+
+          admin.write_text(s)
+          PY
+
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pages/index.js pages/admin.js
+          if git diff --cached --quiet; then
+            echo "No changes needed"
+            exit 0
+          fi
+          git commit -m "fix: complete POS startup and 5 minute inventory sync"
+          git push
