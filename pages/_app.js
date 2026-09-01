@@ -16,6 +16,28 @@ function jsonResponse(data, status = 200) {
   });
 }
 
+function installAdminOfflineMutationGuard() {
+  if (typeof window === 'undefined' || window.__bendemenAdminOfflineMutationGuard) return () => {};
+  window.__bendemenAdminOfflineMutationGuard = true;
+  const originalFetch = window.fetch.bind(window);
+  const mutationMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+  window.fetch = async (input, init = {}) => {
+    const rawUrl = typeof input === 'string' ? input : input?.url;
+    const method = String(init?.method || (typeof input !== 'string' ? input?.method : 'GET') || 'GET').toUpperCase();
+    if (rawUrl && window.location.pathname === '/admin' && mutationMethods.has(method) && window.__bendemenAdminOffline) {
+      window.dispatchEvent(new CustomEvent('pos:admin-change-blocked'));
+      return jsonResponse({ success: false, error: 'De VPS is offline. Admin-wijzigingen zijn tijdelijk geblokkeerd.' }, 503);
+    }
+    return originalFetch(input, init);
+  };
+
+  return () => {
+    window.fetch = originalFetch;
+    window.__bendemenAdminOfflineMutationGuard = false;
+  };
+}
+
 async function pollSumUpTransaction(clientTransactionId, originalFetch) {
   const started = Date.now();
   const timeout = 110000;
@@ -255,10 +277,12 @@ export default function App({ Component, pageProps }) {
   const router = useRouter();
   const [offlineSyncMessage, setOfflineSyncMessage] = useState(null);
   const [serverOnline, setServerOnline] = useState(true);
+  const [adminOfflinePopupDismissed, setAdminOfflinePopupDismissed] = useState(false);
   const [productSyncVersion, setProductSyncVersion] = useState(0);
 
   useEffect(() => {
     installSumUpGatewayFetch();
+    const stopAdminOfflineMutationGuard = installAdminOfflineMutationGuard();
     registerNativePWA();
     const stopServerWatcher = installFastServerWatcher();
     const stopOfflineBridge = installOfflineAjaxBridge((message) => {
@@ -267,12 +291,21 @@ export default function App({ Component, pageProps }) {
         window.setTimeout(() => setOfflineSyncMessage(null), 4500);
       }
     });
-    const statusHandler = (event) => setServerOnline(Boolean(event.detail?.online));
+    const statusHandler = (event) => {
+      const online = Boolean(event.detail?.online);
+      window.__bendemenAdminOffline = !online;
+      setServerOnline(online);
+      if (!online) setAdminOfflinePopupDismissed(false);
+    };
+    const blockedHandler = () => setAdminOfflinePopupDismissed(false);
     window.addEventListener('pos:server-status', statusHandler);
+    window.addEventListener('pos:admin-change-blocked', blockedHandler);
     return () => {
       stopServerWatcher();
+      stopAdminOfflineMutationGuard();
       stopOfflineBridge();
       window.removeEventListener('pos:server-status', statusHandler);
+      window.removeEventListener('pos:admin-change-blocked', blockedHandler);
     };
   }, []);
 
@@ -304,6 +337,7 @@ export default function App({ Component, pageProps }) {
   }, [router.pathname]);
 
   const adminOffline = router.pathname === '/admin' && !serverOnline;
+  const showAdminOfflinePopup = adminOffline && !adminOfflinePopupDismissed;
 
   return (
     <>
@@ -322,15 +356,16 @@ export default function App({ Component, pageProps }) {
         </div>
       )}
       <Component key={router.pathname === '/' ? productSyncVersion : undefined} {...pageProps} />
-      {adminOffline && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 100000, background: 'rgba(17,24,39,.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-          <div style={{ maxWidth: 440, width: '100%', background: '#fff', borderRadius: 14, padding: 28, boxShadow: '0 18px 60px rgba(0,0,0,.3)', textAlign: 'center' }}>
+      {showAdminOfflinePopup && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 100000, background: 'rgba(17,24,39,.20)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, pointerEvents: 'none' }}>
+          <div role="dialog" aria-modal="false" style={{ position: 'relative', maxWidth: 440, width: '100%', background: '#fff', borderRadius: 14, padding: 28, paddingTop: 24, boxShadow: '0 18px 60px rgba(0,0,0,.3)', textAlign: 'center', pointerEvents: 'auto' }}>
+            <button type="button" aria-label="Melding sluiten" onClick={() => setAdminOfflinePopupDismissed(true)} style={{ position: 'absolute', top: 10, right: 12, border: 0, background: 'transparent', color: '#6b7280', fontSize: 24, lineHeight: 1, cursor: 'pointer', padding: 6 }}>×</button>
             <div style={{ fontSize: 42, marginBottom: 10 }}>🔒</div>
             <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 8 }}>Admin alleen-lezen</div>
             <div style={{ color: '#6b7280', fontSize: 14, lineHeight: 1.5 }}>
-              De VPS is offline. Admin is tijdelijk geblokkeerd zodat er offline geen wijzigingen kunnen worden gemaakt.
-              Je lokaal gecachte Admin-gegevens blijven beschikbaar zodra de server weer bereikbaar is.
+              De VPS is offline. Admin-wijzigingen zijn tijdelijk geblokkeerd. Je lokaal gecachte Admin-gegevens blijven beschikbaar.
             </div>
+            <div style={{ marginTop: 14, color: '#9ca3af', fontSize: 12 }}>Sluit deze melding met ×. Zodra de server weer online is, wordt Admin automatisch vrijgegeven.</div>
           </div>
         </div>
       )}
