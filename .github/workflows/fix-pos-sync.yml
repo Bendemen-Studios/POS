@@ -1,100 +1,10 @@
-name: Fix POS sync and admin inventory
+name: Fix POS sync and admin inventory (manual)
 
 on:
-  push:
-    branches: [main]
-
-permissions:
-  contents: write
+  workflow_dispatch:
 
 jobs:
-  patch:
-    if: github.actor != 'github-actions[bot]'
+  disabled:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Patch payment method persistence and offline queue
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('pages/index.js')
-          s = p.read_text()
-          marker = "  const handleSelectStore = (store, shouldCloseModal = true) => {"
-          helper = '''  const getPaymentMethodStorageKey = (store) => `pos_payment_method_${String(store?.id || store?.store_id || 'default')}`;
-
-  const selectPaymentMethod = (method) => {
-    setSelectedPaymentMethod(method);
-    if (selectedStore) localStorage.setItem(getPaymentMethodStorageKey(selectedStore), method);
-  };
-
-'''
-          if 'getPaymentMethodStorageKey' not in s:
-              if marker not in s: raise SystemExit('payment store marker not found')
-              s = s.replace(marker, helper + marker, 1)
-
-          effect_marker = "  useEffect(() => {\n    if (typeof window !== 'undefined') localStorage.setItem('pos_active_tab', activeTab);\n  }, [activeTab]);\n"
-          effect = '''
-  useEffect(() => {
-    if (!selectedStore) return;
-    const methods = parsePaymentMethods(selectedStore.payment_methods);
-    const saved = localStorage.getItem(getPaymentMethodStorageKey(selectedStore));
-    const validSaved = saved && methods[saved] !== false;
-    const fallback = methods.sumup !== false ? 'sumup' : methods.manual_pin !== false ? 'manual_pin' : 'cash';
-    setSelectedPaymentMethod(validSaved ? saved : fallback);
-  }, [selectedStore]);
-'''
-          if 'validSaved = saved && methods[saved] !== false' not in s:
-              if effect_marker not in s: raise SystemExit('active tab effect marker not found')
-              s = s.replace(effect_marker, effect_marker + effect, 1)
-
-          for method in ('sumup','manual_pin','cash'):
-              s = s.replace(f"onClick={() => setSelectedPaymentMethod('{method}')}" , f"onClick={() => selectPaymentMethod('{method}')}" )
-
-          queue_marker = "        setPendingOfflineCount(remainingQueue.length);\n        if (successCount > 0) {"
-          queue_new = """        setPendingOfflineCount(remainingQueue.length);
-        window.dispatchEvent(new CustomEvent('pos:offline-queue-updated', { detail: { count: remainingQueue.length } }));
-        if (successCount > 0) {"""
-          if 'pos:offline-queue-updated' not in s:
-              if queue_marker not in s: raise SystemExit('offline queue marker not found')
-              s = s.replace(queue_marker, queue_new, 1)
-
-          old = "          await fetchProducts();\n        } else if (remainingQueue.length && isManualClick) {"
-          new = """          await Promise.allSettled([fetchProducts(), fetchCustomers(), fetchUsersAsCustomers(), fetchPickupOrders(), fetchStores()]);
-          window.dispatchEvent(new Event('pos:ajax-refresh'));
-        } else if (remainingQueue.length && isManualClick) {"""
-          if old in s:
-              s = s.replace(old, new, 1)
-
-          online_marker = "    const online = () => backgroundSync(true);\n    window.addEventListener('online', online);"
-          online_new = """    const online = () => backgroundSync(true);
-    const queueUpdated = () => { if (typeof navigator === 'undefined' || navigator.onLine !== false) backgroundSync(true); };
-    window.addEventListener('online', online);
-    window.addEventListener('pos:offline-queue-updated', queueUpdated);"""
-          if 'const queueUpdated = () =>' not in s:
-              if online_marker not in s: raise SystemExit('online marker not found')
-              s = s.replace(online_marker, online_new, 1)
-
-          cleanup = "      window.removeEventListener('online', online);\n      window.removeEventListener('focus', wake);"
-          cleanup_new = """      window.removeEventListener('online', online);
-      window.removeEventListener('pos:offline-queue-updated', queueUpdated);
-      window.removeEventListener('focus', wake);"""
-          if cleanup in s and 'removeEventListener(\'pos:offline-queue-updated\'' not in s:
-              s = s.replace(cleanup, cleanup_new, 1)
-
-          p.write_text(s)
-          PY
-
-      - name: Disable this one-time patch workflow
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add pages/index.js
-          if git diff --cached --quiet; then
-            echo "No changes needed"
-            exit 0
-          fi
-          git commit -m "fix: persist payment method per store and auto sync offline queue"
-          git push
+      - run: echo "One-time sync patch workflow is disabled; source changes must be applied directly."
