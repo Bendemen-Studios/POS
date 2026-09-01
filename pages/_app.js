@@ -208,13 +208,13 @@ function installFastServerWatcher() {
   window.__bendemenFastServerWatcher = true;
   let stopped = false;
   let timer = null;
-  let lastOnline = false;
+  let lastOnline = true;
   let failures = 0;
 
   const check = async () => {
     if (stopped) return;
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 2500);
+    const timeout = setTimeout(() => controller.abort(), 1200);
     try {
       const response = await fetch('/api/admin/store?_pos_health=' + Date.now(), {
         method: 'GET', cache: 'no-store', credentials: 'same-origin', signal: controller.signal,
@@ -225,11 +225,11 @@ function installFastServerWatcher() {
         lastOnline = true;
       } else {
         failures += 1;
-        if (failures >= 2) lastOnline = false;
+        if (failures >= 3) lastOnline = false;
       }
     } catch {
       failures += 1;
-      if (failures >= 2) lastOnline = false;
+      if (failures >= 3) lastOnline = false;
     } finally {
       clearTimeout(timeout);
       window.dispatchEvent(new CustomEvent('pos:server-status', { detail: { online: lastOnline } }));
