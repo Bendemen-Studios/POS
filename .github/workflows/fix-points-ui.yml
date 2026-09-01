@@ -1,0 +1,33 @@
+name: Fix POS points UI
+
+on:
+  push:
+    paths:
+      - '.github/workflows/fix-points-ui.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fix points display
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('pages/index.js')
+          s = p.read_text(encoding='utf-8')
+          old = "Math.floor(finalTotal) punten op"
+          new = "(Math.floor(finalTotal) + (Math.round((finalTotal - Math.floor(finalTotal)) * 100) >= 51 ? 1 : 0)) punten op"
+          if old not in s:
+              raise SystemExit('Expected points display text not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s, encoding='utf-8')
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add pages/index.js
+          git commit -m 'fix: show correct earned points in POS'
+          git push
