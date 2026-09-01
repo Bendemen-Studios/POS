@@ -42,6 +42,43 @@ for env_file in .env .env.local; do
   fi
 done
 
+# Apply the active POS queue fix to pages/index.js. The POS currently contains
+# the queue implementation directly in the page, so the reusable hook alone
+# is not sufficient. Keep this idempotent: if the source is already patched,
+# the replacements simply do nothing.
+if command -v python3 >/dev/null 2>&1 && [ -f "$APP_DIR/pages/index.js" ]; then
+  python3 - <<'PY'
+from pathlib import Path
+
+path = Path('/var/www/bendemen-pos/pages/index.js')
+s = path.read_text(encoding='utf-8')
+original = s
+
+s = s.replace(
+    "        if (!(await checkServerConnection())) return;\n        setIsSyncing(true);",
+    "        // Do not gate queue recovery on the separate health endpoint.\n        // The actual order endpoint is the source of truth for availability.\n        setIsSyncing(true);"
+)
+
+s = s.replace(
+    "if (res.status === 404) res = await fetchWithServerCheck('/api/woocommerce/offline-order',",
+    "if (res.status === 404 || res.status === 409 || res.status >= 500) res = await fetchWithServerCheck('/api/woocommerce/offline-order',"
+)
+
+s = s.replace(
+    "healthTimer = setInterval(() => backgroundSync(false), 10000);",
+    "healthTimer = setInterval(() => backgroundSync(false), 5000);"
+)
+
+if s != original:
+    path.write_text(s, encoding='utf-8')
+    print('✅ Active POS offline queue sync patched: 5s retry + no health-gate + offline endpoint fallback.')
+else:
+    print('ℹ️ Active POS offline queue was already patched or source pattern changed; no patch applied.')
+PY
+else
+  echo "⚠️ python3 of pages/index.js ontbreekt; actieve POS queue-patch niet toegepast."
+fi
+
 chmod +x "$APP_DIR/deploy.sh" 2>/dev/null || true
 echo "✅ Code bijgewerkt naar $(git rev-parse --short HEAD)"
 
