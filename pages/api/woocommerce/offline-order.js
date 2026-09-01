@@ -1,7 +1,7 @@
 import WooCommerceRestApi from '@woocommerce/woocommerce-rest-api';
 import { createHash } from 'crypto';
 import { claimOrder, completeOrder, releaseOrder } from '../../../lib/orderIdempotency';
-import { updateCustomerPoints } from '../../../lib/customerPoints';
+import { redeemCustomerPoints } from '../../../lib/customerPoints';
 
 function getClientOrderId(req) {
   const headerId = req.headers['idempotency-key'];
@@ -138,23 +138,26 @@ export default async function handler(req, res) {
 
     if (!responseOrder?.id) throw new Error('WooCommerce gaf geen order-ID terug.');
 
-    if (claimed) await completeOrder(clientOrderId, responseOrder.id);
-
+    // The completed WooCommerce order triggers the normal Points & Rewards
+    // earning flow. Only the separately redeemed points are handled by the POS.
     let pointsSyncPending = false;
-    if (customerId && Number.isFinite(Number(customerId)) && Number(customerId) > 0) {
+    let pointsResult = null;
+    if (customerId && Number.isFinite(Number(customerId)) && Number(customerId) > 0 && Number(totals?.pointsUsed || 0) > 0) {
       try {
-        await updateCustomerPoints({
+        pointsResult = await redeemCustomerPoints({
           customerId: Number(customerId),
-          pointsUsed: totals?.pointsUsed || 0,
-          totalPaid: totals?.totalPaid || 0,
+          pointsUsed: Number(totals.pointsUsed),
+          orderId: Number(responseOrder.id),
         });
       } catch (pointsError) {
         pointsSyncPending = true;
-        console.error('[OFFLINE ORDER POINTS SYNC]:', pointsError.message);
+        console.error('[OFFLINE ORDER POINTS REDEEM]:', pointsError.message);
       }
     }
 
-    return res.status(200).json({ success: true, order: responseOrder, pointsSyncPending });
+    if (claimed) await completeOrder(clientOrderId, responseOrder.id);
+
+    return res.status(200).json({ success: true, order: responseOrder, pointsSyncPending, pointsResult });
   } catch (error) {
     if (claimed) {
       try { await releaseOrder(clientOrderId); } catch (releaseError) {
