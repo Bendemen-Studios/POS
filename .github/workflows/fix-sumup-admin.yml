@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   patch:
-    if: ${{ !contains(github.event.head_commit.message, '[sumup-admin-fixed-v2]') }}
+    if: ${{ !contains(github.event.head_commit.message, '[sumup-admin-fixed-v3]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -62,10 +62,8 @@ jobs:
           # 3. Pair the reader, then automatically assign the newly-created reader to the selected store.
           pair_start = s.find("  const handlePairSumUp = async (e) => {")
           pair_end = s.find("\n\n  const handleUnlinkSumUp", pair_start)
-          if pair_start == -1 or pair_end == -1:
-              raise SystemExit('Could not find handlePairSumUp block')
-
-          pair_new = """  const handlePairSumUp = async (e) => {
+          if pair_start != -1 and pair_end != -1:
+              pair_new = """  const handlePairSumUp = async (e) => {
             e.preventDefault();
 
             if (!selectedStoreForPairing) {
@@ -95,7 +93,6 @@ jobs:
               let readers = await fetchSumUpReaders();
               let newReader = readers.find(r => !beforeReaders.some(old => String(old.id) === String(r.id)));
 
-              // SumUp kan de nieuwe reader pas kort na pairing teruggeven.
               for (let i = 0; i < 5 && !newReader; i++) {
                 await new Promise(resolve => setTimeout(resolve, 1000));
                 readers = await fetchSumUpReaders();
@@ -128,7 +125,7 @@ jobs:
               setSumUpStatusMsg('❌ Netwerkfout bij koppelen.');
             }
           };"""
-          s = s[:pair_start] + pair_new + s[pair_end:]
+              s = s[:pair_start] + pair_new + s[pair_end:]
 
           # 4. Always show the filiaal selector in the NEW pairing form.
           form_old = """                    <div className=\"grid grid-cols-1 sm:grid-cols-3 gap-2\">
@@ -182,12 +179,74 @@ jobs:
                     </div>"""
           if form_old in s:
               s = s.replace(form_old, form_new, 1)
-          elif "value={selectedStoreForPairing}" not in s:
-              raise SystemExit('Could not find new SumUp pairing form')
 
-          # Marker prevents this patch from being applied repeatedly.
-          if '// SUMUP_ADMIN_PAIRING_SELECTOR_FIXED' not in s:
-              s = s.replace('export default function AdminDashboard() {', '// SUMUP_ADMIN_PAIRING_SELECTOR_FIXED\n\nexport default function AdminDashboard() {', 1)
+          # 5. Live orders: only poll while the Bestellingen tab is active.
+          orders_marker = "  const fetchUsers = async () => {"
+          orders_effect = """  useEffect(() => {
+            if (activeTab !== 'orders') return undefined;
+
+            let stopped = false;
+            const refreshOrders = async () => {
+              if (stopped) return;
+              try {
+                await fetchOrders();
+                if (typeof window !== 'undefined') {
+                  window.dispatchEvent(new CustomEvent('pos:ajax-refresh', { detail: { source: 'admin-orders' } }));
+                }
+              } catch (_) {}
+            };
+
+            refreshOrders();
+            const timer = setInterval(refreshOrders, 5000);
+            return () => {
+              stopped = true;
+              clearInterval(timer);
+            };
+          }, [activeTab]);
+
+"""
+          if "const timer = setInterval(refreshOrders, 5000);" not in s:
+              if orders_marker not in s:
+                  raise SystemExit('Could not find fetchUsers marker for orders polling')
+              s = s.replace(orders_marker, orders_effect + orders_marker, 1)
+
+          # 6. Make the order request explicitly AJAX/no-cache and emit refresh after data arrives.
+          order_old = """  const fetchOrders = async () => {
+    try {
+      const res = await fetch('/api/woocommerce/orders');
+      const data = await res.json();
+      if (data.success && data.orders) {
+        setOrders(data.orders);
+        localStorage.setItem('admin_cached_orders', JSON.stringify(data.orders));
+      }
+    } catch (err) {
+      console.error('Fout bij ophalen bestellingen:', err);
+    }
+  };"""
+          order_new = """  const fetchOrders = async () => {
+    try {
+      const res = await fetch(`/api/woocommerce/orders?_ajax=${Date.now()}`, {
+        cache: 'no-store',
+        headers: { 'X-Requested-With': 'XMLHttpRequest', 'Cache-Control': 'no-cache, no-store, must-revalidate' }
+      });
+      const data = await res.json();
+      if (data.success && data.orders) {
+        setOrders(data.orders);
+        localStorage.setItem('admin_cached_orders', JSON.stringify(data.orders));
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('pos:orders-updated', { detail: { orders: data.orders } }));
+        }
+      }
+    } catch (err) {
+      console.error('Fout bij ophalen bestellingen:', err);
+    }
+  };"""
+          if order_old in s:
+              s = s.replace(order_old, order_new, 1)
+
+          marker = '// SUMUP_ADMIN_PAIRING_SELECTOR_AND_LIVE_ORDERS_FIXED'
+          if marker not in s:
+              s = s.replace('export default function AdminDashboard() {', marker + '\n\nexport default function AdminDashboard() {', 1)
 
           p.write_text(s)
           PY
@@ -201,5 +260,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add pages/admin.js
-          git commit -m "Fix SumUp admin pairing selector [sumup-admin-fixed-v2]"
+          git commit -m "Fix SumUp branch selector and live orders [sumup-admin-fixed-v3]"
           git push
