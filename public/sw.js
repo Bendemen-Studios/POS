@@ -1,8 +1,8 @@
-const CACHE_NAME = 'bendemen-pos-v14';
+const CACHE_NAME = 'bendemen-pos-v15';
 const OFFLINE_URL = '/login';
-const NAVIGATION_TIMEOUT = 3500;
-const API_TIMEOUT = 60000;
-const PRODUCT_API_TIMEOUT = 180000;
+const NAVIGATION_TIMEOUT = 2500;
+const API_TIMEOUT = 8000;
+const PRODUCT_API_TIMEOUT = 5000;
 const CHECKOUT_TIMEOUT = 10000;
 
 const APP_SHELL = ['/', '/login', '/select-store', '/pickup', '/admin', '/manifest.json', '/favicon.ico'];
@@ -10,16 +10,16 @@ const APP_SHELL = ['/', '/login', '/select-store', '/pickup', '/admin', '/manife
 const CACHEABLE_API_PREFIXES = [
   '/api/auth/store-selection',
   '/api/admin/users',
-  '/api/admin/store',
   '/api/woocommerce/products',
   '/api/woocommerce/customers',
   '/api/woocommerce/orders',
   '/api/woocommerce/pickup-order',
-  '/api/sumup/proxy',
 ];
 
 const STALE_WHILE_REVALIDATE_API = new Set([
+  '/api/admin/users',
   '/api/woocommerce/customers',
+  '/api/woocommerce/orders',
   '/api/woocommerce/pickup-order',
 ]);
 
@@ -37,20 +37,15 @@ async function cacheResponse(cache, request, response) {
 }
 
 function isCacheableApi(pathname) {
-  return CACHEABLE_API_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}?`));
+  return CACHEABLE_API_PREFIXES.some(prefix => pathname === prefix || pathname.startsWith(`${prefix}?`));
 }
 
-async function refreshApiCache(request) {
-  const url = new URL(request.url);
-  const timeout = url.pathname === '/api/woocommerce/products' ? PRODUCT_API_TIMEOUT : API_TIMEOUT;
+async function refreshApiCache(request, timeout = API_TIMEOUT) {
   try {
     const response = await timeoutFetch(request, timeout);
     if (response.ok) {
       const cache = await caches.open(CACHE_NAME);
       await cache.put(request, response.clone());
-      if (url.pathname === '/api/woocommerce/products') {
-        try { await cache.put(new Request('/api/woocommerce/products'), response.clone()); } catch (_) {}
-      }
     }
     return response;
   } catch (_) {
@@ -59,47 +54,54 @@ async function refreshApiCache(request) {
 }
 
 async function handleProductRequest(request) {
-  const fresh = await refreshApiCache(request);
-  if (fresh) return fresh;
+  const cache = await caches.open(CACHE_NAME);
+  const canonical = await cache.match('/api/woocommerce/products');
+  const cached = canonical || await cache.match(request);
 
-  const canonical = await caches.match('/api/woocommerce/products');
-  if (canonical) return canonical;
+  // Productdata is read-first from local cache. De kassa hoeft nooit op WooCommerce te wachten.
+  if (cached) {
+    refreshApiCache(request, PRODUCT_API_TIMEOUT).then(async fresh => {
+      if (fresh) {
+        try { await cache.put('/api/woocommerce/products', fresh.clone()); } catch (_) {}
+      }
+    }).catch(() => {});
+    return cached;
+  }
 
-  const cached = await caches.match(request);
-  if (cached) return cached;
+  const fresh = await refreshApiCache(request, PRODUCT_API_TIMEOUT);
+  if (fresh) {
+    try { await cache.put('/api/woocommerce/products', fresh.clone()); } catch (_) {}
+    return fresh;
+  }
 
-  return new Response(
-    JSON.stringify({ success: false, offline: true, error: 'Producten konden niet worden opgehaald en er is nog geen lokale productcache beschikbaar.' }),
-    { status: 503, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } }
-  );
+  return new Response(JSON.stringify({ success: false, offline: true, error: 'Geen lokale productcache beschikbaar.' }), {
+    status: 503,
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
+  });
 }
 
 async function handleStaleApiRequest(request) {
   const cache = await caches.open(CACHE_NAME);
   const cached = await cache.match(request);
-
-  // Geef een bestaande lokale response onmiddellijk terug. Vernieuw tegelijk op de achtergrond.
   if (cached) {
-    void refreshApiCache(request);
+    refreshApiCache(request, API_TIMEOUT).catch(() => {});
     return cached;
   }
-
-  const fresh = await refreshApiCache(request);
+  const fresh = await refreshApiCache(request, API_TIMEOUT);
   if (fresh) return fresh;
-
-  return new Response(
-    JSON.stringify({ success: false, offline: true, error: 'Offline en geen lokale cache beschikbaar.' }),
-    { status: 503, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } }
-  );
+  return new Response(JSON.stringify({ success: false, offline: true, error: 'Offline en geen lokale cache beschikbaar.' }), {
+    status: 503,
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
+  });
 }
 
 async function handleServerStatusRequest(request) {
   try {
-    return await timeoutFetch(request, 3000);
+    return await timeoutFetch(request, 2500);
   } catch (_) {
     return new Response(JSON.stringify({ success: false, offline: true, error: 'POS-server offline of niet bereikbaar.' }), {
       status: 503,
-      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
     });
   }
 }
@@ -110,18 +112,18 @@ async function handleCheckoutRequest(request) {
   } catch (_) {
     return new Response(JSON.stringify({ success: false, offline: true, queued: true, error: 'POS-server offline of niet bereikbaar. De bestelling wordt lokaal opgeslagen.' }), {
       status: 503,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json' }
     });
   }
 }
 
-self.addEventListener('install', (event) => {
+self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then(async (cache) => {
-        await Promise.allSettled(APP_SHELL.map(async (url) => {
+      .then(async cache => {
+        await Promise.allSettled(APP_SHELL.map(async url => {
           try {
-            const response = await timeoutFetch(url, 5000);
+            const response = await timeoutFetch(url, 4000);
             if (response.ok) await cache.put(url, response);
           } catch (_) {}
         }));
@@ -130,22 +132,21 @@ self.addEventListener('install', (event) => {
   );
 });
 
-self.addEventListener('activate', (event) => {
+self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))))
+      .then(keys => Promise.all(keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key))))
       .then(() => self.clients.claim())
   );
 });
 
-self.addEventListener('message', (event) => {
-  if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
+self.addEventListener('message', event => {
+  if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
-self.addEventListener('fetch', (event) => {
+self.addEventListener('fetch', event => {
   const request = event.request;
   const url = new URL(request.url);
-
   if (url.origin !== self.location.origin) return;
 
   if (request.method === 'GET' && url.pathname === '/api/admin/store') {
@@ -171,16 +172,7 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return;
 
   if (url.pathname.startsWith('/api/') && isCacheableApi(url.pathname)) {
-    event.respondWith((async () => {
-      const fresh = await refreshApiCache(request);
-      if (fresh) return fresh;
-      const cached = await caches.match(request);
-      if (cached) return cached;
-      return new Response(JSON.stringify({ success: false, offline: true, error: 'Offline en geen lokale cache beschikbaar.' }), {
-        status: 503,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    })());
+    event.respondWith(handleStaleApiRequest(request));
     return;
   }
 
@@ -191,9 +183,9 @@ self.addEventListener('fetch', (event) => {
 
   if (url.pathname.startsWith('/_next/static/')) {
     event.respondWith(
-      caches.match(request).then((cached) => {
+      caches.match(request).then(cached => {
         if (cached) return cached;
-        return fetch(request).then(async (response) => {
+        return fetch(request).then(async response => {
           const cache = await caches.open(CACHE_NAME);
           return cacheResponse(cache, request, response);
         });
@@ -205,31 +197,38 @@ self.addEventListener('fetch', (event) => {
   if (request.mode === 'navigate') {
     event.respondWith((async () => {
       const cache = await caches.open(CACHE_NAME);
+      const cached = await cache.match(request, { ignoreSearch: true }) || await cache.match(url.pathname, { ignoreSearch: true });
+
+      // Homepage/login eerst uit cache: openen is onmiddellijk, ook als VPS/site offline is.
+      if (url.pathname === '/' || url.pathname === '/login') {
+        if (cached) {
+          event.waitUntil(timeoutFetch(request, NAVIGATION_TIMEOUT).then(async response => {
+            if (response.ok && response.type !== 'opaqueredirect') await cache.put(request, response.clone());
+          }).catch(() => {}));
+          return cached;
+        }
+      }
+
       try {
-        const response = await timeoutFetch(request);
+        const response = await timeoutFetch(request, NAVIGATION_TIMEOUT);
         if (response.ok && response.type !== 'opaqueredirect') await cache.put(request, response.clone());
         return response;
       } catch (_) {
-        const cached = await caches.match(request, { ignoreSearch: true });
         if (cached) return cached;
-        const pathCached = await caches.match(url.pathname, { ignoreSearch: true });
-        if (pathCached) return pathCached;
-        const rootCached = await caches.match('/');
+        const rootCached = await cache.match('/');
         if (rootCached) return rootCached;
-        const loginCached = await caches.match(OFFLINE_URL);
+        const loginCached = await cache.match(OFFLINE_URL);
         if (loginCached) return loginCached;
-        return new Response('<!doctype html><html><body style="margin:0;background:#fff;display:flex;align-items:center;justify-content:center;height:100vh;font-family:Arial"><div style="text-align:center"><strong>BENDEMEN POS</strong><p>Offline modus wordt gestart...</p></div></body></html>', {
-          headers: { 'Content-Type': 'text/html; charset=utf-8' },
-        });
+        return new Response('<!doctype html><html><body style="margin:0;background:#fff;display:flex;align-items:center;justify-content:center;height:100vh;font-family:Arial"><div style="text-align:center"><strong>BENDEMEN POS</strong><p>Offline modus wordt gestart...</p></div></body></html>', { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
       }
     })());
     return;
   }
 
   event.respondWith(
-    caches.match(request).then((cached) => {
+    caches.match(request).then(cached => {
       if (cached) return cached;
-      return fetch(request).then(async (response) => {
+      return fetch(request).then(async response => {
         const cache = await caches.open(CACHE_NAME);
         return cacheResponse(cache, request, response);
       });
