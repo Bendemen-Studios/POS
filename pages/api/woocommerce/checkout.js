@@ -119,7 +119,10 @@ export default async function handler(req, res) {
     const orderData = {
       payment_method: paymentMethod || 'pos_checkout',
       payment_method_title: paymentTitle,
-      set_paid: false,
+      // The POS transaction has already been paid at the physical checkout.
+      // Marking it paid here makes WooCommerce Points & Rewards process the
+      // earning side for the amount that remains after points redemption.
+      set_paid: true,
       status: 'pending',
       customer_id: customerId ? Number(customerId) : 0,
       line_items: lineItems,
@@ -193,8 +196,8 @@ export default async function handler(req, res) {
       throw new Error('WooCommerce kon de POS-bestelling niet naar completed zetten.');
     }
 
-    // WooCommerce Points & Rewards now handles earned points from the completed
-    // order. The POS only performs the separate redemption when points were used.
+    // WooCommerce Points & Rewards handles earned points from the paid order.
+    // The POS only performs the separate redemption when points were used.
     let pointsSyncPending = false;
     let pointsResult = null;
     if (customerId && Number.isFinite(Number(customerId)) && Number(customerId) > 0 && Number(totals?.pointsUsed || 0) > 0) {
