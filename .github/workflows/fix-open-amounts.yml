@@ -1,0 +1,63 @@
+name: Fix POS open amount cart items
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Patch open amount cart handling
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('pages/index.js')
+          s = p.read_text(encoding='utf-8')
+          marker = '// BDM_POS_OPEN_AMOUNT_SEPARATE_V1'
+          if marker in s:
+              print('open amount patch already installed')
+              raise SystemExit(0)
+
+          old_confirm = """    addToCart(openAmountProduct, price); setOpenAmountProduct(null); setCustomPriceInput('');"""
+          new_confirm = """    // BDM_POS_OPEN_AMOUNT_SEPARATE_V1
+    // Open amounts are separate cart lines when their prices differ, while identical prices merge.
+    const openAmountId = `${openAmountProduct.id}_open_${price.toFixed(2)}`;
+    addToCartCustom({ ...openAmountProduct, id: openAmountId, product_id: openAmountProduct.id, variation_id: 0, price, name: openAmountProduct.name, is_open_amount: true });
+    setOpenAmountProduct(null); setCustomPriceInput('');"""
+          if old_confirm not in s:
+              raise SystemExit('open amount confirmation marker not found')
+          s = s.replace(old_confirm, new_confirm, 1)
+
+          old_warning = """    else addToCart(product, price);"""
+          new_warning = """    else {
+      // Keep different open amounts for the same product as separate cart lines.
+      const isOpenAmount = product?.price === '' || product?.price === null || (parseFloat(product?.price || 0) === 0 && !product?.is_fixed_zero);
+      if (isOpenAmount) {
+        const openAmountId = `${product.id}_open_${Number(price || 0).toFixed(2)}`;
+        addToCartCustom({ ...product, id: openAmountId, product_id: product.id, variation_id: 0, price: Number(price || 0), name: product.name, is_open_amount: true });
+      } else addToCart(product, price);
+    }"""
+          if old_warning not in s:
+              raise SystemExit('stock warning add marker not found')
+          s = s.replace(old_warning, new_warning, 1)
+
+          p.write_text(s, encoding='utf-8')
+          print('open amount patch applied')
+          PY
+
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add pages/index.js
+          git diff --cached --quiet || git commit -m "fix: keep differently priced open amounts separate"
+          git push
