@@ -1,9 +1,9 @@
-const CACHE_NAME = 'bendemen-pos-v19';
+const CACHE_NAME = 'bendemen-pos-v20';
 const OFFLINE_URL = '/login';
 const NAVIGATION_TIMEOUT = 1200;
 const API_TIMEOUT = 5000;
-const PRODUCT_API_TIMEOUT = 5000;
-const CHECKOUT_TIMEOUT = 15000;
+const PRODUCT_API_TIMEOUT = 60000;
+const CHECKOUT_TIMEOUT = 1500;
 
 const APP_SHELL = ['/', '/login', '/select-store', '/pickup', '/admin', '/manifest.json', '/favicon.ico'];
 
@@ -54,7 +54,7 @@ async function refreshApiCache(request, timeout = API_TIMEOUT) {
 
 async function onlineFirstApi(request, timeout = API_TIMEOUT) {
   const fresh = await refreshApiCache(request, timeout);
-  if (fresh) return fresh;
+  if (fresh && fresh.ok) return fresh;
   const cache = await caches.open(CACHE_NAME);
   const cached = await cache.match(request);
   if (cached) return cached;
@@ -65,17 +65,17 @@ async function handleProductRequest(request) {
   const cache = await caches.open(CACHE_NAME);
   const cached = await cache.match('/api/woocommerce/products') || await cache.match(request);
 
-  // Producten moeten onmiddellijk uit de lokale cache komen. De verse WooCommerce
-  // synchronisatie draait op de achtergrond en blokkeert de POS niet meer.
+  // Toon lokale producten onmiddellijk. Een verse synchronisatie loopt parallel
+  // en blokkeert de kassa niet.
   if (cached) {
     refreshApiCache(request, PRODUCT_API_TIMEOUT).then(fresh => {
-      if (fresh) cache.put('/api/woocommerce/products', fresh.clone()).catch(() => {});
+      if (fresh && fresh.ok) cache.put('/api/woocommerce/products', fresh.clone()).catch(() => {});
     }).catch(() => {});
     return cached;
   }
 
   const fresh = await refreshApiCache(request, PRODUCT_API_TIMEOUT);
-  if (fresh) return fresh;
+  if (fresh && fresh.ok) return fresh;
 
   return new Response(JSON.stringify({ success: false, offline: true, error: 'Server niet bereikbaar en geen lokale productcache beschikbaar.' }), { status: 503, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
 }
@@ -92,7 +92,9 @@ async function handleStaleApiRequest(request) {
 
 async function handleServerStatusRequest(request) {
   try {
-    return await timeoutFetch(request, 1500);
+    const response = await timeoutFetch(request, 1500);
+    if (response.ok) return response;
+    throw new Error(`server status ${response.status}`);
   } catch (_) {
     return new Response(JSON.stringify({ success: false, offline: true, error: 'POS-server offline of niet bereikbaar.' }), { status: 503, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
   }
@@ -100,7 +102,9 @@ async function handleServerStatusRequest(request) {
 
 async function handleCheckoutRequest(request) {
   try {
-    return await timeoutFetch(request, CHECKOUT_TIMEOUT);
+    const response = await timeoutFetch(request, CHECKOUT_TIMEOUT);
+    if (response.ok) return response;
+    throw new Error(`checkout ${response.status}`);
   } catch (_) {
     return new Response(JSON.stringify({ success: false, offline: true, queued: true, error: 'POS-server offline of niet bereikbaar. De bestelling wordt lokaal opgeslagen.' }), { status: 503, headers: { 'Content-Type': 'application/json' } });
   }
@@ -132,8 +136,6 @@ self.addEventListener('fetch', event => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
 
-  // Alleen de expliciete health-check mag door de snelle server-status handler.
-  // Normale /api/admin/store requests moeten de echte filialenlijst ophalen.
   if (request.method === 'GET' && url.pathname === '/api/admin/store' && (url.searchParams.has('_pos_health') || url.searchParams.has('healthcheck'))) {
     event.respondWith(handleServerStatusRequest(request));
     return;
@@ -181,6 +183,9 @@ self.addEventListener('fetch', event => {
     event.respondWith((async () => {
       const cache = await caches.open(CACHE_NAME);
       const cached = await cache.match(request, { ignoreSearch: true }) || await cache.match(url.pathname, { ignoreSearch: true });
+
+      // Cached app pages always win for offline startup. Refresh them in the
+      // background instead of blocking the cashier on a dead VPS.
       if (cached) {
         event.waitUntil((async () => {
           try {
@@ -190,17 +195,23 @@ self.addEventListener('fetch', event => {
         })());
         return cached;
       }
+
       try {
         const response = await timeoutFetch(request, NAVIGATION_TIMEOUT);
-        if (response.ok && response.type !== 'opaqueredirect') await cache.put(request, response.clone());
-        return response;
-      } catch (_) {
-        const rootCached = await cache.match('/');
-        if (rootCached) return rootCached;
-        const loginCached = await cache.match(OFFLINE_URL);
-        if (loginCached) return loginCached;
-        return new Response('<!doctype html><html><body style="margin:0;background:#fff;display:flex;align-items:center;justify-content:center;height:100vh;font-family:Arial"><div style="text-align:center"><strong>BENDEMEN POS</strong><p>Offline modus wordt gestart...</p></div></body></html>', { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
-      }
+        if (response.ok && response.type !== 'opaqueredirect') {
+          await cache.put(request, response.clone());
+          return response;
+        }
+      } catch (_) {}
+
+      // A VPS returning HTTP 500/502/503 is just as unusable for the POS as a
+      // network failure. Fall back to the cached app shell in that case too.
+      const rootCached = await cache.match('/');
+      if (rootCached) return rootCached;
+      const loginCached = await cache.match(OFFLINE_URL);
+      if (loginCached) return loginCached;
+
+      return new Response('<!doctype html><html><body style="margin:0;background:#fff;display:flex;align-items:center;justify-content:center;height:100vh;font-family:Arial"><div style="text-align:center"><strong>BENDEMEN POS</strong><p>Offline modus wordt gestart...</p></div></body></html>', { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
     })());
     return;
   }
