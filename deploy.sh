@@ -69,14 +69,50 @@ s = s.replace(
     "healthTimer = setInterval(() => backgroundSync(false), 5000);"
 )
 
+# Do not report a slow but successful WooCommerce checkout as offline.
+s = s.replace(
+    "fetchWithServerCheck('/api/woocommerce/checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(order) }, 10000)",
+    "fetchWithServerCheck('/api/woocommerce/checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(order) }, 45000)"
+)
+
+# Give the server health endpoint enough time on a busy VPS.
+s = s.replace(
+    "setTimeout(() => controller.abort(), 1200)",
+    "setTimeout(() => controller.abort(), 5000)"
+)
+
 if s != original:
     path.write_text(s, encoding='utf-8')
-    print('✅ Active POS offline queue sync patched: 5s retry + no health-gate + offline endpoint fallback.')
+    print('✅ Active POS sync patched: 45s checkout + 5s health + 5s queue retry + no health gate.')
 else:
-    print('ℹ️ Active POS offline queue was already patched or source pattern changed; no patch applied.')
+    print('ℹ️ Active POS source already patched or source pattern changed; no page patch applied.')
 PY
 else
   echo "⚠️ python3 of pages/index.js ontbreekt; actieve POS queue-patch niet toegepast."
+fi
+
+# Keep the service worker in sync so its checkout timeout cannot turn a slow
+# successful order into a false offline/queued message.
+if command -v python3 >/dev/null 2>&1 && [ -f "$APP_DIR/public/sw.js" ]; then
+  python3 - <<'PY'
+from pathlib import Path
+
+path = Path('/var/www/bendemen-pos/public/sw.js')
+s = path.read_text(encoding='utf-8')
+original = s
+
+s = s.replace("bendemen-pos-v21", "bendemen-pos-v22")
+s = s.replace("const CHECKOUT_TIMEOUT = 15000;", "const CHECKOUT_TIMEOUT = 45000;")
+
+if s != original:
+    path.write_text(s, encoding='utf-8')
+    print('✅ Service worker patched: v22 + 45s checkout timeout.')
+else:
+    print('ℹ️ Service worker already patched or source pattern changed; no change applied.')
+fi
+PY
+else
+  echo "⚠️ python3 of public/sw.js ontbreekt; service-worker patch niet toegepast."
 fi
 
 chmod +x "$APP_DIR/deploy.sh" 2>/dev/null || true
