@@ -1,4 +1,4 @@
-const CACHE_NAME = 'bendemen-pos-v22';
+const CACHE_NAME = 'bendemen-pos-v23';
 const OFFLINE_URL = '/login';
 const NAVIGATION_TIMEOUT = 1200;
 const API_TIMEOUT = 5000;
