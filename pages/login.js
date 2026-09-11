@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 
-// Keep the offline path fast. A dead VPS should never make the cashier wait.
-const OFFLINE_TIMEOUT_MS = 1200;
+// Give the live login API enough time for a cold start/database query,
+// while still falling back to the local cache when the server is unavailable.
+const OFFLINE_TIMEOUT_MS = 5000;
 
 export default function LoginPage() {
   const router = useRouter();
