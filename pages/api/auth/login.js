@@ -18,11 +18,12 @@ export default async function handler(req, res) {
     // Wait for first-start schema creation/migrations before querying users.
     await dbReady;
 
-    // Query the complete row instead of naming optional columns so older
-    // production databases remain compatible with the login endpoint.
+    // Use username as the canonical login identifier. This deliberately does
+    // not reference optional legacy columns such as `email`, so an old POS
+    // database can still authenticate while its schema is being migrated.
     const [rows] = await db.query(
-      'SELECT * FROM users WHERE LOWER(username) = ? OR LOWER(email) = ? LIMIT 1',
-      [cleanUsername, cleanUsername]
+      'SELECT * FROM users WHERE LOWER(username) = ? LIMIT 1',
+      [cleanUsername]
     );
 
     if (!Array.isArray(rows) || rows.length === 0) {
