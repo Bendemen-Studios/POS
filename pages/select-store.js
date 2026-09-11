@@ -19,18 +19,38 @@ export default function SelectStore() {
     try {
       const parsedUser = JSON.parse(userStr);
       setCurrentUser(parsedUser);
-      fetchUserStores(parsedUser.id);
+      fetchUserStores(parsedUser);
     } catch (e) {
       window.location.replace('/login');
     }
   }, [router]);
 
-  const readCachedStores = () => {
+  const isAdmin = (user) => {
+    const role = String(user?.role || '').toLowerCase();
+    return role === 'admin' || role === 'super_admin' || role === 'administrator' || String(user?.username || '').toLowerCase() === 'bendemen';
+  };
+
+  const filterStoresForUser = (allStores, user) => {
+    if (!Array.isArray(allStores)) return [];
+    if (isAdmin(user)) return allStores;
+
+    const assignedStoreId = user?.store_id == null ? '' : String(user.store_id).trim();
+    if (!assignedStoreId) return [];
+
+    const assignedIds = new Set(
+      assignedStoreId.split(',').map(id => id.trim()).filter(Boolean)
+    );
+
+    return allStores.filter(store => assignedIds.has(String(store?.id ?? store?.store_id ?? '').trim()));
+  };
+
+  const readCachedStores = (user) => {
     try {
       const raw = localStorage.getItem('cached_pos_stores');
       if (!raw) return [];
       const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
+      // Never expose cached stores that are not assigned to this user.
+      return filterStoresForUser(parsed, user);
     } catch (_) { return []; }
   };
 
@@ -42,19 +62,17 @@ export default function SelectStore() {
     return true;
   };
 
-  const fetchUserStores = async (userId) => {
+  const fetchUserStores = async (user) => {
     setError('');
 
-    // Show the last known filialen immediately. Do not make the cashier wait for
-    // a network request when the local cache is already usable. The VPS refresh
-    // continues in the background and replaces the cache when it succeeds.
-    const cachedStores = readCachedStores();
+    // The cache is filtered by the current user's assignment before it is shown.
+    const cachedStores = readCachedStores(user);
     if (cachedStores.length) applyStores(cachedStores);
 
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      setLoading(false);
       if (!cachedStores.length) {
-        setLoading(false);
-        setError('Geen verbinding met de server en geen lokale filiaalcache beschikbaar.');
+        setError('Geen verbinding met de server en geen toegewezen filiaalcache beschikbaar.');
       }
       return;
     }
@@ -62,34 +80,36 @@ export default function SelectStore() {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), SERVER_TIMEOUT_MS);
-      const res = await fetch(`/api/auth/store-selection?user_id=${encodeURIComponent(userId)}`, {
-        headers: { 'x-user-id': String(userId), 'Cache-Control': 'no-cache' },
+      const res = await fetch(`/api/auth/store-selection?user_id=${encodeURIComponent(user.id)}`, {
+        headers: { 'x-user-id': String(user.id), 'Cache-Control': 'no-cache' },
         signal: controller.signal,
         cache: 'no-store'
       });
       clearTimeout(timeoutId);
       const data = await res.json();
+
       if (res.ok && data.success && Array.isArray(data.stores)) {
-        setStores(data.stores);
+        // Keep a server response authoritative, but apply the same client-side
+        // restriction as a defence-in-depth measure before rendering it.
+        const allowedStores = filterStoresForUser(data.stores, user);
+        setStores(allowedStores);
         localStorage.setItem('cached_pos_stores', JSON.stringify(data.stores));
         setLoading(false);
         setError('');
         return;
       }
 
-      // If we already displayed a valid cache, keep it visible instead of
-      // replacing it with a temporary server-side error.
       if (!cachedStores.length) {
         setError(data.message || 'Geen toegewezen filialen gevonden.');
         setLoading(false);
       }
     } catch (err) {
-      console.warn('Server offline of timeout, lokale filiaalcache blijft actief.', err);
+      console.warn('Server offline of timeout, lokale toegewezen filialen blijven actief.', err);
       if (!cachedStores.length) {
         setError('Geen verbinding met de server en geen lokale filiaalcache beschikbaar.');
         setLoading(false);
       } else {
-        setError('⚠️ Server reageert niet snel genoeg; lokale filialen worden gebruikt.');
+        setError('⚠️ Server reageert niet snel genoeg; lokale toegewezen filialen worden gebruikt.');
       }
     }
   };
@@ -108,5 +128,5 @@ export default function SelectStore() {
   const handleLogout = () => { localStorage.removeItem('pos_user'); localStorage.removeItem('pos_token'); window.location.replace('/login'); };
 
   if (!currentUser) return null;
-  return <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4"><div className="bg-white rounded-lg shadow-xl p-8 max-w-md w-full border border-gray-200"><div className="text-center mb-8"><h1 className="text-2xl font-black text-black tracking-wider uppercase">Kies je Vestiging</h1><p className="text-xs text-gray-500 font-semibold mt-1">Selecteer een filiaal om de kassa te openen</p></div>{loading && <div className="text-center py-8 space-y-2"><div className="text-red-600 font-black text-xs tracking-widest uppercase animate-pulse">Filialen ophalen...</div></div>}{error && <div className="bg-yellow-50 border-l-4 border-yellow-600 text-yellow-800 p-3 rounded text-xs mb-4 font-semibold">{error}</div>}{!loading && stores.length === 0 && !error && <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 p-4 rounded text-center text-xs font-bold">Geen actieve filialen gekoppeld aan jouw account.</div>}{!loading && stores.length > 0 && <div className="space-y-3">{stores.map(store => <button key={store.id} onClick={() => selectStore(store)} type="button" className="w-full p-4 bg-gray-50 border border-gray-300 hover:border-black rounded-lg transition flex justify-between items-center text-left group shadow-sm"><div><h3 className="font-bold text-sm text-gray-900 group-hover:text-black">{store.store_name || store.name}</h3>{store.address && <span className="text-xs text-gray-500 font-medium block mt-0.5">{store.address}</span>}</div><span className="text-lg font-black text-red-600 transition-transform group-hover:translate-x-1">→</span></button>)}</div>}<button onClick={handleLogout} type="button" className="mt-8 w-full text-center text-xs text-gray-500 hover:text-red-600 font-bold transition uppercase tracking-wider">← Uitloggen / Ander account</button></div></div>;
+  return <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4"><div className="bg-white rounded-lg shadow-xl p-8 max-w-md w-full border border-gray-200"><div className="text-center mb-8"><h1 className="text-2xl font-black text-black tracking-wider uppercase">Kies je Vestiging</h1><p className="text-xs text-gray-500 font-semibold mt-1">Selecteer een filiaal om de kassa te openen</p></div>{loading && <div className="text-center py-8 space-y-2"><div className="text-red-600 font-black text-xs tracking-widest uppercase animate-pulse">Filialen ophalen...</div></div>}{error && <div className="bg-yellow-50 border-l-4 border-yellow-600 text-yellow-800 p-3 rounded text-xs mb-4 font-semibold">{error}</div>}{!loading && stores.length === 0 && <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 p-4 rounded text-center text-xs font-bold">Geen actieve filialen gekoppeld aan jouw account.</div>}{!loading && stores.length > 0 && <div className="space-y-3">{stores.map(store => <button key={store.id} onClick={() => selectStore(store)} type="button" className="w-full p-4 bg-gray-50 border border-gray-300 hover:border-black rounded-lg transition flex justify-between items-center text-left group shadow-sm"><div><h3 className="font-bold text-sm text-gray-900 group-hover:text-black">{store.store_name || store.name}</h3>{store.address && <span className="text-xs text-gray-500 font-medium block mt-0.5">{store.address}</span>}</div><span className="text-lg font-black text-red-600 transition-transform group-hover:translate-x-1">→</span></button>)}</div>}<button onClick={handleLogout} type="button" className="mt-8 w-full text-center text-xs text-gray-500 hover:text-red-600 font-bold transition uppercase tracking-wider">← Uitloggen / Ander account</button></div></div>;
 }
