@@ -1,4 +1,4 @@
-import db from '../../../lib/db';
+import db, { dbReady } from '../../../lib/db';
 import bcrypt from 'bcryptjs';
 
 export default async function handler(req, res) {
@@ -15,7 +15,9 @@ export default async function handler(req, res) {
   }
 
   try {
-    // lib/db initializes/migrates the POS schema when the server starts.
+    // Wait for first-start schema creation/migrations before querying users.
+    await dbReady;
+
     // Query the complete row instead of naming optional columns so older
     // production databases remain compatible with the login endpoint.
     const [rows] = await db.query(
