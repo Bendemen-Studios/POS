@@ -1,9 +1,9 @@
-const CACHE_NAME = 'bendemen-pos-v21';
+const CACHE_NAME = 'bendemen-pos-v22';
 const OFFLINE_URL = '/login';
 const NAVIGATION_TIMEOUT = 1200;
 const API_TIMEOUT = 5000;
 const PRODUCT_API_TIMEOUT = 10000;
-const CHECKOUT_TIMEOUT = 15000;
+const CHECKOUT_TIMEOUT = 45000;
 
 const APP_SHELL = ['/','/login','/select-store','/pickup','/admin','/manifest.json','/favicon.ico'];
 const CACHEABLE_API_PREFIXES = ['/api/auth/store-selection','/api/admin/users','/api/woocommerce/products','/api/woocommerce/customers','/api/woocommerce/orders','/api/woocommerce/pickup-order'];
@@ -62,7 +62,7 @@ async function handleStaleApiRequest(request) {
 
 async function handleServerStatusRequest(request) {
   try {
-    const response = await timeoutFetch(request, 1500);
+    const response = await timeoutFetch(request, 5000);
     if (response.ok) return response;
     throw new Error(`server status ${response.status}`);
   } catch (_) {
