@@ -1,0 +1,76 @@
+name: Fix offline order auto sync
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch POS offline sync
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('pages/index.js')
+          s = p.read_text()
+          old = "  useEffect(() => { let stopped = false; let healthTimer = null; let fullSyncTimer = null; const backgroundSync = async (force = false) => { if (stopped || backgroundSyncState.current.running) return; if (typeof navigator !== 'undefined' && navigator.onLine === false) { checkOfflineQueue(); return; } const now = Date.now(); if (!force && now - backgroundSyncState.current.lastRun < 8000) return; backgroundSyncState.current.running = true; backgroundSyncState.current.lastRun = now; try { await triggerOfflineSync(false); if (!stopped && await checkServerConnection()) await Promise.allSettled([fetchProducts(), fetchCustomers(), fetchUsersAsCustomers(), fetchPickupOrders(), fetchStores()]); } catch (err) { console.warn('[AUTO SYNC] achtergrond-sync mislukt:', err); } finally { backgroundSyncState.current.running = false; } }; backgroundSync(true); healthTimer = setInterval(() => backgroundSync(false), 10000); fullSyncTimer = setInterval(() => backgroundSync(true), 300000); const wake = () => { if (!document.hidden) backgroundSync(true); }; const online = () => backgroundSync(true); window.addEventListener('online', online); window.addEventListener('focus', wake); document.addEventListener('visibilitychange', wake); return () => { stopped = true; clearInterval(healthTimer); clearInterval(fullSyncTimer); window.removeEventListener('online', online); window.removeEventListener('focus', wake); document.removeEventListener('visibilitychange', wake); }; }, []);"
+          new = """  useEffect(() => {
+    let stopped = false;
+    let syncTimer = null;
+    let fullSyncTimer = null;
+    const backgroundSync = async (force = false) => {
+      if (stopped || backgroundSyncState.current.running) return;
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) { checkOfflineQueue(); return; }
+      const now = Date.now();
+      if (!force && now - backgroundSyncState.current.lastRun < 5000) return;
+      backgroundSyncState.current.running = true;
+      backgroundSyncState.current.lastRun = now;
+      try {
+        // The checkout endpoint itself is the source of truth. Do not block the
+        // offline queue behind the separate health endpoint.
+        await triggerOfflineSync(false);
+        if (!stopped && readLocalArray('pos_offline_orders').length === 0) {
+          await Promise.allSettled([fetchProducts(), fetchCustomers(), fetchUsersAsCustomers(), fetchPickupOrders(), fetchStores()]);
+        }
+      } catch (err) { console.warn('[AUTO SYNC] achtergrond-sync mislukt:', err); }
+      finally { backgroundSyncState.current.running = false; }
+    };
+    backgroundSync(true);
+    // Retry while orders remain queued. navigator.onLine does not indicate
+    // whether the POS server has finished restarting, so retry independently.
+    syncTimer = setInterval(() => backgroundSync(false), 5000);
+    fullSyncTimer = setInterval(() => backgroundSync(true), 300000);
+    const wake = () => { if (!document.hidden) backgroundSync(true); };
+    const online = () => backgroundSync(true);
+    window.addEventListener('online', online);
+    window.addEventListener('focus', wake);
+    document.addEventListener('visibilitychange', wake);
+    return () => {
+      stopped = true;
+      clearInterval(syncTimer);
+      clearInterval(fullSyncTimer);
+      window.removeEventListener('online', online);
+      window.removeEventListener('focus', wake);
+      document.removeEventListener('visibilitychange', wake);
+    };
+  }, []);"""
+          if old not in s:
+              raise SystemExit('offline sync block not found; refusing to modify the file')
+          p.write_text(s.replace(old, new, 1))
+      - name: Commit patched file
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add pages/index.js
+          git diff --cached --quiet && exit 0
+          git commit -m 'fix: reliably auto-sync offline orders'
+          git push
