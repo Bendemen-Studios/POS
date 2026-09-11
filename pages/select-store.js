@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 
-const SERVER_TIMEOUT_MS = 2500;
+const SERVER_TIMEOUT_MS = 4000;
 
 export default function SelectStore() {
   const router = useRouter();
@@ -25,27 +25,40 @@ export default function SelectStore() {
     }
   }, [router]);
 
+  const readCachedStores = () => {
+    try {
+      const raw = localStorage.getItem('cached_pos_stores');
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (_) { return []; }
+  };
+
+  const applyStores = (nextStores, offline = false) => {
+    if (!Array.isArray(nextStores) || nextStores.length === 0) return false;
+    setStores(nextStores);
+    setLoading(false);
+    setError(offline ? '⚠️ Offline modus: lokale filialen gebruikt.' : '');
+    return true;
+  };
+
   const fetchUserStores = async (userId) => {
-    setLoading(true);
     setError('');
 
-    const loadFromCache = () => {
-      const cachedStores = localStorage.getItem('cached_pos_stores');
-      if (cachedStores) {
-        try {
-          const parsedStores = JSON.parse(cachedStores);
-          if (!Array.isArray(parsedStores) || parsedStores.length === 0) return false;
-          setStores(parsedStores);
-          setError('⚠️ Offline modus: Filialen geladen via lokale reserve-cache.');
-          setLoading(false);
-          return true;
-        } catch (e) { return false; }
-      }
-      return false;
-    };
+    // Show the last known filialen immediately. Do not make the cashier wait for
+    // a network request when the local cache is already usable. The VPS refresh
+    // continues in the background and replaces the cache when it succeeds.
+    const cachedStores = readCachedStores();
+    if (cachedStores.length) applyStores(cachedStores);
 
-    // Always try the VPS first. navigator.onLine is only a hint; the site can
-    // reach the VPS even when the browser reports offline.
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      if (!cachedStores.length) {
+        setLoading(false);
+        setError('Geen verbinding met de server en geen lokale filiaalcache beschikbaar.');
+      }
+      return;
+    }
+
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), SERVER_TIMEOUT_MS);
@@ -60,21 +73,24 @@ export default function SelectStore() {
         setStores(data.stores);
         localStorage.setItem('cached_pos_stores', JSON.stringify(data.stores));
         setLoading(false);
+        setError('');
         return;
       }
-      // The server responded, so it is reachable. Do not hide a server-side
-      // account/configuration error behind an old local cache.
-      setError(data.message || 'Geen toegewezen filialen gevonden.');
-      setLoading(false);
-      return;
-    } catch (err) {
-      console.warn('Server offline of timeout, val terug op cache...', err);
-    }
 
-    // Only a genuine request failure/timeout falls back to the offline cache.
-    if (!loadFromCache()) {
-      setError('Geen verbinding met de server en geen lokale filiaalcache beschikbaar.');
-      setLoading(false);
+      // If we already displayed a valid cache, keep it visible instead of
+      // replacing it with a temporary server-side error.
+      if (!cachedStores.length) {
+        setError(data.message || 'Geen toegewezen filialen gevonden.');
+        setLoading(false);
+      }
+    } catch (err) {
+      console.warn('Server offline of timeout, lokale filiaalcache blijft actief.', err);
+      if (!cachedStores.length) {
+        setError('Geen verbinding met de server en geen lokale filiaalcache beschikbaar.');
+        setLoading(false);
+      } else {
+        setError('⚠️ Server reageert niet snel genoeg; lokale filialen worden gebruikt.');
+      }
     }
   };
 
