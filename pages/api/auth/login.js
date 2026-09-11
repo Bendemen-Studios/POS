@@ -7,39 +7,46 @@ export default async function handler(req, res) {
     return res.status(405).json({ success: false, message: `Method ${req.method} Not Allowed` });
   }
 
-  const { username, password } = req.body;
-  if (!username || !password) {
+  const { username, password } = req.body || {};
+  const cleanUsername = String(username || '').trim().toLowerCase();
+
+  if (!cleanUsername || !password) {
     return res.status(400).json({ success: false, message: 'Vul zowel een gebruikersnaam als een wachtwoord in.' });
   }
 
   try {
+    // lib/db initializes/migrates the POS schema when the server starts.
+    // Query the complete row instead of naming optional columns so older
+    // production databases remain compatible with the login endpoint.
     const [rows] = await db.query(
-      'SELECT id, username, email, role, store_id, password, password_hash FROM users WHERE username = ? OR email = ? LIMIT 1',
-      [username, username]
+      'SELECT * FROM users WHERE LOWER(username) = ? OR LOWER(email) = ? LIMIT 1',
+      [cleanUsername, cleanUsername]
     );
 
     if (!Array.isArray(rows) || rows.length === 0) {
-      console.log(`[LOGIN FAILED] Gebruiker niet gevonden in DB: "${username}"`);
+      console.log(`[LOGIN FAILED] Gebruiker niet gevonden in DB: "${cleanUsername}"`);
       return res.status(401).json({ success: false, message: 'Ongeldige inloggegevens.' });
     }
 
     const user = rows[0];
     const storedPassword = user.password || user.password_hash || '';
+
     if (!storedPassword) {
-      console.error(`[LOGIN ERROR] Geen wachtwoord gevonden in DB voor gebruiker: ${username}`);
+      console.error(`[LOGIN ERROR] Geen wachtwoord gevonden in DB voor gebruiker: ${cleanUsername}`);
       return res.status(500).json({ success: false, message: 'Fout in gebruikersprofiel (geen wachtwoord).' });
     }
 
-    const isBcrypt = storedPassword.startsWith('$2a$') || storedPassword.startsWith('$2b$') || storedPassword.startsWith('$2y$');
+    const isBcrypt = /^\$2[aby]\$/.test(storedPassword);
     let isMatch = false;
 
     if (isBcrypt) {
       isMatch = await bcrypt.compare(password, storedPassword);
     } else {
       isMatch = password === storedPassword;
-      if (isMatch) {
+      if (isMatch && user.id != null) {
         bcrypt.hash(password, 10).then(newHash => {
-          db.query('UPDATE users SET password = ? WHERE id = ?', [newHash, user.id]).catch(err => {
+          const column = user.password_hash ? 'password_hash' : 'password';
+          db.query(`UPDATE users SET ${column} = ? WHERE id = ?`, [newHash, user.id]).catch(err => {
             console.error('Fout bij automatisch omzetten naar bcrypt hash:', err);
           });
         }).catch(err => console.error('Fout bij bcrypt hash:', err));
@@ -47,11 +54,11 @@ export default async function handler(req, res) {
     }
 
     if (!isMatch) {
-      console.log(`[LOGIN FAILED] Wachtwoord komt niet overeen voor gebruiker: "${username}"`);
+      console.log(`[LOGIN FAILED] Wachtwoord komt niet overeen voor gebruiker: "${cleanUsername}"`);
       return res.status(401).json({ success: false, message: 'Ongeldige inloggegevens.' });
     }
 
-    const isMainOwner = user.username?.toLowerCase() === 'bendemen' || user.email === 'bendemenbv@gmail.com';
+    const isMainOwner = user.username?.toLowerCase() === 'bendemen' || user.email?.toLowerCase() === 'bendemenbv@gmail.com';
 
     console.log(`[LOGIN SUCCESS] Gebruiker ingelogd: ${user.username}`);
 
