@@ -1,11 +1,10 @@
-const CACHE_NAME = 'bendemen-pos-v18';
+const CACHE_NAME = 'bendemen-pos-v19';
 const OFFLINE_URL = '/login';
 const NAVIGATION_TIMEOUT = 1200;
-const API_TIMEOUT = 8000;
+const API_TIMEOUT = 5000;
 const PRODUCT_API_TIMEOUT = 5000;
-const CHECKOUT_TIMEOUT = 10000;
+const CHECKOUT_TIMEOUT = 15000;
 
-// Alleen browser/PWA-cache. Geen preload of permanente cache op de VPS.
 const APP_SHELL = ['/', '/login', '/select-store', '/pickup', '/admin', '/manifest.json', '/favicon.ico'];
 
 const CACHEABLE_API_PREFIXES = [
@@ -56,33 +55,29 @@ async function refreshApiCache(request, timeout = API_TIMEOUT) {
 async function onlineFirstApi(request, timeout = API_TIMEOUT) {
   const fresh = await refreshApiCache(request, timeout);
   if (fresh) return fresh;
-
   const cache = await caches.open(CACHE_NAME);
   const cached = await cache.match(request);
   if (cached) return cached;
-
-  return new Response(JSON.stringify({ success: false, offline: true, error: 'Server niet bereikbaar en geen lokale cache beschikbaar.' }), {
-    status: 503,
-    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
-  });
+  return new Response(JSON.stringify({ success: false, offline: true, error: 'Server niet bereikbaar en geen lokale cache beschikbaar.' }), { status: 503, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
 }
 
 async function handleProductRequest(request) {
-  const fresh = await refreshApiCache(request, PRODUCT_API_TIMEOUT);
-  if (fresh) {
-    const cache = await caches.open(CACHE_NAME);
-    try { await cache.put('/api/woocommerce/products', fresh.clone()); } catch (_) {}
-    return fresh;
-  }
-
   const cache = await caches.open(CACHE_NAME);
   const cached = await cache.match('/api/woocommerce/products') || await cache.match(request);
-  if (cached) return cached;
 
-  return new Response(JSON.stringify({ success: false, offline: true, error: 'Server niet bereikbaar en geen lokale productcache beschikbaar.' }), {
-    status: 503,
-    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
-  });
+  // Producten moeten onmiddellijk uit de lokale cache komen. De verse WooCommerce
+  // synchronisatie draait op de achtergrond en blokkeert de POS niet meer.
+  if (cached) {
+    refreshApiCache(request, PRODUCT_API_TIMEOUT).then(fresh => {
+      if (fresh) cache.put('/api/woocommerce/products', fresh.clone()).catch(() => {});
+    }).catch(() => {});
+    return cached;
+  }
+
+  const fresh = await refreshApiCache(request, PRODUCT_API_TIMEOUT);
+  if (fresh) return fresh;
+
+  return new Response(JSON.stringify({ success: false, offline: true, error: 'Server niet bereikbaar en geen lokale productcache beschikbaar.' }), { status: 503, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
 }
 
 async function handleStaleApiRequest(request) {
@@ -97,12 +92,9 @@ async function handleStaleApiRequest(request) {
 
 async function handleServerStatusRequest(request) {
   try {
-    return await timeoutFetch(request, 1000);
+    return await timeoutFetch(request, 1500);
   } catch (_) {
-    return new Response(JSON.stringify({ success: false, offline: true, error: 'POS-server offline of niet bereikbaar.' }), {
-      status: 503,
-      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
-    });
+    return new Response(JSON.stringify({ success: false, offline: true, error: 'POS-server offline of niet bereikbaar.' }), { status: 503, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
   }
 }
 
@@ -110,10 +102,7 @@ async function handleCheckoutRequest(request) {
   try {
     return await timeoutFetch(request, CHECKOUT_TIMEOUT);
   } catch (_) {
-    return new Response(JSON.stringify({ success: false, offline: true, queued: true, error: 'POS-server offline of niet bereikbaar. De bestelling wordt lokaal opgeslagen.' }), {
-      status: 503,
-      headers: { 'Content-Type': 'application/json' }
-    });
+    return new Response(JSON.stringify({ success: false, offline: true, queued: true, error: 'POS-server offline of niet bereikbaar. De bestelling wordt lokaal opgeslagen.' }), { status: 503, headers: { 'Content-Type': 'application/json' } });
   }
 }
 
@@ -127,19 +116,11 @@ async function warmShell(cache) {
 }
 
 self.addEventListener('install', event => {
-  event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then(cache => warmShell(cache))
-      .then(() => self.skipWaiting())
-  );
+  event.waitUntil(caches.open(CACHE_NAME).then(cache => warmShell(cache)).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', event => {
-  event.waitUntil(
-    caches.keys()
-      .then(keys => Promise.all(keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key))))
-      .then(() => self.clients.claim())
-  );
+  event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key)))).then(() => self.clients.claim()));
 });
 
 self.addEventListener('message', event => {
@@ -151,7 +132,9 @@ self.addEventListener('fetch', event => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
 
-  if (request.method === 'GET' && url.pathname === '/api/admin/store') {
+  // Alleen de expliciete health-check mag door de snelle server-status handler.
+  // Normale /api/admin/store requests moeten de echte filialenlijst ophalen.
+  if (request.method === 'GET' && url.pathname === '/api/admin/store' && (url.searchParams.has('_pos_health') || url.searchParams.has('healthcheck'))) {
     event.respondWith(handleServerStatusRequest(request));
     return;
   }
@@ -184,15 +167,13 @@ self.addEventListener('fetch', event => {
   }
 
   if (url.pathname.startsWith('/_next/static/')) {
-    event.respondWith(
-      caches.match(request).then(cached => {
-        if (cached) return cached;
-        return fetch(request).then(async response => {
-          const cache = await caches.open(CACHE_NAME);
-          return cacheResponse(cache, request, response);
-        });
-      })
-    );
+    event.respondWith(caches.match(request).then(cached => {
+      if (cached) return cached;
+      return fetch(request).then(async response => {
+        const cache = await caches.open(CACHE_NAME);
+        return cacheResponse(cache, request, response);
+      });
+    }));
     return;
   }
 
@@ -200,7 +181,6 @@ self.addEventListener('fetch', event => {
     event.respondWith((async () => {
       const cache = await caches.open(CACHE_NAME);
       const cached = await cache.match(request, { ignoreSearch: true }) || await cache.match(url.pathname, { ignoreSearch: true });
-
       if (cached) {
         event.waitUntil((async () => {
           try {
@@ -210,7 +190,6 @@ self.addEventListener('fetch', event => {
         })());
         return cached;
       }
-
       try {
         const response = await timeoutFetch(request, NAVIGATION_TIMEOUT);
         if (response.ok && response.type !== 'opaqueredirect') await cache.put(request, response.clone());
@@ -226,13 +205,11 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  event.respondWith(
-    caches.match(request).then(cached => {
-      if (cached) return cached;
-      return fetch(request).then(async response => {
-        const cache = await caches.open(CACHE_NAME);
-        return cacheResponse(cache, request, response);
-      });
-    })
-  );
+  event.respondWith(caches.match(request).then(cached => {
+    if (cached) return cached;
+    return fetch(request).then(async response => {
+      const cache = await caches.open(CACHE_NAME);
+      return cacheResponse(cache, request, response);
+    });
+  }));
 });
