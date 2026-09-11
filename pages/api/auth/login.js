@@ -13,10 +13,8 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Alleen de velden die de POS-login nodig heeft ophalen. Dit voorkomt een
-    // onnodig grote users-row en scheelt een extra stores-query per login.
     const [rows] = await db.query(
-      'SELECT id, username, email, role, store_id, store_name, password, password_hash FROM users WHERE username = ? OR email = ? LIMIT 1',
+      'SELECT id, username, email, role, store_id, password, password_hash FROM users WHERE username = ? OR email = ? LIMIT 1',
       [username, username]
     );
 
@@ -40,7 +38,6 @@ export default async function handler(req, res) {
     } else {
       isMatch = password === storedPassword;
       if (isMatch) {
-        // Security upgrade mag de succesvolle login niet onnodig blokkeren.
         bcrypt.hash(password, 10).then(newHash => {
           db.query('UPDATE users SET password = ? WHERE id = ?', [newHash, user.id]).catch(err => {
             console.error('Fout bij automatisch omzetten naar bcrypt hash:', err);
@@ -67,7 +64,7 @@ export default async function handler(req, res) {
         email: user.email || '',
         role: isMainOwner ? 'super_admin' : (user.role || 'cashier'),
         store_id: user.store_id || null,
-        store_name: user.store_name || 'Geen Filiaal'
+        store_name: 'Geen Filiaal'
       }
     });
   } catch (error) {
