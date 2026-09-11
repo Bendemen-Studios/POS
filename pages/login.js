@@ -3,7 +3,7 @@ import { useRouter } from 'next/router';
 
 // Give the live login API enough time for a cold start/database query,
 // while still falling back to the local cache when the server is unavailable.
-const OFFLINE_TIMEOUT_MS = 5000;
+const OFFLINE_TIMEOUT_MS = 15000;
 
 export default function LoginPage() {
   const router = useRouter();
@@ -14,7 +14,6 @@ export default function LoginPage() {
   const [isChecking, setIsChecking] = useState(true);
 
   useEffect(() => {
-    // This check is local only and must never wait for the server.
     const user = localStorage.getItem('pos_user');
     if (user) {
       localStorage.removeItem('selectedStore');
@@ -50,8 +49,6 @@ export default function LoginPage() {
     const cleanUsername = username.trim().toLowerCase();
     if (!cleanUsername || !password) return;
 
-    // If the device already knows it is offline, don't make a network request
-    // at all. This makes offline startup/login effectively instant.
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       if (!getCachedLogin(cleanUsername, password)) {
         setError('Offline: geen geldige lokale inlogcache gevonden.');
@@ -79,19 +76,28 @@ export default function LoginPage() {
 
       clearTimeout(timeoutId);
 
-      // A VPS/proxy can return 500/502/503 while the device still reports
-      // navigator.onLine=true. Treat all server/network failures as an
-      // opportunity to use the local login cache instead of showing an
-      // internal server error.
       if (!res.ok) {
-        throw new Error(`Login server returned ${res.status}`);
+        let serverMessage = '';
+        try {
+          const failedData = await res.json();
+          serverMessage = failedData?.message || failedData?.error || '';
+        } catch (_) {}
+
+        // Authentication errors are not an offline condition.
+        if (res.status === 400 || res.status === 401) {
+          setError(serverMessage || 'Ongeldige inloggegevens.');
+          setLoading(false);
+          return;
+        }
+
+        throw new Error(serverMessage || `Login server returned ${res.status}`);
       }
 
       let data;
       try {
         data = await res.json();
       } catch (_) {
-        throw new Error('Invalid login response');
+        throw new Error('Ongeldige loginresponse van de server.');
       }
 
       if (data.success) {
@@ -105,7 +111,6 @@ export default function LoginPage() {
         return;
       }
 
-      // Invalid credentials are different from an unavailable server.
       setError(data.message || 'Inloggen mislukt.');
       setLoading(false);
       return;
@@ -114,10 +119,8 @@ export default function LoginPage() {
       console.warn('Server niet bereikbaar, gebruik offline login-cache.', err);
     }
 
-    // Network timeout, 500, 502, 503, malformed response, etc.
-    // Fall back immediately to the previously cached credentials.
     if (!getCachedLogin(cleanUsername, password)) {
-      setError('Geen verbinding met de server en geen geldige lokale inlogcache gevonden.');
+      setError('Server niet bereikbaar. Controleer de POS-server of probeer opnieuw.');
       setLoading(false);
     }
   };
