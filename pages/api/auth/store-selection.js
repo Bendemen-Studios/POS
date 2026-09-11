@@ -13,9 +13,9 @@ export default async function handler(req, res) {
   }
 
   try {
-    // 1. Haal de gebruiker op uit de DB
+    // Always determine the allowed stores from the authenticated user's DB record.
     const [userRows] = await db.query(
-      'SELECT id, username, role, store_id FROM users WHERE id = ?',
+      'SELECT id, username, role, store_id FROM users WHERE id = ? LIMIT 1',
       [userId]
     );
 
@@ -27,35 +27,39 @@ export default async function handler(req, res) {
     const isAdmin =
       user.role === 'admin' ||
       user.role === 'super_admin' ||
+      user.role === 'administrator' ||
       user.username?.toLowerCase() === 'bendemen';
 
     let stores = [];
 
     if (isAdmin) {
-      // Admins zien alle filialen
+      // Administrators may select any active store.
       const [allStores] = await db.query(
-        'SELECT id, store_name, address, pickup_id, terminal_id FROM stores'
+        'SELECT id, store_name, address, pickup_id, terminal_id, payment_methods FROM stores ORDER BY store_name ASC'
       );
       stores = allStores;
     } else {
-      // Reguliere gebruikers: zoek op hun store_id / id / store_name
-      const userStoreId = user.store_id || '';
+      // Regular users may ONLY see the store(s) explicitly assigned to their account.
+      // Never fall back to all stores: an empty/invalid assignment means no stores.
+      const assignedStoreId = user.store_id == null ? '' : String(user.store_id).trim();
 
-      const [userStoreRows] = await db.query(
-        `SELECT id, store_name, address, pickup_id, terminal_id 
-         FROM stores 
-         WHERE id = ? OR store_name = ?`,
-        [userStoreId, userStoreId]
-      );
+      if (assignedStoreId) {
+        const assignedIds = assignedStoreId
+          .split(',')
+          .map(id => id.trim())
+          .filter(Boolean);
 
-      // Fallback: Als er geen specifieke match is, haal alle filialen op
-      if (userStoreRows.length === 0) {
-        const [fallbackStores] = await db.query(
-          'SELECT id, store_name, address, pickup_id, terminal_id FROM stores'
-        );
-        stores = fallbackStores;
-      } else {
-        stores = userStoreRows;
+        if (assignedIds.length > 0) {
+          const placeholders = assignedIds.map(() => '?').join(',');
+          const [assignedStores] = await db.query(
+            `SELECT id, store_name, address, pickup_id, terminal_id, payment_methods
+             FROM stores
+             WHERE CAST(id AS CHAR) IN (${placeholders})
+             ORDER BY store_name ASC`,
+            assignedIds
+          );
+          stores = assignedStores;
+        }
       }
     }
 
