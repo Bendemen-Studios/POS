@@ -1,11 +1,12 @@
-const CACHE_NAME = 'bendemen-pos-v24';
+const CACHE_NAME = 'bendemen-pos-v25';
 const OFFLINE_URL = '/login';
+const OFFLINE_FALLBACK_URL = '/offline.html';
 const NAVIGATION_TIMEOUT = 1200;
 const API_TIMEOUT = 5000;
 const PRODUCT_API_TIMEOUT = 10000;
 const CHECKOUT_TIMEOUT = 45000;
 
-const APP_SHELL = ['/','/login','/select-store','/pickup','/admin','/manifest.json','/favicon.ico'];
+const APP_SHELL = ['/','/login','/select-store','/pickup','/admin','/manifest.json','/favicon.ico',OFFLINE_FALLBACK_URL];
 const CACHEABLE_API_PREFIXES = ['/api/auth/store-selection','/api/admin/users','/api/woocommerce/products','/api/woocommerce/customers','/api/woocommerce/orders','/api/woocommerce/pickup-order'];
 const STALE_WHILE_REVALIDATE_API = new Set(['/api/admin/users','/api/woocommerce/orders','/api/woocommerce/pickup-order']);
 
@@ -152,6 +153,8 @@ self.addEventListener('fetch', event => {
       if (rootCached) return rootCached;
       const loginCached = await cache.match(OFFLINE_URL);
       if (loginCached) return loginCached;
+      const offlineCached = await cache.match(OFFLINE_FALLBACK_URL);
+      if (offlineCached) return offlineCached;
       return new Response('<!doctype html><html><body style="margin:0;background:#fff;display:flex;align-items:center;justify-content:center;height:100vh;font-family:Arial"><div style="text-align:center"><strong>BENDEMEN POS</strong><p>Offline modus wordt gestart...</p></div></body></html>', { headers:{'Content-Type':'text/html; charset=utf-8'} });
     })());
     return;
