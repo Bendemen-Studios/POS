@@ -1,4 +1,4 @@
-const CACHE_NAME = 'bendemen-pos-v23';
+const CACHE_NAME = 'bendemen-pos-v24';
 const OFFLINE_URL = '/login';
 const NAVIGATION_TIMEOUT = 1200;
 const API_TIMEOUT = 5000;
@@ -80,8 +80,41 @@ async function handleCheckoutRequest(request) {
   }
 }
 
+
+
+async function cacheDocumentAssets(cache, response) {
+  if (!response || !response.ok) return;
+  try {
+    const html = await response.clone().text();
+    const urls = new Set();
+    const assetPattern = /(?:src|href)=["']([^"']+)["']/gi;
+    let match;
+    while ((match = assetPattern.exec(html))) {
+      const raw = match[1];
+      if (!raw || raw.startsWith('data:') || raw.startsWith('javascript:') || raw.startsWith('#')) continue;
+      try {
+        const url = new URL(raw, self.location.origin);
+        if (url.origin === self.location.origin &&
+            (url.pathname.startsWith('/_next/static/') || url.pathname === '/favicon.ico' ||
+             url.pathname.startsWith('/icon-'))) {
+          urls.add(url.toString());
+        }
+      } catch (_) {}
+    }
+
+    await Promise.allSettled([...urls].map(async assetUrl => {
+      try {
+        const assetResponse = await timeoutFetch(new Request(assetUrl), 5000);
+        if (assetResponse && assetResponse.ok) {
+          await cache.put(assetUrl, assetResponse.clone());
+        }
+      } catch (_) {}
+    }));
+  } catch (_) {}
+}
+
 async function warmShell(cache) {
-  await Promise.allSettled(APP_SHELL.map(async url => { try { const response = await timeoutFetch(url, 1500); if (response.ok) await cache.put(url, response); } catch (_) {} }));
+  await Promise.allSettled(APP_SHELL.map(async url => { try { const response = await timeoutFetch(url, 3000); if (response.ok) { await cache.put(url, response.clone()); if (url === '/') await cacheDocumentAssets(cache, response); } } catch (_) {} }));
 }
 
 self.addEventListener('install', event => { event.waitUntil(caches.open(CACHE_NAME).then(cache => warmShell(cache)).then(() => self.skipWaiting())); });
@@ -108,12 +141,12 @@ self.addEventListener('fetch', event => {
       const cache = await caches.open(CACHE_NAME);
       const cached = await cache.match(request, { ignoreSearch:true }) || await cache.match(url.pathname, { ignoreSearch:true });
       if (cached) {
-        event.waitUntil((async () => { try { const fresh = await timeoutFetch(request, NAVIGATION_TIMEOUT); if (fresh.ok && fresh.type !== 'opaqueredirect') await cache.put(request, fresh.clone()); } catch (_) {} })());
+        event.waitUntil((async () => { try { const fresh = await timeoutFetch(request, NAVIGATION_TIMEOUT); if (fresh.ok && fresh.type !== 'opaqueredirect') { await cache.put(request, fresh.clone()); await cacheDocumentAssets(cache, fresh); } } catch (_) {} })());
         return cached;
       }
       try {
         const response = await timeoutFetch(request, NAVIGATION_TIMEOUT);
-        if (response.ok && response.type !== 'opaqueredirect') { await cache.put(request, response.clone()); return response; }
+        if (response.ok && response.type !== 'opaqueredirect') { await cache.put(request, response.clone()); await cacheDocumentAssets(cache, response); return response; }
       } catch (_) {}
       const rootCached = await cache.match('/');
       if (rootCached) return rootCached;
