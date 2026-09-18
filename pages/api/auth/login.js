@@ -77,20 +77,6 @@ export default async function handler(req, res) {
       }
     }
 
-    const effectiveRole = isMainOwner ? 'super_admin' : (user.role || 'cashier');
-    let stores = [];
-    if (isMainOwner || ['admin', 'super_admin', 'administrator'].includes(String(effectiveRole).toLowerCase())) {
-      const [storeRows] = await db.query('SELECT id, store_name, address, pickup_id, terminal_id, payment_methods FROM stores ORDER BY store_name ASC');
-      stores = Array.isArray(storeRows) ? storeRows : [];
-    } else if (user.store_id != null && String(user.store_id).trim()) {
-      const assignedIds = String(user.store_id).split(',').map(id => id.trim()).filter(Boolean);
-      if (assignedIds.length) {
-        const placeholders = assignedIds.map(() => '?').join(',');
-        const [storeRows] = await db.query(`SELECT id, store_name, address, pickup_id, terminal_id, payment_methods FROM stores WHERE id IN (${placeholders}) ORDER BY store_name ASC`, assignedIds);
-        stores = Array.isArray(storeRows) ? storeRows : [];
-      }
-    }
-
     console.log(`[LOGIN SUCCESS] Gebruiker ingelogd: ${user.username}`);
 
     return res.status(200).json({
