@@ -115,7 +115,7 @@ export default function SelectStore() {
         setError('Geen verbinding met de server en geen lokale filiaalcache beschikbaar.');
         setLoading(false);
       } else {
-        setError('⚠️ Server reageert niet snel genoeg; lokale toegewezen filialen worden gebruikt.');
+        setError('⚠️ Server is waarschijnlijk offline; lokaal bekende filialen worden weergegeven.');
       }
     }
   };
