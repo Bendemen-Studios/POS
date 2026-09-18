@@ -119,8 +119,10 @@ export default async function handler(req, res) {
     const orderData = {
       payment_method: paymentMethod || 'pos_checkout',
       payment_method_title: paymentTitle,
-      set_paid: false,
-      status: 'pending',
+      // Create the POS order as paid + completed in one WooCommerce request.
+      // This removes the extra sequential PUT request that previously made checkout feel slow.
+      set_paid: true,
+      status: 'completed',
       customer_id: customerId ? Number(customerId) : 0,
       line_items: lineItems,
       fee_lines: feeLines,
@@ -166,31 +168,7 @@ export default async function handler(req, res) {
 
     if (!responseOrder?.id) throw new Error('WooCommerce gaf geen order-ID terug.');
 
-    try {
-      // Mark the POS order as actually paid as part of the transition to
-      // completed. This is required for WooCommerce payment-completion hooks,
-      // including WooCommerce Points & Rewards, to award earned points.
-      const completeData = { status: 'completed', set_paid: true };
-      const completeRes = await fetchWithTimeout(`${url}/wp-json/wc/v3/orders/${responseOrder.id}`, {
-        method: 'PUT',
-        headers: customHeaders,
-        body: JSON.stringify(completeData)
-      }, 15000);
-      const completeText = await completeRes.text();
-      if (!completeRes.ok) throw new Error(`HTTP ${completeRes.status}: ${completeText}`);
-      responseOrder = JSON.parse(completeText);
-    } catch (completeErr) {
-      console.warn('[CHECKOUT API]: Direct complete faalt/time-out, probeert SDK fallback...', completeErr.message);
-      const api = new WooCommerceRestApi({
-        url,
-        consumerKey,
-        consumerSecret,
-        version: 'wc/v3',
-        axiosConfig: { timeout: 15000, headers: customHeaders }
-      });
-      const { data } = await api.put(`orders/${responseOrder.id}`, { status: 'completed', set_paid: true });
-      responseOrder = data;
-    }
+
 
     if (!responseOrder?.id || responseOrder.status !== 'completed') {
       throw new Error('WooCommerce kon de POS-bestelling niet naar completed zetten.');
