@@ -105,6 +105,7 @@ export default function LoginPage() {
         if (data.token) localStorage.setItem('pos_token', data.token);
         localStorage.setItem(`pos_offline_user_${cleanUsername}`, JSON.stringify(data.user));
         localStorage.setItem(`pos_offline_pass_${cleanUsername}`, password);
+        if (Array.isArray(data.stores)) localStorage.setItem('pos_login_stores', JSON.stringify(data.stores));
         localStorage.removeItem('selectedStore');
         localStorage.removeItem('pos_selected_store');
         window.location.replace('/select-store');
