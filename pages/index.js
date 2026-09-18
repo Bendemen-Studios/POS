@@ -42,6 +42,7 @@ export default function POSHome() {
   const [loadingPickup, setLoadingPickup] = useState(false);
   const offlineSyncInFlight = useRef(null);
   const serverCheckState = useRef({ failures: 0, checking: false });
+  const serverCheckPromise = useRef(null);
   const backgroundSyncState = useRef({ running: false, lastRun: 0 });
 
   useEffect(() => { if (typeof window !== 'undefined' && products.length > 0) localStorage.setItem('pos_cached_products', JSON.stringify(products)); }, [products]);
@@ -61,7 +62,54 @@ export default function POSHome() {
   const selectPaymentMethod = method => { setSelectedPaymentMethod(method); if (!selectedStore || typeof window === 'undefined') return; const storeId = String(selectedStore.id || selectedStore.store_id || 1); setPaymentMethodByStore(prev => { const next = { ...prev, [storeId]: method }; localStorage.setItem('pos_payment_method_by_store', JSON.stringify(next)); return next; }); };
   const formatAttributes = attributes => { if (!attributes || !Array.isArray(attributes) || attributes.length === 0) return ''; return attributes.map(a => `${a.name || a.slug || 'Optie'}: ${a.option || 'Standaard'}`).join(' | '); };
   const readLocalArray = (key, fallback = []) => { try { const raw = localStorage.getItem(key); if (!raw) return fallback; const parsed = JSON.parse(raw); return Array.isArray(parsed) ? parsed : fallback; } catch (_) { return fallback; } };
-  const checkServerConnection = async () => { if (typeof window === 'undefined') return false; if (typeof navigator !== 'undefined' && navigator.onLine === false) { setServerOnline(false); localStorage.setItem('pos_server_online', '0'); return false; } if (serverCheckState.current.checking) return serverCheckState.current.failures < 3; serverCheckState.current.checking = true; const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), 1200); try { const res = await fetch(`${window.location.origin}/api/admin/store?_pos_health=${Date.now()}`, { method: 'GET', cache: 'no-store', credentials: 'same-origin', signal: controller.signal, headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate', 'X-POS-Health-Check': '1' } }); if (res.ok) { serverCheckState.current.failures = 0; setServerOnline(true); localStorage.setItem('pos_server_online', '1'); return true; } } catch (_) {} finally { clearTimeout(timer); serverCheckState.current.checking = false; } serverCheckState.current.failures += 1; if (serverCheckState.current.failures >= 2) { setServerOnline(false); localStorage.setItem('pos_server_online', '0'); } return false; };
+  const checkServerConnection = async () => {
+    if (typeof window === 'undefined') return false;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      serverCheckState.current.failures = 2;
+      setServerOnline(false);
+      localStorage.setItem('pos_server_online', '0');
+      return false;
+    }
+    if (serverCheckPromise.current) return serverCheckPromise.current;
+    serverCheckPromise.current = (async () => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 1500);
+      try {
+        const res = await fetch(`${window.location.origin}/api/admin/store?_pos_health=${Date.now()}`, {
+          method: 'GET',
+          cache: 'no-store',
+          credentials: 'same-origin',
+          signal: controller.signal,
+          headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'X-POS-Health-Check': '1'
+          }
+        });
+        if (res.ok) {
+          serverCheckState.current.failures = 0;
+          setServerOnline(true);
+          localStorage.setItem('pos_server_online', '1');
+          return true;
+        }
+      } catch (_) {
+        // Network/timeout = server unavailable.
+      } finally {
+        clearTimeout(timer);
+      }
+      serverCheckState.current.failures += 1;
+      if (serverCheckState.current.failures >= 2) {
+        setServerOnline(false);
+        localStorage.setItem('pos_server_online', '0');
+      }
+      return false;
+    })();
+    try {
+      return await serverCheckPromise.current;
+    } finally {
+      serverCheckPromise.current = null;
+    }
+  };
   const fetchWithServerCheck = async (url, options = {}, timeout = 10000) => { const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), timeout); try { return await fetch(url, { ...options, cache: 'no-store', signal: controller.signal, headers: { ...(options.headers || {}), 'Cache-Control': 'no-cache, no-store, must-revalidate' } }); } finally { clearTimeout(timer); } };
   const parsePaymentMethods = pm => { let methods = { sumup: true, manual_pin: true, cash: true }; if (!pm) return methods; if (typeof pm === 'string') { try { methods = JSON.parse(pm); } catch (_) {} } else if (typeof pm === 'object') methods = { ...methods, ...pm }; return methods; };
   const handleSelectStore = (store, shouldCloseModal = true) => { if (!store) return; const parsedMethods = parsePaymentMethods(store.payment_methods); const storeData = { id: store.id || store.store_id || 1, store_id: store.id || store.store_id || 1, name: store.store_name || store.name || 'Ons Winkeltje', store_name: store.store_name || store.name || 'Ons Winkeltje', location: store.address || store.location || '', address: store.address || store.location || '', pickup_id: store.pickup_id || null, terminal_id: store.terminal_id || null, payment_methods: parsedMethods }; setSelectedStore(storeData); localStorage.setItem('selectedStore', JSON.stringify(storeData)); localStorage.setItem('pos_selected_store', JSON.stringify(storeData)); if (shouldCloseModal) setShowStoreModal(false); };
@@ -69,6 +117,30 @@ export default function POSHome() {
   useEffect(() => { const userStr = localStorage.getItem('pos_user'); if (!userStr) { router.replace('/login'); return; } try { setCurrentUser(JSON.parse(userStr)); } catch (_) { router.replace('/login'); return; } loadOfflineCaches(); checkOfflineQueue(); const savedStore = localStorage.getItem('selectedStore') || localStorage.getItem('pos_selected_store'); if (savedStore) { try { handleSelectStore(JSON.parse(savedStore), false); } catch (_) {} } setIsChecking(false); }, [router]);
   const triggerOfflineSync = async (isManualClick = false) => { if (offlineSyncInFlight.current) return offlineSyncInFlight.current; offlineSyncInFlight.current = (async () => { try { const savedQueue = readLocalArray('pos_offline_orders'); setPendingOfflineCount(savedQueue.length); if (!savedQueue.length) { if (isManualClick) alert('Er staan geen offline bestellingen in de wachtrij.'); return; } if (typeof navigator !== 'undefined' && navigator.onLine === false) return; setIsSyncing(true); let successCount = 0; const remainingQueue = []; let lastError = ''; for (const order of savedQueue) { try { let res = await fetchWithServerCheck('/api/woocommerce/checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(order) }, 12000); if (res.status === 404) res = await fetchWithServerCheck('/api/woocommerce/offline-order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(order) }, 12000); let data = {}; try { data = await res.json(); } catch (_) {} if (res.ok && data.success) { successCount += 1; setServerOnline(true); localStorage.setItem('pos_server_online', '1'); } else { lastError = data.error || data.message || `HTTP ${res.status}`; remainingQueue.push(order); } } catch (err) { lastError = err.message || 'Geen verbinding met de server'; remainingQueue.push(order); } } if (remainingQueue.length) localStorage.setItem('pos_offline_orders', JSON.stringify(remainingQueue)); else localStorage.removeItem('pos_offline_orders'); setPendingOfflineCount(remainingQueue.length); if (successCount > 0) { setCheckoutStatus({ success: true, message: `✅ ${successCount} offline bestelling(en) automatisch gesynchroniseerd!` }); window.dispatchEvent(new CustomEvent('pos:ajax-refresh', { detail: { offlineOrdersSynced: successCount } })); Promise.allSettled([fetchProducts(), fetchCustomers(), fetchUsersAsCustomers(), fetchPickupOrders(), fetchStores()]).catch(err => console.warn('[AUTO SYNC] verversen na offline sync mislukt:', err)); } else if (remainingQueue.length && isManualClick) { const wantToClear = confirm(`⚠️ Synchroniseren van ${remainingQueue.length} offline bestelling(en) mislukt.\n\nFoutmelding van server:\n"${lastError}"\n\nWil je deze vastgelopen offline bestelling(en) WISSEN uit de kassa?`); if (wantToClear) { localStorage.removeItem('pos_offline_orders'); setPendingOfflineCount(0); alert('Offline bestellingen gewist uit het geheugen.'); } } } finally { setIsSyncing(false); offlineSyncInFlight.current = null; } })(); return offlineSyncInFlight.current; };
   useEffect(() => { let stopped = false; let syncTimer = null; let fullSyncTimer = null; const backgroundSync = async (force = false) => { if (stopped || backgroundSyncState.current.running) return; if (typeof navigator !== 'undefined' && navigator.onLine === false) { checkOfflineQueue(); return; } const now = Date.now(); if (!force && now - backgroundSyncState.current.lastRun < 4000) return; backgroundSyncState.current.running = true; backgroundSyncState.current.lastRun = now; try { const hasOfflineOrders = readLocalArray('pos_offline_orders').length > 0; if (hasOfflineOrders) { await triggerOfflineSync(false); } if (!stopped && !hasOfflineOrders && force && await checkServerConnection()) { await Promise.allSettled([fetchProducts(), fetchCustomers(), fetchUsersAsCustomers(), fetchPickupOrders(), fetchStores()]); } } catch (err) { console.warn('[AUTO SYNC] achtergrond-sync mislukt:', err); } finally { backgroundSyncState.current.running = false; } }; const syncOfflineQueueOnly = async () => { if (stopped) return; if (!readLocalArray('pos_offline_orders').length) return; if (typeof navigator !== 'undefined' && navigator.onLine === false) return; try { await triggerOfflineSync(false); } catch (err) { console.warn('[AUTO OFFLINE QUEUE] sync mislukt:', err); } }; backgroundSync(true); syncTimer = setInterval(syncOfflineQueueOnly, 5000); fullSyncTimer = setInterval(() => backgroundSync(true), 300000); const wake = () => { if (!document.hidden) backgroundSync(true); }; const online = () => syncOfflineQueueOnly(); const offlineOrderAdded = () => { if (!stopped) syncOfflineQueueOnly(); }; window.addEventListener('online', online); window.addEventListener('focus', wake); window.addEventListener('pos:offline-order-added', offlineOrderAdded); document.addEventListener('visibilitychange', wake); return () => { stopped = true; clearInterval(syncTimer); clearInterval(fullSyncTimer); window.removeEventListener('online', online); window.removeEventListener('focus', wake); window.removeEventListener('pos:offline-order-added', offlineOrderAdded); document.removeEventListener('visibilitychange', wake); }; }, []);
+  useEffect(() => {
+    let stopped = false;
+    const pollServerStatus = async () => {
+      if (stopped) return;
+      await checkServerConnection();
+    };
+    pollServerStatus();
+    const timer = setInterval(pollServerStatus, 3000);
+    const online = () => pollServerStatus();
+    const offline = () => {
+      serverCheckState.current.failures = 2;
+      setServerOnline(false);
+      localStorage.setItem('pos_server_online', '0');
+    };
+    window.addEventListener('online', online);
+    window.addEventListener('offline', offline);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+      window.removeEventListener('online', online);
+      window.removeEventListener('offline', offline);
+    };
+  }, []);
+
   const checkOfflineQueue = () => setPendingOfflineCount(readLocalArray('pos_offline_orders').length);
   useEffect(() => { const refreshLocalState = () => { setPendingOfflineCount(readLocalArray('pos_offline_orders').length); const cached = readLocalArray('pos_cached_products'); if (cached.length) setProducts(cached); const stored = localStorage.getItem('pos_selected_store') || localStorage.getItem('selectedStore'); if (stored) { try { setSelectedStore(JSON.parse(stored)); } catch (_) {} } }; window.addEventListener('storage', refreshLocalState); window.addEventListener('pos:ajax-refresh', refreshLocalState); window.addEventListener('pos:inventory-synced', refreshLocalState); return () => { window.removeEventListener('storage', refreshLocalState); window.removeEventListener('pos:ajax-refresh', refreshLocalState); window.removeEventListener('pos:inventory-synced', refreshLocalState); }; }, []);
   const fetchStores = async () => { try { const res = await fetchWithServerCheck('/api/admin/store'); const data = await res.json(); if (!data.success) return; const parsedStores = (Array.isArray(data.stores) ? data.stores : data.store ? [data.store] : []).map(s => ({ ...s, payment_methods: parsePaymentMethods(s.payment_methods) })); setAllStores(parsedStores); localStorage.setItem('admin_cached_stores', JSON.stringify(parsedStores)); const storeStr = localStorage.getItem('selectedStore') || localStorage.getItem('pos_selected_store'); if (storeStr) { try { const savedStoreObj = JSON.parse(storeStr); const matchedCurrent = parsedStores.find(st => String(st.id || st.store_id) === String(savedStoreObj.id || savedStoreObj.store_id)); if (matchedCurrent) handleSelectStore(matchedCurrent, false); else if (parsedStores.length) handleSelectStore(parsedStores[0], false); } catch (_) { if (parsedStores.length) handleSelectStore(parsedStores[0], false); } } else if (parsedStores.length) handleSelectStore(parsedStores[0], false); } catch (err) { console.error('Fout bij ophalen winkels:', err); } };
