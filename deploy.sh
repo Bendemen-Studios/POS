@@ -34,7 +34,11 @@ echo "🔄 GitHub $BRANCH ophalen..."
 git fetch --prune origin "$BRANCH"
 echo "📌 Commit toepassen: $(git rev-parse --short "origin/$BRANCH")"
 git reset --hard "origin/$BRANCH"
-git clean -fd -e .env -e .env.local
+
+# Keep VPS-generated dependency lockfile and environment files.
+# package-lock.json is intentionally excluded from git clean so Next.js/NPM
+# can keep the resolved SWC platform dependencies between deployments.
+git clean -fd -e .env -e .env.local -e package-lock.json
 
 # Restore VPS environment files.
 for env_file in .env .env.local; do
@@ -51,6 +55,11 @@ if [ ! -f package.json ]; then
 fi
 
 echo "📦 Dependencies installeren..."
+if [ -f package-lock.json ]; then
+  echo "🔒 Bestaande package-lock.json behouden."
+else
+  echo "🆕 Geen package-lock.json gevonden; deze wordt aangemaakt."
+fi
 npm install --include=dev --no-audit --no-fund --package-lock=true
 
 echo "🏗️ Production build maken..."
