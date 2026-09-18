@@ -19,7 +19,13 @@ export default function SelectStore() {
     try {
       const parsedUser = JSON.parse(userStr);
       setCurrentUser(parsedUser);
-      fetchUserStores(parsedUser);
+      let loginStores = [];
+      try { loginStores = JSON.parse(localStorage.getItem('pos_login_stores') || '[]'); } catch (_) {}
+      if (Array.isArray(loginStores) && loginStores.length) {
+        setStores(filterStoresForUser(loginStores, parsedUser));
+        setLoading(false);
+        fetchUserStores(parsedUser); // background refresh only
+      } else fetchUserStores(parsedUser);
     } catch (e) {
       window.location.replace('/login');
     }
