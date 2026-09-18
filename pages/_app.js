@@ -152,9 +152,18 @@ function installSumUpGatewayFetch() {
 
 function registerNativePWA() {
   if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch((error) => console.error('[PWA] Service worker registration failed:', error));
-  }, { once: true });
+  const register = () => navigator.serviceWorker.register('/sw.js', { scope: '/' })
+    .then((registration) => {
+      registration.update().catch(() => {});
+      return registration;
+    })
+    .catch((error) => {
+      console.error('[PWA] Service worker registration failed:', error);
+      return null;
+    });
+  // Register immediately instead of waiting for window load, so the PWA
+  // takes control as early as possible and can serve its cached shell offline.
+  register();
 }
 
 function getOfflineQueueCount(value) {
