@@ -62,7 +62,7 @@ export default function POSHome() {
   const selectPaymentMethod = method => { setSelectedPaymentMethod(method); if (!selectedStore || typeof window === 'undefined') return; const storeId = String(selectedStore.id || selectedStore.store_id || 1); setPaymentMethodByStore(prev => { const next = { ...prev, [storeId]: method }; localStorage.setItem('pos_payment_method_by_store', JSON.stringify(next)); return next; }); };
   const formatAttributes = attributes => { if (!attributes || !Array.isArray(attributes) || attributes.length === 0) return ''; return attributes.map(a => `${a.name || a.slug || 'Optie'}: ${a.option || 'Standaard'}`).join(' | '); };
   const readLocalArray = (key, fallback = []) => { try { const raw = localStorage.getItem(key); if (!raw) return fallback; const parsed = JSON.parse(raw); return Array.isArray(parsed) ? parsed : fallback; } catch (_) { return fallback; } };
-  const checkServerConnection = async () => {
+  const checkServerConnection = async (immediate = false) => {
     if (typeof window === 'undefined') return false;
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
       serverCheckState.current.failures = 3;
@@ -90,7 +90,7 @@ export default function POSHome() {
         if (res.ok) {
           serverCheckState.current.failures = 0;
           serverCheckState.current.successes += 1;
-          if (serverCheckState.current.successes >= 2) setServerOnline(true);
+          if (immediate || serverCheckState.current.successes >= 2) setServerOnline(true);
           localStorage.setItem('pos_server_online', '1');
           return true;
         }
@@ -101,7 +101,11 @@ export default function POSHome() {
       }
       serverCheckState.current.successes = 0;
       serverCheckState.current.failures += 1;
-      if (serverCheckState.current.failures >= 3) {
+      // During the initial login/page load, do not keep showing "online"
+      // while waiting for three polling failures. A failed health check is
+      // enough to establish the initial server state. During normal operation
+      // we keep the existing 3-failure debounce to avoid false offline flicker.
+      if (immediate || serverCheckState.current.failures >= 3) {
         setServerOnline(false);
         localStorage.setItem('pos_server_online', '0');
       }
@@ -126,7 +130,10 @@ export default function POSHome() {
       if (stopped) return;
       await checkServerConnection();
     };
-    pollServerStatus();
+    // Check the real POS server immediately when the POS opens. This avoids
+    // showing the browser's navigator.onLine state as "server online" while
+    // the actual Next.js server is unreachable.
+    checkServerConnection(true);
     const timer = setInterval(pollServerStatus, 3000);
     const online = () => pollServerStatus();
     const offline = () => {
