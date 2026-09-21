@@ -74,7 +74,7 @@ export default function POSHome() {
     if (serverCheckPromise.current) return serverCheckPromise.current;
     serverCheckPromise.current = (async () => {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 1500);
+      const timer = setTimeout(() => controller.abort(), 3000);
       try {
         const res = await fetch(`${window.location.origin}/api/admin/store?_pos_health=${Date.now()}`, {
           method: 'GET',
