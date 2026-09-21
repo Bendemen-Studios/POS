@@ -282,7 +282,7 @@ export default function POSHome() {
         localStorage.setItem('pos_server_online', '1');
         setCheckoutStatus({
           success: false,
-          message: `❌ Checkout-server bereikbaar, maar bestelling mislukt: ${err.message}${changeText}`
+          message: `❌ Er is iets fout gegaan. Probeer de bestelling zo opnieuw af te rekenen. Kom je er niet uit? Haal iemand zoals de manager of iemand van de technische dienst.${err.message}${changeText}`
         });
       } else {
         const offlineQueue = readLocalArray('pos_offline_orders');
@@ -296,7 +296,7 @@ export default function POSHome() {
         window.dispatchEvent(new CustomEvent('pos:offline-order-added'));
         setCheckoutStatus({
           success: true,
-          message: `⚠️ Checkout kon de server niet bevestigen. Bestelling is lokaal opgeslagen met een vaste ID en wordt automatisch opnieuw verzonden.${changeText}`
+          message: `⚠️ Server is Offline, Bestelling wordt automatisch verwerkt. U kunt gewoon doorgaan.${changeText}`
         });
       }
     } finally {
