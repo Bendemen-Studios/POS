@@ -12,6 +12,7 @@ export default function PickupDashboard() {
   
   const [selectedStore, setSelectedStore] = useState(null);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [lastSyncError, setLastSyncError] = useState('');
 
   useEffect(() => {
     const store = JSON.parse(localStorage.getItem('selectedStore') || '{}');
@@ -20,10 +21,12 @@ export default function PickupDashboard() {
     triggerOfflinePickupSync();
 
     const handleOnline = () => triggerOfflinePickupSync();
+    const interval = setInterval(() => triggerOfflinePickupSync(), 5000);
     window.addEventListener('online', handleOnline);
 
     return () => {
       window.removeEventListener('online', handleOnline);
+      clearInterval(interval);
     };
   }, []);
 
@@ -34,40 +37,50 @@ export default function PickupDashboard() {
   }, [orders]);
 
   const fetchPickupOrders = async () => {
+    const cached = JSON.parse(localStorage.getItem('pos_cached_pickup_orders') || '[]');
+    if (Array.isArray(cached) && cached.length) setOrders(prev => prev.length ? prev : cached);
     try {
-      // Aangepast naar het correcte endpoint dat we hebben aangemaakt
-      const res = await axios.get('/api/woocommerce/pickup-order');
-      if (res.data && res.data.orders) {
+      const res = await axios.get('/api/woocommerce/pickup-order', { timeout: 15000 });
+      if (res.data && res.data.success && Array.isArray(res.data.orders)) {
         setOrders(res.data.orders);
         localStorage.setItem('pos_cached_pickup_orders', JSON.stringify(res.data.orders));
+        setLastSyncError('');
       }
     } catch (err) {
-      console.warn('Geen verbinding met server, laadt afhaalbestellingen uit lokale cache.', err);
+      setLastSyncError('Server tijdelijk niet bereikbaar; lokale gegevens worden gebruikt.');
+      console.warn('Geen verbinding met server, lokale afhaalcache blijft actief.', err);
     }
   };
 
   const triggerOfflinePickupSync = async () => {
     const queue = JSON.parse(localStorage.getItem('pos_offline_pickup_actions') || '[]');
-    if (queue.length === 0) return;
+    if (!Array.isArray(queue) || queue.length === 0 || (typeof navigator !== 'undefined' && navigator.onLine === false)) return;
 
     setIsSyncing(true);
+    setLastSyncError('');
     const remainingQueue = [];
-
-    for (const action of queue) {
-      try {
-        // Gebruikt nu de juiste PUT methode en het juiste endpoint
-        await axios.put('/api/woocommerce/pickup-order', { 
-          order_id: action.orderId, 
-          status: action.status 
-        });
-      } catch (err) {
-        remainingQueue.push(action);
+    try {
+      for (const action of queue) {
+        try {
+          const response = await axios.put('/api/woocommerce/pickup-order', {
+            order_id: action.orderId,
+            status: action.status || 'completed'
+          }, { timeout: 15000 });
+          if (!(response.data && response.data.success)) remainingQueue.push(action);
+        } catch (err) {
+          remainingQueue.push(action);
+        }
       }
+      if (remainingQueue.length) {
+        localStorage.setItem('pos_offline_pickup_actions', JSON.stringify(remainingQueue));
+        setLastSyncError('Niet alle afhaalacties konden worden gesynchroniseerd.');
+      } else {
+        localStorage.removeItem('pos_offline_pickup_actions');
+      }
+      await fetchPickupOrders();
+    } finally {
+      setIsSyncing(false);
     }
-
-    localStorage.setItem('pos_offline_pickup_actions', JSON.stringify(remainingQueue));
-    setIsSyncing(false);
-    fetchPickupOrders();
   };
 
   const handleMarkAsPickedUp = async (orderId) => {
@@ -83,7 +96,7 @@ export default function PickupDashboard() {
       console.warn('Server niet bereikbaar. Actie opgeslagen in offline wachtrij.');
       
       const queue = JSON.parse(localStorage.getItem('pos_offline_pickup_actions') || '[]');
-      queue.push({ orderId, status: 'completed', timestamp: new Date().toISOString() });
+      if (!queue.some(action => String(action.orderId) === String(orderId))) queue.push({ orderId, status: 'completed', timestamp: new Date().toISOString() });
       localStorage.setItem('pos_offline_pickup_actions', JSON.stringify(queue));
       
       alert('⚠️ Geen verbinding met de server. De statuswijziging is lokaal opgeslagen en wordt gesynchroniseerd zodra er internet is.');
@@ -98,7 +111,7 @@ export default function PickupDashboard() {
   return (
     <div className="p-4 sm:p-6 bg-gray-100 min-h-screen">
       <div className="flex justify-between items-center mb-4">
-        <h1 className="text-lg sm:text-xl font-bold">📦 Afhaalbalie: {selectedStore?.store_name || selectedStore?.name || 'Alle'}</h1>
+        <div><h1 className="text-lg sm:text-xl font-bold">📦 Afhaalbalie: {selectedStore?.store_name || selectedStore?.name || 'Alle'}</h1>{lastSyncError && <p className="text-[10px] text-orange-600 mt-1">{lastSyncError}</p>}</div>
         <button 
           onClick={fetchPickupOrders} 
           className="bg-black text-white px-3 py-1.5 rounded text-xs font-bold hover:bg-gray-800"
