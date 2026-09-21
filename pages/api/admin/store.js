@@ -6,10 +6,62 @@ const PROTECTED_STORE_NAME = 'ons winkeltje';
 export default async function handler(req, res) {
   const { method } = req;
 
-  // Lightweight probe used by the POS to determine whether the VPS itself
-  // is reachable. It deliberately does not touch MySQL or WooCommerce.
+  // Real POS health probe. The checkout depends on the VPS, MySQL
+  // idempotency table and WooCommerce, so browser connectivity alone is not
+  // enough to decide whether an order can be sent directly.
   if (method === 'GET' && (Object.prototype.hasOwnProperty.call(req.query, 'healthcheck') || Object.prototype.hasOwnProperty.call(req.query, '_pos_health'))) {
-    return res.status(200).json({ success: true, online: true, timestamp: Date.now() });
+    const startedAt = Date.now();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 2000);
+
+    const checkWooCommerce = async () => {
+      const url = process.env.WOOCOMMERCE_URL || process.env.NEXT_PUBLIC_WOOCOMMERCE_URL || 'https://www.bendemen.com';
+      const consumerKey = process.env.WOOCOMMERCE_CONSUMER_KEY || process.env.WOOCOMMERCE_KEY || process.env.NEXT_PUBLIC_WOOCOMMERCE_KEY;
+      const consumerSecret = process.env.WOOCOMMERCE_CONSUMER_SECRET || process.env.WOOCOMMERCE_SECRET || process.env.NEXT_PUBLIC_WOOCOMMERCE_SECRET;
+      if (!consumerKey || !consumerSecret) return false;
+      const auth = 'Basic ' + Buffer.from(consumerKey + ':' + consumerSecret).toString('base64');
+      const response = await fetch(url + '/wp-json/wc/v3/orders?per_page=1', {
+        method: 'GET',
+        headers: {
+          Authorization: auth,
+          'User-Agent': 'BDM-POS-Health/1.0',
+          Connection: 'close'
+        },
+        signal: controller.signal
+      });
+      return response.ok;
+    };
+
+    try {
+      const [dbResult, wooResult] = await Promise.allSettled([
+        db.query('SELECT 1 AS ok'),
+        checkWooCommerce()
+      ]);
+      const dbOnline = dbResult.status === 'fulfilled';
+      const wooOnline = wooResult.status === 'fulfilled' && wooResult.value === true;
+      const online = dbOnline && wooOnline;
+      return res.status(200).json({
+        success: true,
+        online,
+        pos: true,
+        database: dbOnline,
+        woocommerce: wooOnline,
+        latencyMs: Date.now() - startedAt,
+        timestamp: Date.now()
+      });
+    } catch (_) {
+      return res.status(200).json({
+        success: true,
+        online: false,
+        pos: true,
+        database: false,
+        woocommerce: false,
+        latencyMs: Date.now() - startedAt,
+        timestamp: Date.now()
+      });
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   if (method === 'GET') {
