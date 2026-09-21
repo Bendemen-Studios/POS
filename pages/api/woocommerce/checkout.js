@@ -226,7 +226,7 @@ export default async function handler(req, res) {
         method: 'POST',
         headers: customHeaders,
         body: JSON.stringify(orderData)
-      }, 45000);
+      }, 12000);
       const responseText = await fetchRes.text();
       if (!fetchRes.ok) throw new Error(`HTTP ${fetchRes.status}: ${responseText}`);
       responseOrder = JSON.parse(responseText);
