@@ -23,12 +23,11 @@ async function fetchWithTimeout(url, options, timeoutMs = 15000) {
 
 
 async function findExistingWooOrder(url, authHeader, clientOrderId) {
+  const targetId = String(clientOrderId).slice(0, 128);
   try {
-    const query = new URLSearchParams({
-      per_page: '1',
-      meta_key: '_pos_client_order_id',
-      meta_value: String(clientOrderId).slice(0, 128),
-    });
+    // Inspect recent orders and their actual meta_data instead of relying on
+    // meta_key/meta_value query parameters supported differently by servers.
+    const query = new URLSearchParams({ per_page: '25', orderby: 'date', order: 'desc' });
     const response = await fetchWithTimeout(
       `${url}/wp-json/wc/v3/orders?${query.toString()}`,
       {
@@ -39,16 +38,45 @@ async function findExistingWooOrder(url, authHeader, clientOrderId) {
           Connection: 'close',
         },
       },
-      5000
+      7000
     );
     if (!response.ok) return null;
     const orders = await response.json().catch(() => []);
-    return Array.isArray(orders) && orders[0]?.id ? orders[0] : null;
+    if (!Array.isArray(orders)) return null;
+    return orders.find(order =>
+      Array.isArray(order?.meta_data) &&
+      order.meta_data.some(meta =>
+        String(meta?.key || '') === '_pos_client_order_id' &&
+        String(meta?.value || '') === targetId
+      )
+    ) || null;
   } catch (_) {
     return null;
   }
 }
 
+async function verifyWooOrder(url, authHeader, wooOrderId) {
+  try {
+    const response = await fetchWithTimeout(
+      `${url}/wp-json/wc/v3/orders/${encodeURIComponent(String(wooOrderId))}`,
+      {
+        method: 'GET',
+        headers: {
+          Authorization: authHeader,
+          'User-Agent': 'BDM-POS-Client/1.0 (Mozilla/5.0; Node.js)',
+          Connection: 'close',
+        },
+      },
+      7000
+    );
+    if (response.status === 404) return { exists: false, unavailable: false };
+    if (!response.ok) return { exists: false, unavailable: true };
+    const order = await response.json().catch(() => null);
+    return { exists: !!order?.id, unavailable: false, order };
+  } catch (_) {
+    return { exists: false, unavailable: true };
+  }
+}
 async function fetchJsonWithTimeout(url, options, timeoutMs = 15000) {
   const response = await fetchWithTimeout(url, options, timeoutMs);
   const text = await response.text();
@@ -78,7 +106,21 @@ export default async function handler(req, res) {
     const claim = await claimOrder(clientOrderId);
 
     if (claim.completed) {
-      return res.status(200).json({ success: true, idempotent: true, order: { id: claim.wooOrderId } });
+      // Verify the WooCommerce order before reporting success. A stale local
+      // idempotency record must never make the POS drop an offline order.
+      const completedOrderCheck = await verifyWooOrder(
+        url,
+        'Basic ' + Buffer.from(consumerKey + ':' + consumerSecret).toString('base64'),
+        claim.wooOrderId
+      );
+      if (completedOrderCheck.exists && completedOrderCheck.order?.status === 'completed') {
+        return res.status(200).json({ success: true, idempotent: true, order: completedOrderCheck.order });
+      }
+      if (completedOrderCheck.unavailable) {
+        return res.status(503).json({ success: false, retryable: true, error: 'WooCommerce is tijdelijk niet bereikbaar. De offline bestelling blijft in de wachtrij.' });
+      }
+      await releaseOrder(clientOrderId);
+      claimed = true;
     }
 
     if (claim.processing) {
