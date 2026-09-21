@@ -33,13 +33,16 @@ async function sendOfflineOrder(order) {
   };
   const body = JSON.stringify(order);
 
-  let response = await fetch('/api/woocommerce/checkout', { method: 'POST', headers, body, cache: 'no-store' });
-
-  // Checkout and offline-order share the same idempotency store. If checkout
-  // is unavailable/fails, let the dedicated offline endpoint take over.
-  if (response.status === 404 || response.status === 409 || response.status >= 500) {
-    response = await fetch('/api/woocommerce/offline-order', { method: 'POST', headers, body, cache: 'no-store' });
-  }
+  // Use the same idempotent checkout endpoint for both online and queued
+  // orders. It checks WooCommerce for an already-created order after an
+  // uncertain timeout, so falling back to a second POST endpoint could create
+  // duplicates or race with the original checkout.
+  const response = await fetch('/api/woocommerce/checkout', {
+    method: 'POST',
+    headers,
+    body,
+    cache: 'no-store'
+  });
 
   let data = null;
   try { data = await response.json(); } catch { data = null; }
