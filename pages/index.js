@@ -90,7 +90,7 @@ export default function POSHome() {
         if (res.ok) {
           let health = {};
           try { health = await res.json(); } catch (_) {}
-          const online = health.online === true && health.database !== false && health.woocommerce !== false;
+          const online = health.online === true && health.database !== false;
           if (online) {
             serverCheckState.current.failures = 0;
             serverCheckState.current.successes += 1;
