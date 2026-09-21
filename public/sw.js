@@ -4,7 +4,6 @@ const OFFLINE_FALLBACK_URL = '/offline.html';
 const NAVIGATION_TIMEOUT = 1200;
 const API_TIMEOUT = 5000;
 const PRODUCT_API_TIMEOUT = 10000;
-const CHECKOUT_TIMEOUT = 45000;
 
 const APP_SHELL = ['/','/login','/select-store','/pickup','/admin','/manifest.json','/favicon.ico',OFFLINE_FALLBACK_URL];
 const CACHEABLE_API_PREFIXES = ['/api/auth/store-selection','/api/admin/users','/api/woocommerce/products','/api/woocommerce/customers','/api/woocommerce/orders','/api/woocommerce/pickup-order'];
@@ -129,7 +128,6 @@ self.addEventListener('fetch', event => {
   if (request.method === 'GET' && url.pathname === '/api/admin/store' && (url.searchParams.has('_pos_health') || url.searchParams.has('healthcheck'))) { event.respondWith(handleServerStatusRequest(request)); return; }
   if (request.method === 'GET' && url.pathname === '/api/woocommerce/products') { event.respondWith(handleProductRequest(request)); return; }
   if (request.method === 'GET' && STALE_WHILE_REVALIDATE_API.has(url.pathname)) { event.respondWith(handleStaleApiRequest(request)); return; }
-  if (request.method === 'POST' && url.pathname === '/api/woocommerce/checkout') { event.respondWith(handleCheckoutRequest(request)); return; }
   if (request.method !== 'GET') return;
   if (url.pathname.startsWith('/api/') && isCacheableApi(url.pathname)) { event.respondWith(onlineFirstApi(request, API_TIMEOUT)); return; }
   if (url.pathname.startsWith('/api/')) { event.respondWith(fetch(request)); return; }
