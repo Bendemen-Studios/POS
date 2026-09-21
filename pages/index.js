@@ -128,7 +128,17 @@ export default function POSHome() {
     let stopped = false;
     const pollServerStatus = async () => {
       if (stopped) return;
-      await checkServerConnection();
+      const online = await checkServerConnection();
+      // Server recovery is the authoritative trigger for the offline queue.
+      // Do not rely only on the browser's "online" event: the internet can
+      // stay online while the POS server itself was temporarily down.
+      if (online && readLocalArray('pos_offline_orders').length > 0) {
+        try {
+          await triggerOfflineSync(false);
+        } catch (err) {
+          console.warn('[SERVER RECOVERY] offline queue sync mislukt:', err);
+        }
+      }
     };
     // Check the real POS server immediately when the POS opens. This avoids
     // showing the browser's navigator.onLine state as "server online" while
