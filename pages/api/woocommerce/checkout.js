@@ -27,7 +27,7 @@ async function findExistingWooOrder(url, authHeader, clientOrderId) {
   try {
     // Inspect recent orders and their actual meta_data instead of relying on
     // meta_key/meta_value query parameters supported differently by servers.
-    const query = new URLSearchParams({ per_page: '25', orderby: 'date', order: 'desc' });
+    const query = new URLSearchParams({ per_page: '100', orderby: 'date', order: 'desc' });
     const response = await fetchWithTimeout(
       `${url}/wp-json/wc/v3/orders?${query.toString()}`,
       {
