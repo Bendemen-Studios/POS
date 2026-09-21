@@ -12,7 +12,7 @@ export default async function handler(req, res) {
   if (method === 'GET' && (Object.prototype.hasOwnProperty.call(req.query, 'healthcheck') || Object.prototype.hasOwnProperty.call(req.query, '_pos_health'))) {
     const startedAt = Date.now();
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 2000);
+    const timer = setTimeout(() => controller.abort(), 3500);
 
     const checkWooCommerce = async () => {
       const url = process.env.WOOCOMMERCE_URL || process.env.NEXT_PUBLIC_WOOCOMMERCE_URL || 'https://www.bendemen.com';
