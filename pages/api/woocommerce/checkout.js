@@ -22,6 +22,34 @@ async function fetchWithTimeout(url, options, timeoutMs = 15000) {
   }
 }
 
+
+async function findExistingWooOrder(url, authHeader, clientOrderId) {
+  try {
+    const query = new URLSearchParams({
+      per_page: '1',
+      meta_key: '_pos_client_order_id',
+      meta_value: String(clientOrderId).slice(0, 128),
+    });
+    const response = await fetchWithTimeout(
+      `${url}/wp-json/wc/v3/orders?${query.toString()}`,
+      {
+        method: 'GET',
+        headers: {
+          Authorization: authHeader,
+          'User-Agent': 'BDM-POS-Client/1.0 (Mozilla/5.0; Node.js)',
+          Connection: 'close',
+        },
+      },
+      5000
+    );
+    if (!response.ok) return null;
+    const orders = await response.json().catch(() => []);
+    return Array.isArray(orders) && orders[0]?.id ? orders[0] : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 async function fetchJsonWithTimeout(url, options, timeoutMs = 15000) {
   const response = await fetchWithTimeout(url, options, timeoutMs);
   const text = await response.text();
@@ -62,6 +90,14 @@ export default async function handler(req, res) {
 
     const { orderItems, paymentMethod, storeId, cashierId, customerId, totals, cashDetails, created_at } = req.body;
     const authHeader = 'Basic ' + Buffer.from(`${consumerKey}:${consumerSecret}`).toString('base64');
+
+    // A client may retry after a timeout even though WooCommerce already created
+    // the order. Always check WooCommerce before creating another order.
+    const existingOrder = await findExistingWooOrder(url, authHeader, clientOrderId);
+    if (existingOrder?.id) {
+      await completeOrder(clientOrderId, existingOrder.id);
+      return res.status(200).json({ success: true, idempotent: true, order: existingOrder });
+    }
     const customHeaders = {
       Authorization: authHeader,
       'Content-Type': 'application/json',
@@ -154,16 +190,14 @@ export default async function handler(req, res) {
       if (!fetchRes.ok) throw new Error(`HTTP ${fetchRes.status}: ${responseText}`);
       responseOrder = JSON.parse(responseText);
     } catch (fetchErr) {
-      console.warn('[CHECKOUT API]: Native fetch faalt/time-out, probeert SDK fallback...', fetchErr.message);
-      const api = new WooCommerceRestApi({
-        url,
-        consumerKey,
-        consumerSecret,
-        version: 'wc/v3',
-        axiosConfig: { timeout: 15000, headers: customHeaders }
-      });
-      const { data } = await api.post('orders', orderData);
-      responseOrder = data;
+      // Never issue a second WooCommerce POST after an uncertain timeout.
+      // The original request may have reached WooCommerce successfully.
+      const existingAfterError = await findExistingWooOrder(url, authHeader, clientOrderId);
+      if (existingAfterError?.id) {
+        responseOrder = existingAfterError;
+      } else {
+        throw new Error(`WooCommerce checkout niet bevestigd: ${fetchErr.message}`);
+      }
     }
 
     if (!responseOrder?.id) throw new Error('WooCommerce gaf geen order-ID terug.');
