@@ -39,7 +39,10 @@ export default async function handler(req, res) {
       ]);
       const dbOnline = dbResult.status === 'fulfilled';
       const wooOnline = wooResult.status === 'fulfilled' && wooResult.value === true;
-      const online = dbOnline && wooOnline;
+      // "online" means the POS/VPS itself is reachable and its database works.
+      // WooCommerce is reported separately because a slow/unavailable WooCommerce
+      // API must not make the entire POS appear to be offline.
+      const online = dbOnline;
       return res.status(200).json({
         success: true,
         online,
