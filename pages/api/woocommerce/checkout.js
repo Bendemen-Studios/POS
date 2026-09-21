@@ -226,7 +226,7 @@ export default async function handler(req, res) {
         method: 'POST',
         headers: customHeaders,
         body: JSON.stringify(orderData)
-      }, 15000);
+      }, 45000);
       const responseText = await fetchRes.text();
       if (!fetchRes.ok) throw new Error(`HTTP ${fetchRes.status}: ${responseText}`);
       responseOrder = JSON.parse(responseText);
@@ -237,7 +237,12 @@ export default async function handler(req, res) {
       if (existingAfterError?.id) {
         responseOrder = existingAfterError;
       } else {
-        throw new Error(`WooCommerce checkout niet bevestigd: ${fetchErr.message}`);
+        const message = fetchErr?.name === 'AbortError' || /aborted|abort/i.test(String(fetchErr?.message || ''))
+          ? 'WooCommerce reageerde te laat tijdens het aanmaken van de bestelling. De bestelling is niet bevestigd; de POS kan veilig opnieuw proberen.'
+          : `WooCommerce checkout niet bevestigd: ${fetchErr.message}`;
+        const timeoutError = new Error(message);
+        timeoutError.code = 'WOO_CHECKOUT_TIMEOUT';
+        throw timeoutError;
       }
     }
 
