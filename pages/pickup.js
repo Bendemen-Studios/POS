@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 
 export default function PickupDashboard() {
@@ -13,6 +13,7 @@ export default function PickupDashboard() {
   const [selectedStore, setSelectedStore] = useState(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncError, setLastSyncError] = useState('');
+  const syncInFlight = useRef(null);
 
   useEffect(() => {
     const store = JSON.parse(localStorage.getItem('selectedStore') || '{}');
@@ -53,6 +54,8 @@ export default function PickupDashboard() {
   };
 
   const triggerOfflinePickupSync = async () => {
+    if (syncInFlight.current) return syncInFlight.current;
+    syncInFlight.current = (async () => {
     const queue = JSON.parse(localStorage.getItem('pos_offline_pickup_actions') || '[]');
     if (!Array.isArray(queue) || queue.length === 0 || (typeof navigator !== 'undefined' && navigator.onLine === false)) return;
 
@@ -80,7 +83,10 @@ export default function PickupDashboard() {
       await fetchPickupOrders();
     } finally {
       setIsSyncing(false);
+      syncInFlight.current = null;
     }
+    })();
+    return syncInFlight.current;
   };
 
   const handleMarkAsPickedUp = async (orderId) => {
