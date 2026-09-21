@@ -151,15 +151,7 @@ export default function POSHome() {
     // Perform a real POS-server health check immediately on startup.
     // navigator.onLine only tells us that the device has internet access;
     // the health endpoint tells us whether the actual POS server is reachable.
-    checkServerConnection(true).then((online) => {
-      if (online && readLocalArray('pos_offline_orders').length > 0) {
-        triggerOfflineSync(false).catch(err => {
-          console.warn('[STARTUP] offline queue sync mislukt:', err);
-        });
-      }
-    }).catch(err => {
-      console.warn('[STARTUP] server healthcheck mislukt:', err);
-    });
+    checkServerConnection(true);
     const timer = setInterval(pollServerStatus, 2000);
     const online = () => pollServerStatus();
     const offline = () => {
