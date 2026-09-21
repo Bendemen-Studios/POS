@@ -1,4 +1,3 @@
-import WooCommerceRestApi from '@woocommerce/woocommerce-rest-api';
 import { createHash } from 'crypto';
 import { claimOrder, completeOrder, releaseOrder } from '../../../lib/orderIdempotency';
 import { redeemCustomerPoints } from '../../../lib/customerPoints';
