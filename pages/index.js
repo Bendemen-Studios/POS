@@ -88,11 +88,16 @@ export default function POSHome() {
           }
         });
         if (res.ok) {
-          serverCheckState.current.failures = 0;
-          serverCheckState.current.successes += 1;
-          if (immediate || serverCheckState.current.successes >= 2) setServerOnline(true);
-          localStorage.setItem('pos_server_online', '1');
-          return true;
+          let health = {};
+          try { health = await res.json(); } catch (_) {}
+          const online = health.online === true && health.database !== false && health.woocommerce !== false;
+          if (online) {
+            serverCheckState.current.failures = 0;
+            serverCheckState.current.successes += 1;
+            if (immediate || serverCheckState.current.successes >= 2) setServerOnline(true);
+            localStorage.setItem('pos_server_online', '1');
+            return true;
+          }
         }
       } catch (_) {
         // Network/timeout = server unavailable.
@@ -155,7 +160,7 @@ export default function POSHome() {
     }).catch(err => {
       console.warn('[STARTUP] server healthcheck mislukt:', err);
     });
-    const timer = setInterval(pollServerStatus, 3000);
+    const timer = setInterval(pollServerStatus, 2000);
     const online = () => pollServerStatus();
     const offline = () => {
       serverCheckState.current.failures = 3;
