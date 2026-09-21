@@ -11,59 +11,30 @@ export default async function handler(req, res) {
   // enough to decide whether an order can be sent directly.
   if (method === 'GET' && (Object.prototype.hasOwnProperty.call(req.query, 'healthcheck') || Object.prototype.hasOwnProperty.call(req.query, '_pos_health'))) {
     const startedAt = Date.now();
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 3500);
-
-    const checkWooCommerce = async () => {
-      const url = process.env.WOOCOMMERCE_URL || process.env.NEXT_PUBLIC_WOOCOMMERCE_URL || 'https://www.bendemen.com';
-      const consumerKey = process.env.WOOCOMMERCE_CONSUMER_KEY || process.env.WOOCOMMERCE_KEY || process.env.NEXT_PUBLIC_WOOCOMMERCE_KEY;
-      const consumerSecret = process.env.WOOCOMMERCE_CONSUMER_SECRET || process.env.WOOCOMMERCE_SECRET || process.env.NEXT_PUBLIC_WOOCOMMERCE_SECRET;
-      if (!consumerKey || !consumerSecret) return false;
-      const auth = 'Basic ' + Buffer.from(consumerKey + ':' + consumerSecret).toString('base64');
-      const response = await fetch(url + '/wp-json/wc/v3/orders?per_page=1', {
-        method: 'GET',
-        headers: {
-          Authorization: auth,
-          'User-Agent': 'BDM-POS-Health/1.0',
-          Connection: 'close'
-        },
-        signal: controller.signal
-      });
-      return response.ok;
-    };
-
     try {
-      const [dbResult, wooResult] = await Promise.allSettled([
-        db.query('SELECT 1 AS ok'),
-        checkWooCommerce()
-      ]);
-      const dbOnline = dbResult.status === 'fulfilled';
-      const wooOnline = wooResult.status === 'fulfilled' && wooResult.value === true;
-      // "online" means the POS/VPS itself is reachable and its database works.
-      // WooCommerce is reported separately because a slow/unavailable WooCommerce
-      // API must not make the entire POS appear to be offline.
-      const online = dbOnline;
+      // Server status is deliberately a VPS/POS check, not a WooCommerce
+      // check. WooCommerce can be slow while the POS API and database are
+      // perfectly reachable; that must not switch the terminal to local mode.
+      await db.query('SELECT 1 AS ok');
       return res.status(200).json({
         success: true,
-        online,
+        online: true,
         pos: true,
-        database: dbOnline,
-        woocommerce: wooOnline,
+        database: true,
+        woocommerce: null,
         latencyMs: Date.now() - startedAt,
         timestamp: Date.now()
       });
-    } catch (_) {
+    } catch (error) {
       return res.status(200).json({
         success: true,
         online: false,
         pos: true,
         database: false,
-        woocommerce: false,
+        woocommerce: null,
         latencyMs: Date.now() - startedAt,
         timestamp: Date.now()
       });
-    } finally {
-      clearTimeout(timer);
     }
   }
 
