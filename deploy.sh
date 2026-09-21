@@ -56,11 +56,15 @@ fi
 
 echo "📦 Dependencies installeren..."
 if [ -f package-lock.json ]; then
-  echo "🔒 Bestaande package-lock.json behouden."
+  echo "🔒 Bestaande package-lock.json gebruiken met npm ci..."
+  # Use the VPS-generated lockfile deterministically. The lockfile is kept
+  # outside Git for now because it was generated from the production Linux
+  # environment and contains the platform-specific optional SWC packages.
+  npm ci --include=dev --include=optional --no-audit --no-fund
 else
   echo "🆕 Geen package-lock.json gevonden; deze wordt aangemaakt."
+  npm install --include=dev --include=optional --no-audit --no-fund --package-lock=true
 fi
-npm install --include=dev --no-audit --no-fund --package-lock=true
 
 echo "🏗️ Production build maken..."
 rm -rf .next
