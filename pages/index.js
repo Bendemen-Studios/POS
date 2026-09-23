@@ -321,25 +321,16 @@ export default function POSHome() {
           message: `❌ Er is iets fout gegaan. Probeer de bestelling zo opnieuw af te rekenen. Kom je er niet uit? Haal iemand zoals de manager of iemand van de technische dienst.${changeText}`
         });
       } else {
-        // A checkout timeout alone does not prove the VPS is offline. Keep the
-        // same clientOrderId so the next attempt can recover an order that was
-        // already created by WooCommerce.
+        // A timeout/network failure is immediately placed in the offline queue.
+        // Do not wait for a separate health check first: the WooCommerce request
+        // may have reached the server even though the POS timed out. The same
+        // clientOrderId makes the later automatic retry idempotent.
         try {
           localStorage.setItem(pendingCheckoutKey, JSON.stringify({
             clientOrderId,
             orderPayload
           }));
         } catch (_) {}
-        // A checkout timeout alone does not prove the VPS is offline. Check the
-        // lightweight POS health endpoint before deciding whether to queue it.
-        const serverStillOnline = await checkServerConnection(true);
-        if (serverStillOnline) {
-          setCheckoutStatus({
-            success: false,
-            message: `❌ Er is iets fout gegaan. Probeer de bestelling zo opnieuw af te rekenen. Kom je er niet uit? Haal iemand zoals de manager of iemand van de technische dienst.${changeText}`
-          });
-          return;
-        }
         const offlineQueue = readLocalArray('pos_offline_orders');
         // Never enqueue the same clientOrderId twice.
         const alreadyQueued = offlineQueue.some(order => String(order.clientOrderId || '') === clientOrderId);
