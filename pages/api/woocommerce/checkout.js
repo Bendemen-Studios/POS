@@ -169,10 +169,17 @@ export default async function handler(req, res) {
           tax_status: 'none'
         });
       } else {
+        const itemQuantity = Number(item.quantity || 1);
+        const itemUnitPrice = Number.parseFloat(item.price || 0);
+        const itemTotal = (itemUnitPrice * itemQuantity).toFixed(2);
         const lineObj = {
           product_id: pid,
-          quantity: item.quantity || 1,
-          total: (parseFloat(item.price || 0) * (item.quantity || 1)).toFixed(2)
+          quantity: itemQuantity,
+          // WooCommerce expects both subtotal and total when the POS overrides
+          // the catalog price. Open-bedrag items deliberately use the cashier's
+          // entered amount instead of the product's WooCommerce price.
+          subtotal: itemTotal,
+          total: itemTotal
         };
         if (item.variation_id && Number(item.variation_id) > 0) lineObj.variation_id = Number(item.variation_id);
         lineItems.push(lineObj);
