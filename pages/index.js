@@ -219,11 +219,19 @@ export default function POSHome() {
       }
     }
 
-    // Generate the idempotency key BEFORE the first checkout attempt.
-    // The exact same ID follows the order into the offline queue when the
-    // request times out, so a retry can never become a different order.
-    const clientOrderId = `pos-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-    const orderPayload = {
+    // Keep the same idempotency ID when the previous checkout may have
+    // reached WooCommerce but the POS did not receive the final response.
+    // This is especially important for DHL/open-amount orders, where the
+    // WooCommerce request can take longer than usual.
+    const pendingCheckoutKey = 'pos_pending_checkout';
+    let pendingCheckout = null;
+    try {
+      const savedPending = localStorage.getItem(pendingCheckoutKey);
+      if (savedPending) pendingCheckout = JSON.parse(savedPending);
+    } catch (_) {}
+
+    const createOrderId = () => `pos-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    const orderPayloadBase = {
       orderItems: cart,
       paymentMethod: selectedPaymentMethod,
       storeId: selectedStore?.id || 1,
@@ -238,8 +246,26 @@ export default function POSHome() {
       },
       cashDetails: selectedPaymentMethod === 'cash'
         ? { cashGiven: cashGivenFloat.toFixed(2), changeDue: changeDue.toFixed(2) }
-        : null,
-      created_at: new Date().toISOString(),
+        : null
+    };
+
+    const orderFingerprint = payload => {
+      const { created_at: _createdAt, clientOrderId: _clientOrderId, ...businessPayload } = payload || {};
+      return JSON.stringify(businessPayload);
+    };
+
+    const samePendingOrder = pendingCheckout?.orderPayload &&
+      orderFingerprint(pendingCheckout.orderPayload) === orderFingerprint(orderPayloadBase);
+
+    const clientOrderId = samePendingOrder
+      ? String(pendingCheckout.clientOrderId).slice(0, 128)
+      : createOrderId();
+
+    const orderPayload = {
+      ...orderPayloadBase,
+      created_at: samePendingOrder
+        ? String(pendingCheckout.orderPayload.created_at || new Date().toISOString())
+        : new Date().toISOString(),
       clientOrderId
     };
 
@@ -260,6 +286,7 @@ export default function POSHome() {
       try { data = await res.json(); } catch (_) {}
 
       if (res.ok && data.success) {
+        localStorage.removeItem(pendingCheckoutKey);
         setServerOnline(true);
         localStorage.setItem('pos_server_online', '1');
         const changeText = selectedPaymentMethod === 'cash' && changeDue > 0
@@ -277,6 +304,14 @@ export default function POSHome() {
         : '';
 
       if (err?.isServerResponse) {
+        // Keep the exact checkout ID for a manual retry. The server may have
+        // created the WooCommerce order before returning an error/timeout.
+        try {
+          localStorage.setItem(pendingCheckoutKey, JSON.stringify({
+            clientOrderId,
+            orderPayload
+          }));
+        } catch (_) {}
         // HTTP responses prove the POS server is reachable. Do not put a
         // genuine application error into the offline queue.
         setServerOnline(true);
@@ -286,6 +321,15 @@ export default function POSHome() {
           message: `❌ Er is iets fout gegaan. Probeer de bestelling zo opnieuw af te rekenen. Kom je er niet uit? Haal iemand zoals de manager of iemand van de technische dienst.${changeText}`
         });
       } else {
+        // A checkout timeout alone does not prove the VPS is offline. Keep the
+        // same clientOrderId so the next attempt can recover an order that was
+        // already created by WooCommerce.
+        try {
+          localStorage.setItem(pendingCheckoutKey, JSON.stringify({
+            clientOrderId,
+            orderPayload
+          }));
+        } catch (_) {}
         // A checkout timeout alone does not prove the VPS is offline. Check the
         // lightweight POS health endpoint before deciding whether to queue it.
         const serverStillOnline = await checkServerConnection(true);
