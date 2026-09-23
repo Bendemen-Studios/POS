@@ -124,6 +124,14 @@ export default async function handler(req, res) {
     }
 
     if (claim.processing) {
+      // A previous request may still be finishing after the POS timed out.
+      // Check WooCommerce before returning 409 so a manual retry can recover
+      // the already-created order instead of creating a duplicate later.
+      const processingOrder = await findExistingWooOrder(url, authHeader, clientOrderId);
+      if (processingOrder?.id && processingOrder.status === 'completed') {
+        await completeOrder(clientOrderId, processingOrder.id);
+        return res.status(200).json({ success: true, idempotent: true, order: processingOrder });
+      }
       return res.status(409).json({ success: false, retryable: true, error: 'Deze bestelling wordt al verwerkt.' });
     }
 
