@@ -107,6 +107,41 @@ export default async function handler(req, res) {
   // needs it to check whether WooCommerce already created the order.
   const authHeader = 'Basic ' + Buffer.from(`${consumerKey}:${consumerSecret}`).toString('base64');
 
+  const body = req.body || {};
+  const { orderItems, paymentMethod, totals = {} } = body;
+  if (!Array.isArray(orderItems) || orderItems.length === 0) {
+    return res.status(400).json({ success: false, error: 'De bestelling bevat geen artikelen.' });
+  }
+  if (paymentMethod && !['cash', 'manual_pin', 'sumup'].includes(paymentMethod)) {
+    return res.status(400).json({ success: false, error: 'Ongeldige betaalmethode.' });
+  }
+
+  let subtotal = 0;
+  for (const item of orderItems) {
+    if (!item || typeof item !== 'object') {
+      return res.status(400).json({ success: false, error: 'De bestelling bevat een ongeldig artikel.' });
+    }
+    const price = Number(item.price);
+    const quantity = item.quantity == null ? 1 : Number(item.quantity);
+    if (!Number.isFinite(price) || price < 0 || !Number.isFinite(quantity) || quantity <= 0) {
+      return res.status(400).json({ success: false, error: 'Een artikel heeft een ongeldige prijs of hoeveelheid.' });
+    }
+    const isCustomItem = String(item.id || '').startsWith('custom_') || (!item.product_id && !Number.isFinite(Number(item.id)));
+    const productId = Number(item.product_id || item.id);
+    if (!isCustomItem && (!Number.isInteger(productId) || productId <= 0)) {
+      return res.status(400).json({ success: false, error: 'Een artikel heeft geen geldig WooCommerce-product-ID.' });
+    }
+    subtotal += price * quantity;
+  }
+
+  const discountAmount = Number(totals.discountAmount || 0);
+  const pointsDiscount = Number(totals.pointsDiscount || 0);
+  if (!Number.isFinite(discountAmount) || discountAmount < 0 ||
+      !Number.isFinite(pointsDiscount) || pointsDiscount < 0 ||
+      discountAmount + pointsDiscount > subtotal + 0.01) {
+    return res.status(400).json({ success: false, error: 'De korting is ongeldig of hoger dan het bestelbedrag.' });
+  }
+
   try {
     const claim = await claimOrder(clientOrderId);
 
