@@ -1,12 +1,16 @@
 import WooCommerceRestApi from '@woocommerce/woocommerce-rest-api';
+import { requireSession } from '../../../lib/session';
 
 export default async function handler(req, res) {
   const { method } = req;
 
+  const session = await requireSession(req, res, { roles: ['admin', 'super_admin', 'administrator'] });
+  if (!session) return;
+
   // Fallbacks voor verschillende .env-variabelennamen
   const url = process.env.WOOCOMMERCE_URL || process.env.NEXT_PUBLIC_WOOCOMMERCE_URL || 'https://www.bendemen.com';
-  const consumerKey = process.env.WOOCOMMERCE_CONSUMER_KEY || process.env.WOOCOMMERCE_KEY || process.env.NEXT_PUBLIC_WOOCOMMERCE_KEY;
-  const consumerSecret = process.env.WOOCOMMERCE_CONSUMER_SECRET || process.env.WOOCOMMERCE_SECRET || process.env.NEXT_PUBLIC_WOOCOMMERCE_SECRET;
+  const consumerKey = process.env.WOOCOMMERCE_CONSUMER_KEY || process.env.WOO_CONSUMER_KEY || process.env.WOOCOMMERCE_KEY || process.env.NEXT_PUBLIC_WOOCOMMERCE_KEY;
+  const consumerSecret = process.env.WOOCOMMERCE_CONSUMER_SECRET || process.env.WOO_CONSUMER_SECRET || process.env.WOOCOMMERCE_SECRET || process.env.NEXT_PUBLIC_WOOCOMMERCE_SECRET;
 
   if (!consumerKey || !consumerSecret) {
     return res.status(500).json({

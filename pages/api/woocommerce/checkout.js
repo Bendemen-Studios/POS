@@ -1,6 +1,7 @@
 import { createHash } from 'crypto';
 import { claimOrder, completeOrder, releaseOrder } from '../../../lib/orderIdempotency';
 import { redeemCustomerPoints } from '../../../lib/customerPoints';
+import { requireSession, requireStoreAccess } from '../../../lib/session';
 
 function getClientOrderId(req) {
   const headerId = req.headers['idempotency-key'];
@@ -24,8 +25,7 @@ async function fetchWithTimeout(url, options, timeoutMs = 15000) {
 
 async function findExistingWooOrder(url, authHeader, clientOrderId) {
   const targetId = String(clientOrderId).slice(0, 128);
-  try {
-    // Inspect recent orders and their actual meta_data instead of relying on
+  // Inspect recent orders and their actual meta_data instead of relying on
     // meta_key/meta_value query parameters supported differently by servers.
     const query = new URLSearchParams({ per_page: '100', orderby: 'date', order: 'desc' });
     const response = await fetchWithTimeout(
@@ -40,9 +40,13 @@ async function findExistingWooOrder(url, authHeader, clientOrderId) {
       },
       7000
     );
-    if (!response.ok) return null;
-    const orders = await response.json().catch(() => []);
-    if (!Array.isArray(orders)) return null;
+    if (!response.ok) {
+      throw new Error(`WooCommerce kon bestaande bestellingen niet controleren (HTTP ${response.status}).`);
+    }
+    const orders = await response.json();
+    if (!Array.isArray(orders)) {
+      throw new Error('WooCommerce gaf een ongeldige lijst met bestaande bestellingen terug.');
+    }
     return orders.find(order =>
       Array.isArray(order?.meta_data) &&
       order.meta_data.some(meta =>
@@ -50,9 +54,6 @@ async function findExistingWooOrder(url, authHeader, clientOrderId) {
         String(meta?.value || '') === targetId
       )
     ) || null;
-  } catch (_) {
-    return null;
-  }
 }
 
 async function verifyWooOrder(url, authHeader, wooOrderId) {
@@ -92,14 +93,59 @@ export default async function handler(req, res) {
     return res.status(405).json({ success: false, error: `Method ${req.method} Not Allowed` });
   }
 
+  const session = await requireSession(req, res);
+  if (!session) return;
+
+  if (!requireStoreAccess(req, res, (req.body || {}).storeId || 1)) return;
+
   const clientOrderId = getClientOrderId(req);
   let claimed = false;
   const url = process.env.WOOCOMMERCE_URL || process.env.NEXT_PUBLIC_WOOCOMMERCE_URL || 'https://www.bendemen.com';
-  const consumerKey = process.env.WOOCOMMERCE_CONSUMER_KEY || process.env.WOOCOMMERCE_KEY || process.env.NEXT_PUBLIC_WOOCOMMERCE_KEY;
-  const consumerSecret = process.env.WOOCOMMERCE_CONSUMER_SECRET || process.env.WOOCOMMERCE_SECRET || process.env.NEXT_PUBLIC_WOOCOMMERCE_SECRET;
+  const consumerKey = process.env.WOOCOMMERCE_CONSUMER_KEY || process.env.WOO_CONSUMER_KEY || process.env.WOOCOMMERCE_KEY || process.env.NEXT_PUBLIC_WOOCOMMERCE_KEY;
+  const consumerSecret = process.env.WOOCOMMERCE_CONSUMER_SECRET || process.env.WOO_CONSUMER_SECRET || process.env.WOOCOMMERCE_SECRET || process.env.NEXT_PUBLIC_WOOCOMMERCE_SECRET;
 
   if (!consumerKey || !consumerSecret) {
     return res.status(500).json({ success: false, error: 'WooCommerce API sleutels zijn niet geconfigureerd in .env' });
+  }
+
+  // Build this before claiming the order: the processing-retry branch also
+  // needs it to check whether WooCommerce already created the order.
+  const authHeader = 'Basic ' + Buffer.from(`${consumerKey}:${consumerSecret}`).toString('base64');
+
+  const body = req.body || {};
+  const { orderItems, paymentMethod } = body;
+  const totals = body.totals && typeof body.totals === 'object' ? body.totals : {};
+  if (!Array.isArray(orderItems) || orderItems.length === 0) {
+    return res.status(400).json({ success: false, error: 'De bestelling bevat geen artikelen.' });
+  }
+  if (!['cash', 'manual_pin', 'sumup'].includes(paymentMethod)) {
+    return res.status(400).json({ success: false, error: 'Kies een geldige betaalmethode voordat de bestelling wordt verwerkt.' });
+  }
+
+  let subtotal = 0;
+  for (const item of orderItems) {
+    if (!item || typeof item !== 'object') {
+      return res.status(400).json({ success: false, error: 'De bestelling bevat een ongeldig artikel.' });
+    }
+    const price = Number(item.price);
+    const quantity = item.quantity == null ? 1 : Number(item.quantity);
+    if (!Number.isFinite(price) || price < 0 || !Number.isFinite(quantity) || quantity <= 0) {
+      return res.status(400).json({ success: false, error: 'Een artikel heeft een ongeldige prijs of hoeveelheid.' });
+    }
+    const isCustomItem = String(item.id || '').startsWith('custom_') || (!item.product_id && !Number.isFinite(Number(item.id)));
+    const productId = Number(item.product_id || item.id);
+    if (!isCustomItem && (!Number.isInteger(productId) || productId <= 0)) {
+      return res.status(400).json({ success: false, error: 'Een artikel heeft geen geldig WooCommerce-product-ID.' });
+    }
+    subtotal += price * quantity;
+  }
+
+  const discountAmount = Number(totals.discountAmount || 0);
+  const pointsDiscount = Number(totals.pointsDiscount || 0);
+  if (!Number.isFinite(discountAmount) || discountAmount < 0 ||
+      !Number.isFinite(pointsDiscount) || pointsDiscount < 0 ||
+      Math.round(discountAmount * 100) + Math.round(pointsDiscount * 100) > Math.round(subtotal * 100)) {
+    return res.status(400).json({ success: false, error: 'De korting is ongeldig of hoger dan het bestelbedrag.' });
   }
 
   try {
@@ -138,12 +184,14 @@ export default async function handler(req, res) {
     claimed = claim.claimed;
 
     const { orderItems, paymentMethod, storeId, cashierId, customerId, totals, cashDetails, created_at } = req.body;
-    const authHeader = 'Basic ' + Buffer.from(`${consumerKey}:${consumerSecret}`).toString('base64');
 
     // A client may retry after a timeout even though WooCommerce already created
     // the order. Always check WooCommerce before creating another order.
     const existingOrder = await findExistingWooOrder(url, authHeader, clientOrderId);
     if (existingOrder?.id) {
+      if (existingOrder.status !== 'completed') {
+        throw new Error(`WooCommerce-bestelling #${existingOrder.id} bestaat, maar heeft status '${existingOrder.status || 'onbekend'}'. De bestelling blijft in de wachtrij voor controle.`);
+      }
       await completeOrder(clientOrderId, existingOrder.id);
       return res.status(200).json({ success: true, idempotent: true, order: existingOrder });
     }

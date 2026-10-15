@@ -1,0 +1,35 @@
+name: POS CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      NODE_ENV: production
+      DB_HOST: 127.0.0.1
+      DB_PORT: "3306"
+      DB_USER: pos_ci
+      DB_PASSWORD: pos_ci
+      DB_NAME: bendemen_pos
+      WOOCOMMERCE_URL: https://example.invalid
+      WOOCOMMERCE_CONSUMER_KEY: ci-placeholder
+      WOOCOMMERCE_CONSUMER_SECRET: ci-placeholder
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: npm install --include=dev --no-audit --no-fund
+      - name: Run ESLint
+        run: npm run lint
+      - name: Build production app
+        run: npm run build

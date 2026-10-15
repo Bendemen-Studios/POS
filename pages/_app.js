@@ -105,6 +105,64 @@ async function syncProductsToCacheAndNotify() {
   }
 }
 
+function installPosSessionFetch() {
+  if (typeof window === 'undefined' || window.__bendemenPosSessionFetch) return () => {};
+  window.__bendemenPosSessionFetch = true;
+  const originalFetch = window.fetch.bind(window);
+
+  window.fetch = (input, init = {}) => {
+    const rawUrl = typeof input === 'string' ? input : input?.url;
+    if (!rawUrl) return originalFetch(input, init);
+
+    let url;
+    try { url = new URL(rawUrl, window.location.origin); } catch { return originalFetch(input, init); }
+    if (url.origin !== window.location.origin || !url.pathname.startsWith('/api/')) {
+      return originalFetch(input, init);
+    }
+
+    // Login and the public health probe must work without an existing session.
+    if (url.pathname === '/api/auth/login' ||
+        (url.pathname === '/api/admin/store' && (url.searchParams.has('_pos_health') || url.searchParams.has('healthcheck')))) {
+      return originalFetch(input, init);
+    }
+
+    // The regular SumUp actions are redirected to the separate gateway below.
+    // Do not leak the POS session token to that external service.
+    if (url.pathname === '/api/sumup/proxy' && url.searchParams.get('action') !== 'assign-store') {
+      return originalFetch(input, init);
+    }
+
+    const token = localStorage.getItem('pos_token');
+    let requestInit = init;
+    if (token) {
+      const headers = new Headers(typeof input !== 'string' ? input?.headers : undefined);
+      new Headers(init?.headers || {}).forEach((value, key) => headers.set(key, value));
+      headers.set('Authorization', `Bearer ${token}`);
+      requestInit = { ...init, headers };
+    }
+
+    return originalFetch(input, requestInit).then(response => {
+      // Old pre-signed tokens and expired sessions must not leave the POS
+      // stuck on a screen that looks logged in but cannot access its APIs.
+      if (response.status === 401) {
+        localStorage.removeItem('pos_user');
+        localStorage.removeItem('pos_token');
+        if (window.location.pathname !== '/login') window.location.replace('/login');
+      }
+      return response;
+    });
+  };
+
+  return () => {
+    window.fetch = originalFetch;
+    window.__bendemenPosSessionFetch = false;
+  };
+}
+
+// Install before React effects so the page's initial API requests already carry
+// the signed session token. The wrapper reads localStorage on every request.
+if (typeof window !== 'undefined') installPosSessionFetch();
+
 function installSumUpGatewayFetch() {
   if (typeof window === 'undefined' || window.__bendemenSumUpFetchInstalled) return;
   window.__bendemenSumUpFetchInstalled = true;

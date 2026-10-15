@@ -1,51 +1,67 @@
+import { requireSession } from '../../../lib/session';
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', ['POST']);
     return res.status(405).json({ success: false, message: `Method ${req.method} not allowed` });
   }
 
-  try {
-    const { cartItems, discountType, discountValue, couponCode } = req.body;
+  const session = await requireSession(req, res);
+  if (!session) return;
 
-    // Bereken subtotaal
-    let subtotal = cartItems.reduce((acc, item) => acc + (parseFloat(item.price) * item.quantity), 0);
-    let discountAmount = 0;
-    let appliedCoupons = [];
-
-    // 1. Verwerk Vouchers / Coupons
-    if (couponCode) {
-      appliedCoupons.push({ code: couponCode });
-      // Je kunt hier eventueel extra WooCommerce coupon validatie toevoegen via API indien gewenst
-    }
-
-    // 2. Verwerk Percentage of Vaste Korting
-    if (discountType === 'percentage') {
-      discountAmount = (subtotal * parseFloat(discountValue)) / 100;
-    } else if (discountType === 'fixed') {
-      discountAmount = parseFloat(discountValue);
-    }
-
-    // Zorg dat korting nooit hoger is dan het subtotaal
-    if (discountAmount > subtotal) {
-      discountAmount = subtotal;
-    }
-
-    const total = subtotal - discountAmount;
-
-    return res.status(200).json({
-      success: true,
-      subtotal,
-      discountAmount,
-      total,
-      appliedCoupons,
-      feeLines: discountAmount > 0 ? [{
-        name: `Korting (${discountType === 'percentage' ? discountValue + '%' : '€' + discountValue})`,
-        total: (-discountAmount).toFixed(2)
-      }] : []
-    });
-
-  } catch (error) {
-    console.error("Discount Error:", error);
-    return res.status(500).json({ success: false, error: error.message });
+  const { cartItems, discountType = 'none', discountValue = 0, couponCode } = req.body || {};
+  if (!Array.isArray(cartItems) || cartItems.length === 0) {
+    return res.status(400).json({ success: false, message: 'De winkelwagen bevat geen geldige artikelen.' });
   }
+
+  // This endpoint does not currently validate coupons against WooCommerce.
+  // Never claim a coupon was applied when it has not actually been checked.
+  if (typeof couponCode === 'string' && couponCode.trim()) {
+    return res.status(400).json({ success: false, message: 'Kortingscodes worden nog niet gevalideerd. Gebruik een percentage- of vaste korting.' });
+  }
+
+  const items = [];
+  for (const item of cartItems) {
+    const price = Number.parseFloat(item?.price);
+    const quantity = Number(item?.quantity);
+    if (!Number.isFinite(price) || price < 0 || !Number.isFinite(quantity) || quantity <= 0) {
+      return res.status(400).json({ success: false, message: 'Een of meer winkelwagenartikelen hebben een ongeldige prijs of hoeveelheid.' });
+    }
+    items.push({ price, quantity });
+  }
+
+  const subtotal = Math.round(items.reduce((sum, item) => sum + item.price * item.quantity, 0) * 100) / 100;
+  let discountAmount = 0;
+  const parsedDiscount = Number.parseFloat(discountValue);
+
+  if (discountType === 'percentage') {
+    if (!Number.isFinite(parsedDiscount) || parsedDiscount < 0 || parsedDiscount > 100) {
+      return res.status(400).json({ success: false, message: 'Het kortingspercentage moet tussen 0 en 100 liggen.' });
+    }
+    discountAmount = subtotal * parsedDiscount / 100;
+  } else if (discountType === 'fixed') {
+    if (!Number.isFinite(parsedDiscount) || parsedDiscount < 0) {
+      return res.status(400).json({ success: false, message: 'De vaste korting moet een geldig positief bedrag zijn.' });
+    }
+    discountAmount = parsedDiscount;
+  } else if (discountType !== 'none') {
+    return res.status(400).json({ success: false, message: 'Onbekend kortingstype.' });
+  }
+
+  discountAmount = Math.round(Math.min(subtotal, Math.max(0, discountAmount)) * 100) / 100;
+  const total = Math.round((subtotal - discountAmount) * 100) / 100;
+
+  return res.status(200).json({
+    success: true,
+    subtotal,
+    discountAmount,
+    total,
+    appliedCoupons: [],
+    feeLines: discountAmount > 0 ? [{
+      name: `Korting (${discountType === 'percentage' ? parsedDiscount + '%' : '€' + discountAmount.toFixed(2)})`,
+      total: (-discountAmount).toFixed(2),
+      tax_class: '',
+      tax_status: 'none'
+    }] : []
+  });
 }

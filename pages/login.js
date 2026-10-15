@@ -4,6 +4,35 @@ import { useRouter } from 'next/router';
 // Give the live login API enough time for a cold start/database query,
 // while still falling back to the local cache when the server is unavailable.
 const OFFLINE_TIMEOUT_MS = 15000;
+const OFFLINE_PASSWORD_ITERATIONS = 210000;
+
+function bytesToHex(bytes) {
+  return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function hexToBytes(hex) {
+  if (typeof hex !== 'string' || hex.length % 2 !== 0 || !/^[0-9a-f]+$/i.test(hex)) return null;
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < bytes.length; i += 1) bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  return bytes;
+}
+
+async function deriveOfflinePasswordHash(password, salt, iterations = OFFLINE_PASSWORD_ITERATIONS) {
+  if (!globalThis.crypto?.subtle) throw new Error('Veilige offline wachtwoordcontrole is niet beschikbaar in deze browser.');
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt, iterations, hash: 'SHA-256' }, key, 256);
+  return bytesToHex(new Uint8Array(bits));
+}
+
+async function createOfflineCredential(password) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  return {
+    algorithm: 'PBKDF2-SHA-256',
+    iterations: OFFLINE_PASSWORD_ITERATIONS,
+    salt: bytesToHex(salt),
+    hash: await deriveOfflinePasswordHash(password, salt),
+  };
+}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -24,15 +53,42 @@ export default function LoginPage() {
     setIsChecking(false);
   }, [router]);
 
-  const getCachedLogin = (cleanUsername, enteredPassword) => {
+  const getCachedLogin = async (cleanUsername, enteredPassword) => {
     const cachedUser = localStorage.getItem(`pos_offline_user_${cleanUsername}`);
-    const cachedPass = localStorage.getItem(`pos_offline_pass_${cleanUsername}`);
+    const credentialKey = `pos_offline_credential_${cleanUsername}`;
+    const cachedToken = localStorage.getItem(`pos_offline_token_${cleanUsername}`);
+    let rawCredential = localStorage.getItem(credentialKey);
 
-    if (!cachedUser || cachedPass !== enteredPassword) return false;
+    // Offline access must also have a server-signed token so queued orders can
+    // safely synchronize when the server returns.
+    if (!cachedUser || !cachedToken) return false;
+
+    // One-time migration: remove any legacy plaintext password as soon as it
+    // is read, then replace it with a salted verifier if the password matches.
+    const legacyPasswordKey = `pos_offline_pass_${cleanUsername}`;
+    if (!rawCredential) {
+      const legacyPassword = localStorage.getItem(legacyPasswordKey);
+      localStorage.removeItem(legacyPasswordKey);
+      if (legacyPassword !== enteredPassword) return false;
+      try {
+        const migrated = await createOfflineCredential(enteredPassword);
+        localStorage.setItem(credentialKey, JSON.stringify(migrated));
+        rawCredential = JSON.stringify(migrated);
+      } catch (_) {
+        return false;
+      }
+    }
 
     try {
+      const credential = JSON.parse(rawCredential);
+      const salt = hexToBytes(credential.salt);
+      if (credential.algorithm !== 'PBKDF2-SHA-256' || !salt || !credential.hash) return false;
+      const derived = await deriveOfflinePasswordHash(enteredPassword, salt, credential.iterations);
+      if (derived !== credential.hash) return false;
+
       const userObj = JSON.parse(cachedUser);
       localStorage.setItem('pos_user', JSON.stringify(userObj));
+      localStorage.setItem('pos_token', cachedToken);
       localStorage.removeItem('selectedStore');
       localStorage.removeItem('pos_selected_store');
       window.location.replace('/select-store');
@@ -50,7 +106,7 @@ export default function LoginPage() {
     if (!cleanUsername || !password) return;
 
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
-      if (!getCachedLogin(cleanUsername, password)) {
+      if (!await getCachedLogin(cleanUsername, password)) {
         setError('Offline: geen geldige lokale inlogcache gevonden.');
       }
       return;
@@ -102,9 +158,21 @@ export default function LoginPage() {
 
       if (data.success) {
         localStorage.setItem('pos_user', JSON.stringify(data.user));
-        if (data.token) localStorage.setItem('pos_token', data.token);
+        if (data.token) {
+          localStorage.setItem('pos_token', data.token);
+          localStorage.setItem(`pos_offline_token_${cleanUsername}`, data.token);
+        }
         localStorage.setItem(`pos_offline_user_${cleanUsername}`, JSON.stringify(data.user));
-        localStorage.setItem(`pos_offline_pass_${cleanUsername}`, password);
+        localStorage.removeItem(`pos_offline_pass_${cleanUsername}`);
+        try {
+          const offlineCredential = await createOfflineCredential(password);
+          localStorage.setItem(`pos_offline_credential_${cleanUsername}`, JSON.stringify(offlineCredential));
+        } catch (credentialError) {
+          // Online login still succeeds, but never persist a plaintext password
+          // as a fallback when Web Crypto is unavailable.
+          localStorage.removeItem(`pos_offline_credential_${cleanUsername}`);
+          console.warn('Offline logincache niet beschikbaar:', credentialError.message);
+        }
         if (Array.isArray(data.stores)) localStorage.setItem('pos_login_stores', JSON.stringify(data.stores));
         localStorage.removeItem('selectedStore');
         localStorage.removeItem('pos_selected_store');

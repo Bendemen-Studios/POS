@@ -1,5 +1,6 @@
 import WooCommerceRestApi from "@woocommerce/woocommerce-rest-api";
 import { updateCustomerPoints } from "../../../lib/customerPoints";
+import { requireSession, requireStoreAccess } from '../../../lib/session';
 
 const WooCommerce = WooCommerceRestApi.default || WooCommerceRestApi;
 const api = new WooCommerce({
@@ -11,6 +12,11 @@ const api = new WooCommerce({
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ message: 'Method not allowed' });
+
+  const session = await requireSession(req, res);
+  if (!session) return;
+
+  if (!requireStoreAccess(req, res, (req.body || {}).storeId || 1)) return;
 
   const { orderItems = [], paymentMethod, storeId, cashierId, customerId, totals = {} } = req.body || {};
 
@@ -28,15 +34,23 @@ export default async function handler(req, res) {
       set_paid: true,
       status: 'completed',
       customer_id: Number(customerId) || 0,
-      line_items: orderItems.map(item => {
+      line_items: orderItems.filter(item => item.product_id || (Number(item.id) > 0 && !String(item.id).startsWith('custom_'))).map(item => {
         const quantity = Number(item.quantity) || 1;
         const price = Number.parseFloat(item.price) || 0;
-        const lineItem = { quantity, price: String(price), subtotal: String(price * quantity), total: String(price * quantity) };
-        if (!item.product_id || String(item.id).startsWith('custom_')) lineItem.name = item.name;
-        else { lineItem.product_id = item.product_id || item.id; lineItem.variation_id = item.variation_id || 0; }
+        const productId = Number(item.product_id || item.id);
+        const lineItem = { product_id: productId, quantity, subtotal: (price * quantity).toFixed(2), total: (price * quantity).toFixed(2) };
+        if (item.variation_id && Number(item.variation_id) > 0) lineItem.variation_id = Number(item.variation_id);
         return lineItem;
       }),
-      fee_lines: feeLines,
+      fee_lines: [
+        ...feeLines,
+        ...orderItems.filter(item => !item.product_id && (!Number.isInteger(Number(item.id)) || Number(item.id) <= 0 || String(item.id).startsWith('custom_'))).map(item => ({
+          name: item.name || 'Custom Artikel',
+          total: (Number.parseFloat(item.price || 0) * (Number(item.quantity) || 1)).toFixed(2),
+          tax_class: '',
+          tax_status: 'none'
+        }))
+      ],
       meta_data: [
         { key: '_pos_store_id', value: storeId || 1 },
         { key: '_pos_cashier_id', value: cashierId || 1 },

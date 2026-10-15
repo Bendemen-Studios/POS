@@ -1,4 +1,5 @@
 import WooCommerceRestApi from '@woocommerce/woocommerce-rest-api';
+import { requireSession } from '../../../lib/session';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const SERVER_CACHE_TTL = 5 * 60 * 1000;
@@ -17,6 +18,9 @@ export default async function handler(req, res) {
     res.setHeader('Allow', ['GET']);
     return res.status(405).json({ success: false, error: `Method ${req.method} Not Allowed` });
   }
+
+  const session = await requireSession(req, res);
+  if (!session) return;
 
   const cache = getCache();
   const forceRefresh = req.query?.refresh === '1' || req.query?.preload === '1';

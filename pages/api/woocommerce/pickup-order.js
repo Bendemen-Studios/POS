@@ -1,4 +1,6 @@
 import WooCommerceRestApi from '@woocommerce/woocommerce-rest-api';
+import { requireSession } from '../../../lib/session';
+import db from '../../../lib/db';
 
 function getWooCommerceApi() {
   const url = process.env.WOO_SITE_URL || process.env.WOOCOMMERCE_URL || 'https://www.bendemen.com';
@@ -61,15 +63,23 @@ async function getOrdersForStatus(api, status) {
 
   if (totalPages === 1) return firstOrders;
 
-  const responses = await Promise.all(
-    Array.from({ length: totalPages - 1 }, (_, index) => api.get('orders', {
+  const responses = [];
+  // Bound concurrent requests to avoid flooding WooCommerce when the order
+  // history spans many pages.
+  for (let startPage = 2; startPage <= totalPages; startPage += 5) {
+    const pageBatch = Array.from(
+      { length: Math.min(5, totalPages - startPage + 1) },
+      (_, index) => startPage + index
+    );
+    const batchResponses = await Promise.all(pageBatch.map(page => api.get('orders', {
       per_page: perPage,
-      page: index + 2,
+      page,
       status,
       orderby: 'date',
       order: 'desc',
-    }))
-  );
+    })));
+    responses.push(...batchResponses);
+  }
 
   return firstOrders.concat(
     ...responses.map((response) => Array.isArray(response.data) ? response.data : [])
@@ -78,7 +88,34 @@ async function getOrdersForStatus(api, status) {
 
 export default async function handler(req, res) {
   const { method } = req;
+  const session = await requireSession(req, res);
+  if (!session) return;
   const api = getWooCommerceApi();
+  const role = String(session.role || '').toLowerCase();
+  const isAdmin = ['admin', 'super_admin', 'administrator'].includes(role) ||
+    String(session.username || '').toLowerCase() === 'bendemen';
+  let assignedStoreIds = [];
+  let assignedPickupIds = [];
+
+  if (!isAdmin) {
+    assignedStoreIds = String(session.store_id || '').split(',').map(id => id.trim()).filter(Boolean);
+    if (!assignedStoreIds.length) {
+      return res.status(403).json({ success: false, error: 'Je account is niet gekoppeld aan een filiaal.' });
+    }
+    const placeholders = assignedStoreIds.map(() => '?').join(',');
+    const [assignedStores] = await db.query(
+      `SELECT id, pickup_id FROM stores WHERE CAST(id AS CHAR) IN (${placeholders})`,
+      assignedStoreIds
+    );
+    assignedStoreIds = Array.isArray(assignedStores) ? assignedStores.map(store => String(store.id)) : [];
+    assignedPickupIds = Array.isArray(assignedStores)
+      ? assignedStores.map(store => String(store.pickup_id || '')).filter(Boolean)
+      : [];
+    const requestedPickupId = req.query?.pickup_id;
+    if (requestedPickupId && !assignedPickupIds.includes(String(requestedPickupId))) {
+      return res.status(403).json({ success: false, error: 'Dit afhaalpunt hoort niet bij jouw filiaal.' });
+    }
+  }
 
   if (!api) {
     return sendApiError(res, 500, 'WooCommerce API-sleutels ontbreken op de POS-server. Controleer WOO_CONSUMER_KEY/WOO_CONSUMER_SECRET (of WOOCOMMERCE_CK/WOOCOMMERCE_CS).');
@@ -101,8 +138,15 @@ export default async function handler(req, res) {
       const filteredOrders = Array.from(byId.values())
         .filter((order) => {
           const pickup = isPickupOrder(order);
-          if (pickup_id) return pickup || matchesPickupId(order, pickup_id);
-          return pickup;
+          if (!pickup) return false;
+          if (pickup_id) return matchesPickupId(order, pickup_id);
+          if (isAdmin) return true;
+
+          const storeMeta = Array.isArray(order.meta_data)
+            ? order.meta_data.find(meta => String(meta.key || '') === '_pos_store_id')
+            : null;
+          return assignedStoreIds.includes(String(storeMeta?.value || '')) ||
+            assignedPickupIds.some(id => matchesPickupId(order, id));
         })
         .sort((a, b) => new Date(b.date_created || 0).getTime() - new Date(a.date_created || 0).getTime());
 
@@ -128,7 +172,18 @@ export default async function handler(req, res) {
       const { order_id, status } = req.body || {};
       if (!order_id) return sendApiError(res, 400, 'Order ID is verplicht.');
 
-      const response = await api.put(`orders/${order_id}`, {
+      if (!isAdmin) {
+        const existingResponse = await api.get(`orders/${encodeURIComponent(String(order_id))}`);
+        const existingOrder = existingResponse.data;
+        const storeMeta = Array.isArray(existingOrder?.meta_data)
+          ? existingOrder.meta_data.find(meta => String(meta.key || '') === '_pos_store_id')
+          : null;
+        const allowed = assignedStoreIds.includes(String(storeMeta?.value || '')) ||
+          assignedPickupIds.some(id => matchesPickupId(existingOrder, id));
+        if (!allowed) return sendApiError(res, 403, 'Deze afhaalbestelling hoort niet bij jouw filiaal.');
+      }
+
+      const response = await api.put(`orders/${encodeURIComponent(String(order_id))}`, {
         status: status || 'completed',
       });
 

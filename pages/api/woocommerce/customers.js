@@ -1,5 +1,6 @@
 import WooCommerceRestApi from "@woocommerce/woocommerce-rest-api";
 import { extractCustomerPoints, getCustomersPoints } from "../../../lib/customerPoints";
+import { requireSession } from '../../../lib/session';
 
 const WooCommerce = WooCommerceRestApi.default || WooCommerceRestApi;
 
@@ -16,6 +17,9 @@ export default async function handler(req, res) {
     res.setHeader('Allow', ['GET']);
     return res.status(405).json({ success: false, error: `Method ${req.method} not allowed` });
   }
+
+  const session = await requireSession(req, res);
+  if (!session) return;
 
   try {
     const allCustomers = [];

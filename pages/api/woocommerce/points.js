@@ -1,10 +1,14 @@
 import { getCustomerPoints, calculateEarnedPoints } from "../../../lib/customerPoints";
+import { requireSession } from '../../../lib/session';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST' && req.method !== 'GET') {
     res.setHeader('Allow', ['GET', 'POST']);
     return res.status(405).json({ success: false, message: `Method ${req.method} not allowed` });
   }
+
+  const session = await requireSession(req, res);
+  if (!session) return;
 
   try {
     const action = req.method === 'POST' ? String(req.body?.action || '') : 'balance';
