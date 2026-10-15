@@ -269,6 +269,7 @@ export default function POSHome() {
       clientOrderId
     };
 
+    let preserveCartOnCheckoutError = false;
     try {
       // Give the direct checkout enough time to finish the WooCommerce call.
       // The backend itself allows up to 15s for WooCommerce, plus its
@@ -304,6 +305,8 @@ export default function POSHome() {
         : '';
 
       if (err?.isServerResponse) {
+        // Preserve items after an HTTP checkout error so the cashier can inspect/retry.
+        preserveCartOnCheckoutError = true;
         // Keep the exact checkout ID for a manual retry. The server may have
         // created the WooCommerce order before returning an error/timeout.
         try {
@@ -346,6 +349,7 @@ export default function POSHome() {
         });
       }
     } finally {
+      if (!preserveCartOnCheckoutError) {
       setCompletedOrderForReceipt({
         order: orderPayload,
         store: selectedStore,
@@ -402,6 +406,9 @@ export default function POSHome() {
             }));
           }
         })().catch(err => console.warn('[POST-PURCHASE SYNC] refresh:', err));
+      }
+      } else {
+        setLoading(false);
       }
     }
   };
