@@ -102,6 +102,10 @@ export default async function handler(req, res) {
     return res.status(500).json({ success: false, error: 'WooCommerce API sleutels zijn niet geconfigureerd in .env' });
   }
 
+  // Build this before claiming the order: the processing-retry branch also
+  // needs it to check whether WooCommerce already created the order.
+  const authHeader = 'Basic ' + Buffer.from(`${consumerKey}:${consumerSecret}`).toString('base64');
+
   try {
     const claim = await claimOrder(clientOrderId);
 
@@ -138,12 +142,14 @@ export default async function handler(req, res) {
     claimed = claim.claimed;
 
     const { orderItems, paymentMethod, storeId, cashierId, customerId, totals, cashDetails, created_at } = req.body;
-    const authHeader = 'Basic ' + Buffer.from(`${consumerKey}:${consumerSecret}`).toString('base64');
 
     // A client may retry after a timeout even though WooCommerce already created
     // the order. Always check WooCommerce before creating another order.
     const existingOrder = await findExistingWooOrder(url, authHeader, clientOrderId);
     if (existingOrder?.id) {
+      if (existingOrder.status !== 'completed') {
+        throw new Error(`WooCommerce-bestelling #${existingOrder.id} bestaat, maar heeft status '${existingOrder.status || 'onbekend'}'. De bestelling blijft in de wachtrij voor controle.`);
+      }
       await completeOrder(clientOrderId, existingOrder.id);
       return res.status(200).json({ success: true, idempotent: true, order: existingOrder });
     }
