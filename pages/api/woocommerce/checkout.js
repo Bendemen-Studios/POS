@@ -1,7 +1,7 @@
 import { createHash } from 'crypto';
 import { claimOrder, completeOrder, releaseOrder } from '../../../lib/orderIdempotency';
 import { redeemCustomerPoints } from '../../../lib/customerPoints';
-import { requireSession } from '../../../lib/session';
+import { requireSession, requireStoreAccess } from '../../../lib/session';
 
 function getClientOrderId(req) {
   const headerId = req.headers['idempotency-key'];
@@ -96,6 +96,8 @@ export default async function handler(req, res) {
 
   const session = await requireSession(req, res);
   if (!session) return;
+
+  if (!requireStoreAccess(req, res, (req.body || {}).storeId || 1)) return;
 
   const clientOrderId = getClientOrderId(req);
   let claimed = false;
