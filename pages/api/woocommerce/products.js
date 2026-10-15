@@ -23,7 +23,7 @@ export default async function handler(req, res) {
   if (!session) return;
 
   const cache = getCache();
-  const forceRefresh = req.query?.refresh === '1' || req.query?.preload === '1';
+  const forceRefresh = req.query?.refresh === '1' || req.query?.preload === '1' || req.query?._sync != null;
   const cacheAge = Date.now() - cache.updatedAt;
 
   // Normal POS requests get the warmed VPS cache immediately. Explicit
