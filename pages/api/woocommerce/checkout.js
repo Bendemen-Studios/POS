@@ -25,8 +25,7 @@ async function fetchWithTimeout(url, options, timeoutMs = 15000) {
 
 async function findExistingWooOrder(url, authHeader, clientOrderId) {
   const targetId = String(clientOrderId).slice(0, 128);
-  try {
-    // Inspect recent orders and their actual meta_data instead of relying on
+  // Inspect recent orders and their actual meta_data instead of relying on
     // meta_key/meta_value query parameters supported differently by servers.
     const query = new URLSearchParams({ per_page: '100', orderby: 'date', order: 'desc' });
     const response = await fetchWithTimeout(
