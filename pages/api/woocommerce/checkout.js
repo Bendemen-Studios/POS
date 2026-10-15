@@ -118,8 +118,8 @@ export default async function handler(req, res) {
   if (!Array.isArray(orderItems) || orderItems.length === 0) {
     return res.status(400).json({ success: false, error: 'De bestelling bevat geen artikelen.' });
   }
-  if (paymentMethod && !['cash', 'manual_pin', 'sumup'].includes(paymentMethod)) {
-    return res.status(400).json({ success: false, error: 'Ongeldige betaalmethode.' });
+  if (!['cash', 'manual_pin', 'sumup'].includes(paymentMethod)) {
+    return res.status(400).json({ success: false, error: 'Kies een geldige betaalmethode voordat de bestelling wordt verwerkt.' });
   }
 
   let subtotal = 0;
