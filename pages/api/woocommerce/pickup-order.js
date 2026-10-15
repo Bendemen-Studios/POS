@@ -1,4 +1,5 @@
 import WooCommerceRestApi from '@woocommerce/woocommerce-rest-api';
+import { requireSession } from '../../../lib/session';
 
 function getWooCommerceApi() {
   const url = process.env.WOO_SITE_URL || process.env.WOOCOMMERCE_URL || 'https://www.bendemen.com';
@@ -78,6 +79,8 @@ async function getOrdersForStatus(api, status) {
 
 export default async function handler(req, res) {
   const { method } = req;
+  const session = await requireSession(req, res);
+  if (!session) return;
   const api = getWooCommerceApi();
 
   if (!api) {
