@@ -18,31 +18,40 @@ export default async function handler(req, res) {
 
   if (!requireStoreAccess(req, res, (req.body || {}).storeId || 1)) return;
 
-  const { orderItems, paymentMethod, storeId, cashierId, customerId, totals, cashDetails } = req.body;
+  const { orderItems = [], paymentMethod, storeId, cashierId, customerId, totals = {}, cashDetails } = req.body || {};
+  if (!Array.isArray(orderItems) || orderItems.length === 0) {
+    return res.status(400).json({ success: false, error: 'De bestelling bevat geen artikelen.' });
+  }
 
   try {
-    const lineItems = orderItems.map((item) => {
-      // Custom artikel afhandeling
-      if (!item.product_id || item.product_id === 0 || String(item.id).startsWith('custom_')) {
-        return {
+    const lineItems = [];
+    const customFeeLines = [];
+    for (const item of orderItems) {
+      const price = Number(item?.price);
+      const quantity = item?.quantity == null ? 1 : Number(item.quantity);
+      if (!item || !Number.isFinite(price) || price < 0 || !Number.isFinite(quantity) || quantity <= 0) {
+        return res.status(400).json({ success: false, error: 'Een artikel heeft een ongeldige prijs of hoeveelheid.' });
+      }
+      const productId = Number(item.product_id || item.id);
+      const isCustomItem = String(item.id || '').startsWith('custom_') || !Number.isInteger(productId) || productId <= 0;
+      if (isCustomItem) {
+        customFeeLines.push({
           name: item.name || 'Custom Artikel',
-          total: parseFloat(item.price).toFixed(2),
-          quantity: item.quantity,
-        };
+          total: (price * quantity).toFixed(2),
+          tax_class: '',
+          tax_status: 'none'
+        });
+        continue;
       }
-
       const lineItemObj = {
-        product_id: item.product_id,
-        quantity: item.quantity,
-        total: (parseFloat(item.price) * item.quantity).toFixed(2)
+        product_id: productId,
+        quantity,
+        subtotal: (price * quantity).toFixed(2),
+        total: (price * quantity).toFixed(2)
       };
-
-      if (item.variation_id && item.variation_id !== 0) {
-        lineItemObj.variation_id = item.variation_id;
-      }
-
-      return lineItemObj;
-    });
+      if (item.variation_id && Number(item.variation_id) > 0) lineItemObj.variation_id = Number(item.variation_id);
+      lineItems.push(lineItemObj);
+    }
 
     const paymentTitle = paymentMethod === 'cash' 
       ? 'Contante Betaling (POS)' 
@@ -55,14 +64,21 @@ export default async function handler(req, res) {
       status: 'completed',
       customer_id: customerId ? parseInt(customerId) : 0,
       line_items: lineItems,
-      fee_lines: totals?.discountAmount > 0 ? [
-        {
+      fee_lines: [
+        ...customFeeLines,
+        ...(Number(totals?.discountAmount) > 0 ? [{
           name: 'Handmatige Korting',
-          total: `-${parseFloat(totals.discountAmount).toFixed(2)}`,
+          total: `-${Number(totals.discountAmount).toFixed(2)}`,
           tax_class: '',
           tax_status: 'none'
-        }
-      ] : [],
+        }] : []),
+        ...(Number(totals?.pointsDiscount) > 0 ? [{
+          name: 'Punten Ingewisseld',
+          total: `-${Number(totals.pointsDiscount).toFixed(2)}`,
+          tax_class: '',
+          tax_status: 'none'
+        }] : [])
+      ],
       meta_data: [
         { key: '_pos_store_id', value: String(storeId || 1) },
         { key: '_pos_cashier_id', value: String(cashierId || 1) },
