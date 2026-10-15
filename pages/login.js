@@ -50,7 +50,17 @@ export default function LoginPage() {
       window.location.replace('/select-store');
       return;
     }
+
     setIsChecking(false);
+
+    // Warm the Next.js store-selection route and establish a lightweight DB
+    // connection before the user submits credentials. Both are best-effort.
+    router.prefetch('/select-store').catch(() => {});
+    fetch('/api/auth/warmup', {
+      method: 'POST',
+      cache: 'no-store',
+      keepalive: true,
+    }).catch(() => {});
   }, [router]);
 
   const getCachedLogin = async (cleanUsername, enteredPassword) => {
