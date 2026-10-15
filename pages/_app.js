@@ -240,28 +240,38 @@ function installFastServerWatcher() {
   window.__bendemenFastServerWatcher = true;
   let stopped = false;
   let timer = null;
-  let lastOnline = true;
+  // Start offline until the health endpoint confirms that the POS API and
+  // database are actually available. navigator.onLine / HTTP 200 alone are
+  // not proof: the health endpoint can return 200 with online:false.
+  let lastOnline = false;
   let failures = 0;
 
   const check = async () => {
     if (stopped) return;
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 1200);
+    const timeout = setTimeout(() => controller.abort(), 3000);
     try {
       const response = await fetch('/api/admin/store?_pos_health=' + Date.now(), {
         method: 'GET', cache: 'no-store', credentials: 'same-origin', signal: controller.signal,
-        headers: { 'Cache-Control': 'no-cache', 'X-POS-Health-Check': '1' },
+        headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate', 'Pragma': 'no-cache', 'X-POS-Health-Check': '1' },
       });
+      let health = null;
       if (response.ok) {
+        try { health = await response.json(); } catch (_) {}
+      }
+      const online = response.ok && health?.online === true && health?.database !== false;
+      if (online) {
         failures = 0;
         lastOnline = true;
       } else {
         failures += 1;
-        if (failures >= 1) lastOnline = false;
+        // This is the initial/global status watcher: fail closed immediately
+        // rather than displaying online while the VPS or database is down.
+        lastOnline = false;
       }
     } catch {
       failures += 1;
-      if (failures >= 1) lastOnline = false;
+      lastOnline = false;
     } finally {
       clearTimeout(timeout);
       window.dispatchEvent(new CustomEvent('pos:server-status', { detail: { online: lastOnline } }));
@@ -286,7 +296,7 @@ function installFastServerWatcher() {
 export default function App({ Component, pageProps }) {
   const router = useRouter();
   const [offlineSyncMessage, setOfflineSyncMessage] = useState(null);
-  const [serverOnline, setServerOnline] = useState(true);
+  const [serverOnline, setServerOnline] = useState(false);
   const [adminOfflinePopupDismissed, setAdminOfflinePopupDismissed] = useState(true);
   const [productSyncVersion, setProductSyncVersion] = useState(0);
 
