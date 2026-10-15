@@ -1,8 +1,12 @@
 import db from '../../../lib/db';
 import bcrypt from 'bcryptjs';
+import { requireSession } from '../../../lib/session';
 
 export default async function handler(req, res) {
   const { method } = req;
+
+  const session = await requireSession(req, res, { roles: ['admin', 'super_admin', 'administrator'] });
+  if (!session) return;
 
   if (method === 'GET') {
     try {
