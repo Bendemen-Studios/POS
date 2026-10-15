@@ -174,6 +174,36 @@ export default function POSHome() {
   useEffect(() => { const refreshLocalState = () => { setPendingOfflineCount(readLocalArray('pos_offline_orders').length); const cached = readLocalArray('pos_cached_products'); if (cached.length) setProducts(cached); const stored = localStorage.getItem('pos_selected_store') || localStorage.getItem('selectedStore'); if (stored) { try { setSelectedStore(JSON.parse(stored)); } catch (_) {} } }; window.addEventListener('storage', refreshLocalState); window.addEventListener('pos:ajax-refresh', refreshLocalState); window.addEventListener('pos:inventory-synced', refreshLocalState); return () => { window.removeEventListener('storage', refreshLocalState); window.removeEventListener('pos:ajax-refresh', refreshLocalState); window.removeEventListener('pos:inventory-synced', refreshLocalState); }; }, []);
   const fetchStores = async () => { try { const res = await fetchWithServerCheck('/api/admin/store'); const data = await res.json(); if (!data.success) return; const parsedStores = (Array.isArray(data.stores) ? data.stores : data.store ? [data.store] : []).map(s => ({ ...s, payment_methods: parsePaymentMethods(s.payment_methods) })); setAllStores(parsedStores); localStorage.setItem('admin_cached_stores', JSON.stringify(parsedStores)); const storeStr = localStorage.getItem('selectedStore') || localStorage.getItem('pos_selected_store'); if (storeStr) { try { const savedStoreObj = JSON.parse(storeStr); const matchedCurrent = parsedStores.find(st => String(st.id || st.store_id) === String(savedStoreObj.id || savedStoreObj.store_id)); if (matchedCurrent) handleSelectStore(matchedCurrent, false); else if (parsedStores.length) handleSelectStore(parsedStores[0], false); } catch (_) { if (parsedStores.length) handleSelectStore(parsedStores[0], false); } } else if (parsedStores.length) handleSelectStore(parsedStores[0], false); } catch (err) { console.error('Fout bij ophalen winkels:', err); } };
   const handleSyncData = async () => { if (isSyncing) return; setIsSyncing(true); try { await Promise.allSettled([fetchProducts(), fetchCustomers(), fetchUsersAsCustomers(), fetchPickupOrders(), fetchStores()]); await triggerOfflineSync(false); } catch (err) { console.warn('[MANUAL SYNC] mislukt:', err); } finally { setIsSyncing(false); } };
+  const fetchQuickStock = async (orderItems = []) => {
+    const ids = [...new Set(orderItems.map(item => Number(item.product_id || item.id)).filter(id => Number.isInteger(id) && id > 0 && !String(id).startsWith('custom_')))].slice(0, 40);
+    if (!ids.length) return;
+    try {
+      const res = await fetchWithServerCheck(`/api/woocommerce/stock?ids=${ids.join(',')}`, {}, 9000);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success || !Array.isArray(data.products)) return;
+      setProducts(previous => {
+        const updated = previous.map(product => {
+          const fresh = data.products.find(item => Number(item.id) === Number(product.id));
+          if (!fresh) return product;
+          const freshVars = Array.isArray(fresh.variations_data) ? fresh.variations_data : [];
+          const variationsData = (product.variations_data || []).map(variation => {
+            const v = freshVars.find(item => Number(item.id) === Number(variation.id || variation.variation_id));
+            return v ? { ...variation, stock_quantity: v.stock_quantity, in_stock: v.in_stock } : variation;
+          });
+          return { ...product, stock_quantity: fresh.stock_quantity, in_stock: fresh.in_stock, variations_data: variationsData };
+        });
+        try {
+          localStorage.setItem('pos_cached_products', JSON.stringify(updated));
+          localStorage.setItem('admin_products', JSON.stringify(updated));
+          localStorage.setItem('pos_cached_products_updated_at', String(Date.now()));
+        } catch (_) {}
+        return updated;
+      });
+      window.dispatchEvent(new CustomEvent('pos:inventory-synced', { detail: { quick: true, products: data.products } }));
+    } catch (err) {
+      console.warn('[QUICK STOCK SYNC] voorraad blijft uit cache tot volgende sync:', err);
+    }
+  };
   const fetchProducts = async () => { const cached = readLocalArray('pos_cached_products'); if (cached.length) setProducts(prev => prev.length ? prev : cached); try { const res = await fetchWithServerCheck(`/api/woocommerce/products?_sync=${Date.now()}`, {}, 30000); const data = await res.json().catch(() => ({})); if (res.ok && data.success && Array.isArray(data.products)) { setProducts(data.products); localStorage.setItem('pos_cached_products', JSON.stringify(data.products)); localStorage.setItem('admin_products', JSON.stringify(data.products)); localStorage.setItem('pos_cached_products_updated_at', String(Date.now())); window.dispatchEvent(new CustomEvent('pos:inventory-synced', { detail: { products: data.products } })); } } catch (err) { console.warn('[PRODUCTS] Server niet bereikbaar; lokale productcache behouden.', err); } };
   const fetchCustomers = async () => { try { const res = await fetchWithServerCheck('/api/woocommerce/customers'); const data = await res.json(); if (data.success && data.customers) { setCustomers(data.customers); localStorage.setItem('pos_cached_customers', JSON.stringify(data.customers)); } } catch (err) { console.error('Fout bij ophalen klanten:', err); } };
   const fetchUsersAsCustomers = async () => { try { const res = await fetchWithServerCheck('/api/admin/users'); const data = await res.json(); if (data.success && data.users) { const staffAsCustomers = data.users.map(u => ({ id: `user_${u.id}`, username: u.username || '', user_login: u.username || '', first_name: u.username || '', last_name: u.role ? `(${u.role})` : '(Gebruiker)', email: u.email || `${u.username}@bendemen.local` })); setCustomers(prev => { const existingIds = new Set(prev.map(c => String(c.id))); const merged = [...prev, ...staffAsCustomers.filter(s => !existingIds.has(String(s.id)))]; localStorage.setItem('pos_cached_customers', JSON.stringify(merged)); return merged; }); } } catch (err) { console.error('Fout bij ophalen gebruikers:', err); } };
@@ -381,31 +411,16 @@ export default function POSHome() {
         triggerOfflineSync(false).catch(err =>
           console.warn('[POST-PURCHASE SYNC] offline queue:', err)
         );
-        // Refresh the UI immediately, then re-fetch stock after WooCommerce has
-        // had time to finish its stock reduction hooks. A single immediate
-        // request can race those hooks and leave the POS showing old quantities.
-        (async () => {
-          await Promise.allSettled([
-            fetchProducts(),
-            fetchCustomers(),
-            fetchUsersAsCustomers(),
-            fetchPickupOrders(),
-            fetchStores()
-          ]);
+        // Fast, targeted stock sync only for products sold in this checkout.
+        // The full catalog sync remains on its existing background schedule.
+        fetchQuickStock(orderPayload.orderItems).finally(() => {
           window.dispatchEvent(new CustomEvent('pos:ajax-refresh', {
-            detail: { postPurchaseSync: true }
+            detail: { postPurchaseSync: true, quickStockSync: true }
           }));
-
-          const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
-          for (const delay of [1800, 2500]) {
-            await wait(delay);
-            if (typeof navigator !== 'undefined' && navigator.onLine === false) break;
-            await fetchProducts();
-            window.dispatchEvent(new CustomEvent('pos:ajax-refresh', {
-              detail: { postPurchaseSync: true, stockRetry: true }
-            }));
-          }
-        })().catch(err => console.warn('[POST-PURCHASE SYNC] refresh:', err));
+        });
+        // Keep non-stock refreshes detached from checkout completion.
+        Promise.allSettled([fetchCustomers(), fetchUsersAsCustomers(), fetchPickupOrders(), fetchStores()])
+          .catch(err => console.warn('[POST-PURCHASE SYNC] secondary refresh:', err));
       }
       } else {
         setLoading(false);
