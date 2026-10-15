@@ -1,4 +1,5 @@
 import db from '../../../lib/db';
+import { requireSession } from '../../../lib/session';
 
 const PROTECTED_STORE_ID = 'store_ons_winkeltje';
 const PROTECTED_STORE_NAME = 'ons winkeltje';
@@ -37,6 +38,9 @@ export default async function handler(req, res) {
       });
     }
   }
+
+  const session = await requireSession(req, res, method === 'GET' ? {} : { roles: ['admin', 'super_admin', 'administrator'] });
+  if (!session) return;
 
   if (method === 'GET') {
     try {
