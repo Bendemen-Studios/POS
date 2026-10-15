@@ -1,9 +1,9 @@
 const CACHE_NAME = 'bendemen-pos-v26';
 const OFFLINE_URL = '/login';
 const OFFLINE_FALLBACK_URL = '/offline.html';
-const NAVIGATION_TIMEOUT = 1200;
-const API_TIMEOUT = 15000;
-const PRODUCT_API_TIMEOUT = 30000;
+const NAVIGATION_TIMEOUT = 500;
+const API_TIMEOUT = 5000;
+const PRODUCT_API_TIMEOUT = 10000;
 
 const APP_SHELL = ['/','/login','/select-store','/pickup','/admin','/manifest.json','/favicon.ico',OFFLINE_FALLBACK_URL];
 const CACHEABLE_API_PREFIXES = ['/api/auth/store-selection','/api/admin/users','/api/woocommerce/products','/api/woocommerce/customers','/api/woocommerce/orders','/api/woocommerce/pickup-order'];
@@ -117,8 +117,35 @@ async function warmShell(cache) {
   await Promise.allSettled(APP_SHELL.map(async url => { try { const response = await timeoutFetch(url, 3000); if (response.ok) { await cache.put(url, response.clone()); if (url === '/') await cacheDocumentAssets(cache, response); } } catch (_) {} }));
 }
 
-self.addEventListener('install', event => { event.waitUntil(caches.open(CACHE_NAME).then(cache => warmShell(cache)).then(() => self.skipWaiting())); });
-self.addEventListener('activate', event => { event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key)))).then(() => self.clients.claim())); });
+self.addEventListener('install', event => {
+  // Install only the critical startup shell before taking control. The old
+  // installer waited for every admin/pickup page and their assets, which made
+  // a freshly updated PWA appear stuck on the splash screen when the VPS was
+  // unavailable. The remaining shell is warmed after activation.
+  event.waitUntil((async () => {
+    const cache = await caches.open(CACHE_NAME);
+    const criticalShell = ['/', '/login', OFFLINE_FALLBACK_URL, '/manifest.json', '/favicon.ico'];
+    await Promise.allSettled(criticalShell.map(async url => {
+      try {
+        const response = await timeoutFetch(url, 1200);
+        if (response.ok) {
+          await cache.put(url, response.clone());
+          if (url === '/') await cacheDocumentAssets(cache, response);
+        }
+      } catch (_) {}
+    }));
+    await self.skipWaiting();
+  })());
+});
+self.addEventListener('activate', event => {
+  event.waitUntil((async () => {
+    const keys = await caches.keys();
+    await Promise.all(keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key)));
+    await self.clients.claim();
+    const cache = await caches.open(CACHE_NAME);
+    warmShell(cache).catch(() => {});
+  })());
+});
 self.addEventListener('message', event => { if (event.data?.type === 'SKIP_WAITING') self.skipWaiting(); });
 
 self.addEventListener('fetch', event => {
