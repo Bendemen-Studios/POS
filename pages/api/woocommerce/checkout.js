@@ -40,9 +40,13 @@ async function findExistingWooOrder(url, authHeader, clientOrderId) {
       },
       7000
     );
-    if (!response.ok) return null;
-    const orders = await response.json().catch(() => []);
-    if (!Array.isArray(orders)) return null;
+    if (!response.ok) {
+      throw new Error(`WooCommerce kon bestaande bestellingen niet controleren (HTTP ${response.status}).`);
+    }
+    const orders = await response.json();
+    if (!Array.isArray(orders)) {
+      throw new Error('WooCommerce gaf een ongeldige lijst met bestaande bestellingen terug.');
+    }
     return orders.find(order =>
       Array.isArray(order?.meta_data) &&
       order.meta_data.some(meta =>
@@ -50,9 +54,6 @@ async function findExistingWooOrder(url, authHeader, clientOrderId) {
         String(meta?.value || '') === targetId
       )
     ) || null;
-  } catch (_) {
-    return null;
-  }
 }
 
 async function verifyWooOrder(url, authHeader, wooOrderId) {
