@@ -161,6 +161,7 @@ export default function AdminDashboard() {
       try {
         await fetchProductsSilently();
         if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('pos:inventory-synced', { detail: { products: data.products || [] } }));
           window.dispatchEvent(new CustomEvent('pos:ajax-refresh'));
         }
       } catch (_) {}
@@ -249,6 +250,10 @@ export default function AdminDashboard() {
       if (data.success) {
         setProducts(data.products || []);
         localStorage.setItem('admin_products', JSON.stringify(data.products || []));
+        localStorage.setItem('pos_cached_products', JSON.stringify(data.products || []));
+        localStorage.setItem('pos_cached_products_updated_at', String(Date.now()));
+        window.dispatchEvent(new CustomEvent('pos:inventory-synced', { detail: { products: data.products || [] } }));
+        window.dispatchEvent(new CustomEvent('pos:products-updated'));
         alert('Producten succesvol gesynchroniseerd met WooCommerce!');
       } else {
         alert('Fout bij synchroniseren van producten.');
