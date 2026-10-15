@@ -78,22 +78,10 @@ export default async function handler(req, res) {
 
     const isMainOwner = user.username?.toLowerCase() === 'bendemen' || user.email?.toLowerCase() === 'bendemenbv@gmail.com';
     const effectiveRole = isMainOwner ? 'super_admin' : (user.role || 'cashier');
-    let stores = [];
-    const storesQueryStartedAt = Date.now();
-
-    if (isMainOwner || ['admin', 'super_admin', 'administrator'].includes(String(effectiveRole).toLowerCase())) {
-      const [storeRows] = await db.query('SELECT id, store_name, address, pickup_id, terminal_id, payment_methods FROM stores ORDER BY store_name ASC');
-      stores = Array.isArray(storeRows) ? storeRows : [];
-    } else if (user.store_id != null && String(user.store_id).trim()) {
-      const assignedIds = String(user.store_id).split(',').map(id => id.trim()).filter(Boolean);
-      if (assignedIds.length) {
-        const placeholders = assignedIds.map(() => '?').join(',');
-        const [storeRows] = await db.query(`SELECT id, store_name, address, pickup_id, terminal_id, payment_methods FROM stores WHERE id IN (${placeholders}) ORDER BY store_name ASC`, assignedIds);
-        stores = Array.isArray(storeRows) ? storeRows : [];
-      }
-    }
-
-    timings.storesQueryMs = Date.now() - storesQueryStartedAt;
+    // Store lookup is intentionally deferred to the store-selection endpoint.
+    // This keeps authentication independent from store-list queries; the client
+    // displays its per-user filtered cache immediately and refreshes it in the background.
+    timings.storesQueryMs = 0;
     const totalMs = Date.now() - startedAt;
     res.setHeader('Server-Timing', `user-query;dur=${timings.userQueryMs}, password-check;dur=${timings.passwordCheckMs}, stores-query;dur=${timings.storesQueryMs}, total;dur=${totalMs}`);
     console.info('[LOGIN PERF]', JSON.stringify({ ...timings, totalMs }));
