@@ -1,6 +1,6 @@
 import WooCommerceRestApi from "@woocommerce/woocommerce-rest-api";
 import { updateCustomerPoints } from "../../../lib/customerPoints";
-import { requireSession } from '../../../lib/session';
+import { requireSession, requireStoreAccess } from '../../../lib/session';
 
 const WooCommerce = WooCommerceRestApi.default || WooCommerceRestApi;
 const api = new WooCommerce({
@@ -15,6 +15,8 @@ export default async function handler(req, res) {
 
   const session = await requireSession(req, res);
   if (!session) return;
+
+  if (!requireStoreAccess(req, res, (req.body || {}).storeId || 1)) return;
 
   const { orderItems = [], paymentMethod, storeId, cashierId, customerId, totals = {} } = req.body || {};
 
