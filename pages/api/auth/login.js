@@ -16,7 +16,7 @@ export default async function handler(req, res) {
   }
 
   const startedAt = Date.now();
-  const timings = { userQueryMs: 0, passwordCheckMs: 0, storesQueryMs: 0 };
+  const timings = { userQueryMs: 0, passwordCheckMs: 0 };
 
   try {
     // Fast path: query the existing schema directly. Full schema migrations are
@@ -81,9 +81,8 @@ export default async function handler(req, res) {
     // Store lookup is intentionally deferred to the store-selection endpoint.
     // This keeps authentication independent from store-list queries; the client
     // displays its per-user filtered cache immediately and refreshes it in the background.
-    timings.storesQueryMs = 0;
     const totalMs = Date.now() - startedAt;
-    res.setHeader('Server-Timing', `user-query;dur=${timings.userQueryMs}, password-check;dur=${timings.passwordCheckMs}, stores-query;dur=${timings.storesQueryMs}, total;dur=${totalMs}`);
+    res.setHeader('Server-Timing', `user-query;dur=${timings.userQueryMs}, password-check;dur=${timings.passwordCheckMs}, total;dur=${totalMs}`);
     console.info('[LOGIN PERF]', JSON.stringify({ ...timings, totalMs }));
 
     return res.status(200).json({
@@ -101,7 +100,7 @@ export default async function handler(req, res) {
     });
   } catch (error) {
     const totalMs = Date.now() - startedAt;
-    res.setHeader('Server-Timing', `user-query;dur=${timings.userQueryMs}, password-check;dur=${timings.passwordCheckMs}, stores-query;dur=${timings.storesQueryMs}, total;dur=${totalMs}`);
+    res.setHeader('Server-Timing', `user-query;dur=${timings.userQueryMs}, password-check;dur=${timings.passwordCheckMs}, total;dur=${totalMs}`);
     console.info('[LOGIN PERF]', JSON.stringify({ ...timings, totalMs, failed: true }));
     console.error('[LOGIN API EXCEPTION]:', error);
     return res.status(500).json({ success: false, message: 'Interne serverfout bij inloggen.' });
