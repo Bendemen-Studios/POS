@@ -20,12 +20,18 @@ export default async function handler(req, res) {
     return res.status(400).json({ success: false, message: 'Gebruikers ID ontbreekt.' });
   }
 
+  const startedAt = Date.now();
+  let userQueryMs = 0;
+  let storesQueryMs = 0;
+
   try {
     // Always determine the allowed stores from the authenticated user's DB record.
+    const userQueryStartedAt = Date.now();
     const [userRows] = await db.query(
       'SELECT id, username, role, store_id FROM users WHERE id = ? LIMIT 1',
       [userId]
     );
+    userQueryMs = Date.now() - userQueryStartedAt;
 
     if (!Array.isArray(userRows) || userRows.length === 0) {
       return res.status(404).json({ success: false, message: 'Gebruiker niet gevonden.' });
@@ -37,6 +43,7 @@ export default async function handler(req, res) {
       user.username?.toLowerCase() === 'bendemen';
 
     let stores = [];
+    const storesQueryStartedAt = Date.now();
 
     if (isAdmin) {
       // Administrators may select any active store.
@@ -69,8 +76,15 @@ export default async function handler(req, res) {
       }
     }
 
+    storesQueryMs = Date.now() - storesQueryStartedAt;
+    const totalMs = Date.now() - startedAt;
+    res.setHeader('Server-Timing', `user-query;dur=${userQueryMs}, stores-query;dur=${storesQueryMs}, total;dur=${totalMs}`);
+    console.info('[STORE SELECTION PERF]', JSON.stringify({ userQueryMs, storesQueryMs, totalMs }));
     return res.status(200).json({ success: true, stores });
   } catch (error) {
+    const totalMs = Date.now() - startedAt;
+    res.setHeader('Server-Timing', `user-query;dur=${userQueryMs}, stores-query;dur=${storesQueryMs}, total;dur=${totalMs}`);
+    console.info('[STORE SELECTION PERF]', JSON.stringify({ userQueryMs, storesQueryMs, totalMs, failed: true }));
     console.error('[STORE SELECTION API ERROR]:', error);
     return res.status(500).json({ success: false, message: 'Fout bij ophalen van filialen uit de database.' });
   }
