@@ -16,19 +16,23 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Wait for first-start schema creation/migrations before querying users.
-    await ensureDatabaseReady();
-
-    // Use username as the canonical login identifier. This deliberately does
-    // not reference optional legacy columns such as `email`, so an old POS
-    // database can still authenticate while its schema is being migrated.
-    const [rows] = await db.query(
+    // Fast path: query the existing schema directly. Full schema migrations are
+    // only needed for a fresh/legacy database, not for every cold login.
+    const queryUser = () => db.query(
       'SELECT id, username, email, password, password_hash, role, store_id, name FROM users WHERE username = ? LIMIT 1',
       [cleanUsername]
     );
 
+    let rows;
+    try {
+      [rows] = await queryUser();
+    } catch (error) {
+      if (!['ER_NO_SUCH_TABLE', 'ER_BAD_FIELD_ERROR'].includes(error?.code)) throw error;
+      await ensureDatabaseReady();
+      [rows] = await queryUser();
+    }
+
     if (!Array.isArray(rows) || rows.length === 0) {
-      console.log(`[LOGIN FAILED] Gebruiker niet gevonden in DB: "${cleanUsername}"`);
       return res.status(401).json({ success: false, message: 'Ongeldige inloggegevens.' });
     }
 
@@ -58,14 +62,13 @@ export default async function handler(req, res) {
     }
 
     if (!isMatch) {
-      console.log(`[LOGIN FAILED] Wachtwoord komt niet overeen voor gebruiker: "${cleanUsername}"`);
       return res.status(401).json({ success: false, message: 'Ongeldige inloggegevens.' });
     }
 
     const isMainOwner = user.username?.toLowerCase() === 'bendemen' || user.email?.toLowerCase() === 'bendemenbv@gmail.com';
-
     const effectiveRole = isMainOwner ? 'super_admin' : (user.role || 'cashier');
     let stores = [];
+
     if (isMainOwner || ['admin', 'super_admin', 'administrator'].includes(String(effectiveRole).toLowerCase())) {
       const [storeRows] = await db.query('SELECT id, store_name, address, pickup_id, terminal_id, payment_methods FROM stores ORDER BY store_name ASC');
       stores = Array.isArray(storeRows) ? storeRows : [];
@@ -77,8 +80,6 @@ export default async function handler(req, res) {
         stores = Array.isArray(storeRows) ? storeRows : [];
       }
     }
-
-    console.log(`[LOGIN SUCCESS] Gebruiker ingelogd: ${user.username}`);
 
     return res.status(200).json({
       success: true,
