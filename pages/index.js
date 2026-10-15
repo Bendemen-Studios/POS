@@ -280,7 +280,7 @@ export default function POSHome() {
           'Idempotency-Key': clientOrderId
         },
         body: JSON.stringify(orderPayload)
-      }, 15000);
+      }, 40000);
 
       let data = {};
       try { data = await res.json(); } catch (_) {}
