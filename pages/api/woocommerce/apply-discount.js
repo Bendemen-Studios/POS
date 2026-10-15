@@ -1,8 +1,13 @@
+import { requireSession } from '../../../lib/session';
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', ['POST']);
     return res.status(405).json({ success: false, message: `Method ${req.method} not allowed` });
   }
+
+  const session = await requireSession(req, res);
+  if (!session) return;
 
   const { cartItems, discountType = 'none', discountValue = 0, couponCode } = req.body || {};
   if (!Array.isArray(cartItems) || cartItems.length === 0) {
