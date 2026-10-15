@@ -60,7 +60,10 @@ if [ -f package-lock.json ]; then
   # Use the VPS-generated lockfile deterministically. The lockfile is kept
   # outside Git for now because it was generated from the production Linux
   # environment and contains the platform-specific optional SWC packages.
-  npm ci --include=dev --include=optional --no-audit --no-fund
+  if ! npm ci --include=dev --include=optional --no-audit --no-fund; then
+    echo "⚠️ Lockfile past niet bij package.json; lockfile op VPS vernieuwen..."
+    npm install --include=dev --include=optional --no-audit --no-fund --package-lock=true
+  fi
 else
   echo "🆕 Geen package-lock.json gevonden; deze wordt aangemaakt."
   npm install --include=dev --include=optional --no-audit --no-fund --package-lock=true
