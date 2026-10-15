@@ -4,13 +4,6 @@ import bcrypt from 'bcryptjs';
 export default async function handler(req, res) {
   const { method } = req;
 
-  // Zorg dat de store_id kolom VARCHAR accepteert voor string-ID's
-  try {
-    await db.query('ALTER TABLE users MODIFY COLUMN store_id VARCHAR(255) DEFAULT NULL');
-  } catch (e) {
-    // Negeer als kolom al VARCHAR is
-  }
-
   if (method === 'GET') {
     try {
       const [rows] = await db.query(`
