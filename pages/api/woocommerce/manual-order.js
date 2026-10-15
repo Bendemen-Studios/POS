@@ -1,5 +1,5 @@
 import WooCommerceRestApi from '@woocommerce/woocommerce-rest-api';
-import { requireSession } from '../../../lib/session';
+import { requireSession, requireStoreAccess } from '../../../lib/session';
 
 const WooCommerce = new WooCommerceRestApi({
   url: process.env.WOOCOMMERCE_URL || 'https://www.bendemen.com',
@@ -15,6 +15,8 @@ export default async function handler(req, res) {
 
   const session = await requireSession(req, res);
   if (!session) return;
+
+  if (!requireStoreAccess(req, res, (req.body || {}).storeId || 1)) return;
 
   const { orderItems, paymentMethod, storeId, cashierId, customerId, totals, cashDetails } = req.body;
 
