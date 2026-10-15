@@ -206,7 +206,7 @@ export default function LoginPage() {
       console.warn('Server niet bereikbaar, gebruik offline login-cache.', err);
     }
 
-    if (!getCachedLogin(cleanUsername, password)) {
+    if (!await getCachedLogin(cleanUsername, password)) {
       setError('Server niet bereikbaar. Controleer de POS-server of probeer opnieuw.');
       setLoading(false);
     }
