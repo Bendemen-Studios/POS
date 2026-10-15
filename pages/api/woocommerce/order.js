@@ -1,5 +1,6 @@
 import WooCommerceRestApi from "@woocommerce/woocommerce-rest-api";
 import { updateCustomerPoints } from "../../../lib/customerPoints";
+import { requireSession } from '../../../lib/session';
 
 const WooCommerce = WooCommerceRestApi.default || WooCommerceRestApi;
 const api = new WooCommerce({
@@ -11,6 +12,9 @@ const api = new WooCommerce({
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ message: 'Method not allowed' });
+
+  const session = await requireSession(req, res);
+  if (!session) return;
 
   const { orderItems = [], paymentMethod, storeId, cashierId, customerId, totals = {} } = req.body || {};
 
