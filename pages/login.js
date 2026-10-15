@@ -157,26 +157,33 @@ export default function LoginPage() {
       }
 
       if (data.success) {
+        const token = data.token;
         localStorage.setItem('pos_user', JSON.stringify(data.user));
-        if (data.token) {
-          localStorage.setItem('pos_token', data.token);
-          localStorage.setItem(`pos_offline_token_${cleanUsername}`, data.token);
+        if (token) {
+          localStorage.setItem('pos_token', token);
+          localStorage.setItem(`pos_offline_token_${cleanUsername}`, token);
         }
         localStorage.setItem(`pos_offline_user_${cleanUsername}`, JSON.stringify(data.user));
         localStorage.removeItem(`pos_offline_pass_${cleanUsername}`);
-        try {
-          const offlineCredential = await createOfflineCredential(password);
-          localStorage.setItem(`pos_offline_credential_${cleanUsername}`, JSON.stringify(offlineCredential));
-        } catch (credentialError) {
-          // Online login still succeeds, but never persist a plaintext password
-          // as a fallback when Web Crypto is unavailable.
-          localStorage.removeItem(`pos_offline_credential_${cleanUsername}`);
-          console.warn('Offline logincache niet beschikbaar:', credentialError.message);
-        }
         if (Array.isArray(data.stores)) localStorage.setItem('pos_login_stores', JSON.stringify(data.stores));
         localStorage.removeItem('selectedStore');
         localStorage.removeItem('pos_selected_store');
-        window.location.replace('/select-store');
+
+        // Do not hold up the successful login on the expensive PBKDF2 offline
+        // verifier. Navigate immediately, then save the verifier in the
+        // background while this page remains mounted during client routing.
+        const credentialKey = `pos_offline_credential_${cleanUsername}`;
+        localStorage.removeItem(credentialKey);
+        createOfflineCredential(password).then((offlineCredential) => {
+          // Do not overwrite a newer session if another login occurred.
+          if (localStorage.getItem(`pos_offline_token_${cleanUsername}`) === token) {
+            localStorage.setItem(credentialKey, JSON.stringify(offlineCredential));
+          }
+        }).catch((credentialError) => {
+          console.warn('Offline logincache niet beschikbaar:', credentialError.message);
+        });
+
+        await router.replace('/select-store');
         return;
       }
 
