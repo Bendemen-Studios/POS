@@ -1,4 +1,5 @@
 import db from '../../../lib/db';
+import { requireSession } from '../../../lib/session';
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
@@ -6,7 +7,14 @@ export default async function handler(req, res) {
     return res.status(405).json({ success: false, message: `Method ${req.method} Not Allowed` });
   }
 
-  const userId = req.query.user_id || req.headers['x-user-id'];
+  const session = await requireSession(req, res);
+  if (!session) return;
+
+  const requestedUserId = req.query.user_id || req.headers['x-user-id'];
+  if (requestedUserId && String(requestedUserId) !== String(session.id)) {
+    return res.status(403).json({ success: false, message: 'Je kunt alleen filialen van je eigen account ophalen.' });
+  }
+  const userId = session.id;
 
   if (!userId) {
     return res.status(400).json({ success: false, message: 'Gebruikers ID ontbreekt.' });
