@@ -63,7 +63,14 @@ export default async function handler(req, res) {
           payment_methods: pm || { sumup: true, manual_pin: true, cash: true }
         };
       });
-      return res.status(200).json({ success: true, stores: formattedStores });
+      const role = String(session.role || '').toLowerCase();
+      const isAdmin = ['admin', 'super_admin', 'administrator'].includes(role) ||
+        String(session.username || '').toLowerCase() === 'bendemen';
+      const assignedIds = String(session.store_id || '').split(',').map(id => id.trim()).filter(Boolean);
+      const visibleStores = isAdmin
+        ? formattedStores
+        : formattedStores.filter(store => assignedIds.includes(String(store.id ?? store.store_id ?? '')));
+      return res.status(200).json({ success: true, stores: visibleStores });
     } catch (error) {
       console.error('Fout bij ophalen winkels:', error);
       return res.status(500).json({ success: false, error: error.message });
