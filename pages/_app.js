@@ -133,12 +133,24 @@ function installPosSessionFetch() {
     }
 
     const token = localStorage.getItem('pos_token');
-    if (!token) return originalFetch(input, init);
+    let requestInit = init;
+    if (token) {
+      const headers = new Headers(typeof input !== 'string' ? input?.headers : undefined);
+      new Headers(init?.headers || {}).forEach((value, key) => headers.set(key, value));
+      headers.set('Authorization', `Bearer ${token}`);
+      requestInit = { ...init, headers };
+    }
 
-    const headers = new Headers(typeof input !== 'string' ? input?.headers : undefined);
-    new Headers(init?.headers || {}).forEach((value, key) => headers.set(key, value));
-    headers.set('Authorization', `Bearer ${token}`);
-    return originalFetch(input, { ...init, headers });
+    return originalFetch(input, requestInit).then(response => {
+      // Old pre-signed tokens and expired sessions must not leave the POS
+      // stuck on a screen that looks logged in but cannot access its APIs.
+      if (response.status === 401) {
+        localStorage.removeItem('pos_user');
+        localStorage.removeItem('pos_token');
+        if (window.location.pathname !== '/login') window.location.replace('/login');
+      }
+      return response;
+    });
   };
 
   return () => {
