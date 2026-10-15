@@ -1,3 +1,5 @@
+import { requireSession } from '../../../lib/session';
+
 const GATEWAY = process.env.SUMUP_GATEWAY_URL || 'https://pos-sumup.vercel.app';
 
 async function gatewayRequest(req, action) {
@@ -25,6 +27,8 @@ async function gatewayRequest(req, action) {
 
 export default async function handler(req, res) {
   const action = String(req.query.action || '');
+  const session = await requireSession(req, res, action === 'assign-store' ? { roles: ['admin', 'super_admin', 'administrator'] } : undefined);
+  if (!session) return;
 
   // The SumUp payment/reader actions are normally redirected client-side
   // to Vercel by pages/_app.js. Keep this endpoint as a safe server-side
@@ -39,7 +43,7 @@ export default async function handler(req, res) {
 
       const storeResponse = await fetch(`${req.headers['x-forwarded-proto'] || 'https'}://${req.headers.host}/api/admin/store`, {
         method: 'GET',
-        headers: { cookie: req.headers.cookie || '' },
+        headers: { cookie: req.headers.cookie || '', authorization: req.headers.authorization || '' },
         cache: 'no-store',
       });
       const storeData = await storeResponse.json().catch(() => ({}));
@@ -49,7 +53,7 @@ export default async function handler(req, res) {
 
       const updateResponse = await fetch(`${req.headers['x-forwarded-proto'] || 'https'}://${req.headers.host}/api/admin/store`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json', cookie: req.headers.cookie || '' },
+        headers: { 'Content-Type': 'application/json', cookie: req.headers.cookie || '', authorization: req.headers.authorization || '' },
         body: JSON.stringify({ ...store, id: store.id || store.store_id, terminal_id: String(readerId) }),
       });
       const updateData = await updateResponse.json().catch(() => ({}));
