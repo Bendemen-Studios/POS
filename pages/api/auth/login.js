@@ -1,4 +1,5 @@
-import db, { dbReady } from '../../../lib/db';
+import db, { ensureDatabaseReady } from '../../../lib/db';
+import { createSessionToken } from '../../../lib/session';
 import bcrypt from 'bcryptjs';
 
 export default async function handler(req, res) {
@@ -16,7 +17,7 @@ export default async function handler(req, res) {
 
   try {
     // Wait for first-start schema creation/migrations before querying users.
-    await dbReady;
+    await ensureDatabaseReady();
 
     // Use username as the canonical login identifier. This deliberately does
     // not reference optional legacy columns such as `email`, so an old POS
@@ -81,7 +82,7 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       success: true,
-      token: `pos_session_${user.id}_${Date.now()}`,
+      token: createSessionToken(user.id),
       user: {
         id: user.id,
         username: user.username,
