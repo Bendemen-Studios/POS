@@ -1,4 +1,5 @@
 import WooCommerceRestApi from '@woocommerce/woocommerce-rest-api';
+import { requireSession } from '../../../lib/session';
 
 const WooCommerce = new WooCommerceRestApi({
   url: process.env.WOOCOMMERCE_URL || 'https://www.bendemen.com',
@@ -11,6 +12,9 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ message: 'Method not allowed' });
   }
+
+  const session = await requireSession(req, res);
+  if (!session) return;
 
   const { orderItems, paymentMethod, storeId, cashierId, customerId, totals, cashDetails } = req.body;
 
