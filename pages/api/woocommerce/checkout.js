@@ -108,7 +108,8 @@ export default async function handler(req, res) {
   const authHeader = 'Basic ' + Buffer.from(`${consumerKey}:${consumerSecret}`).toString('base64');
 
   const body = req.body || {};
-  const { orderItems, paymentMethod, totals = {} } = body;
+  const { orderItems, paymentMethod } = body;
+  const totals = body.totals && typeof body.totals === 'object' ? body.totals : {};
   if (!Array.isArray(orderItems) || orderItems.length === 0) {
     return res.status(400).json({ success: false, error: 'De bestelling bevat geen artikelen.' });
   }
@@ -138,7 +139,7 @@ export default async function handler(req, res) {
   const pointsDiscount = Number(totals.pointsDiscount || 0);
   if (!Number.isFinite(discountAmount) || discountAmount < 0 ||
       !Number.isFinite(pointsDiscount) || pointsDiscount < 0 ||
-      discountAmount + pointsDiscount > subtotal + 0.01) {
+      Math.round(discountAmount * 100) + Math.round(pointsDiscount * 100) > Math.round(subtotal * 100)) {
     return res.status(400).json({ success: false, error: 'De korting is ongeldig of hoger dan het bestelbedrag.' });
   }
 
