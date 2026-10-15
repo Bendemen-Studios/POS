@@ -46,6 +46,30 @@ export default function POSHome() {
   const backgroundSyncState = useRef({ running: false, lastRun: 0 });
 
   useEffect(() => { if (typeof window !== 'undefined' && products.length > 0) localStorage.setItem('pos_cached_products', JSON.stringify(products)); }, [products]);
+  useEffect(() => {
+    const applySyncedProducts = (event) => {
+      const synced = event?.detail?.products;
+      if (Array.isArray(synced)) {
+        setProducts(synced);
+        return;
+      }
+      try {
+        const raw = localStorage.getItem('pos_cached_products');
+        if (raw) {
+          const cached = JSON.parse(raw);
+          if (Array.isArray(cached)) setProducts(cached);
+        }
+      } catch (err) {
+        console.warn('[PRODUCT SYNC] lokale productcache kon niet worden ingelezen:', err);
+      }
+    };
+    window.addEventListener('pos:products-updated', applySyncedProducts);
+    window.addEventListener('pos:inventory-synced', applySyncedProducts);
+    return () => {
+      window.removeEventListener('pos:products-updated', applySyncedProducts);
+      window.removeEventListener('pos:inventory-synced', applySyncedProducts);
+    };
+  }, []);
   useEffect(() => { if (typeof window !== 'undefined' && customers.length > 0) localStorage.setItem('pos_cached_customers', JSON.stringify(customers)); }, [customers]);
   useEffect(() => { if (typeof window !== 'undefined') localStorage.setItem('pos_cart', JSON.stringify(cart)); }, [cart]);
   useEffect(() => { if (typeof window !== 'undefined') { if (selectedCustomer) localStorage.setItem('pos_selected_customer', JSON.stringify(selectedCustomer)); else localStorage.removeItem('pos_selected_customer'); } }, [selectedCustomer]);
