@@ -15,6 +15,9 @@ export default async function handler(req, res) {
     return res.status(400).json({ success: false, message: 'Vul zowel een gebruikersnaam als een wachtwoord in.' });
   }
 
+  const startedAt = Date.now();
+  const timings = { userQueryMs: 0, passwordCheckMs: 0, storesQueryMs: 0 };
+
   try {
     // Fast path: query the existing schema directly. Full schema migrations are
     // only needed for a fresh/legacy database, not for every cold login.
@@ -24,12 +27,17 @@ export default async function handler(req, res) {
     );
 
     let rows;
+    const userQueryStartedAt = Date.now();
     try {
-      [rows] = await queryUser();
-    } catch (error) {
-      if (!['ER_NO_SUCH_TABLE', 'ER_BAD_FIELD_ERROR'].includes(error?.code)) throw error;
-      await ensureDatabaseReady();
-      [rows] = await queryUser();
+      try {
+        [rows] = await queryUser();
+      } catch (error) {
+        if (!['ER_NO_SUCH_TABLE', 'ER_BAD_FIELD_ERROR'].includes(error?.code)) throw error;
+        await ensureDatabaseReady();
+        [rows] = await queryUser();
+      }
+    } finally {
+      timings.userQueryMs = Date.now() - userQueryStartedAt;
     }
 
     if (!Array.isArray(rows) || rows.length === 0) {
@@ -47,6 +55,7 @@ export default async function handler(req, res) {
     const isBcrypt = /^\$2[aby]\$/.test(storedPassword);
     let isMatch = false;
 
+    const passwordCheckStartedAt = Date.now();
     if (isBcrypt) {
       isMatch = await bcrypt.compare(password, storedPassword);
     } else {
@@ -61,6 +70,8 @@ export default async function handler(req, res) {
       }
     }
 
+    timings.passwordCheckMs = Date.now() - passwordCheckStartedAt;
+
     if (!isMatch) {
       return res.status(401).json({ success: false, message: 'Ongeldige inloggegevens.' });
     }
@@ -68,6 +79,7 @@ export default async function handler(req, res) {
     const isMainOwner = user.username?.toLowerCase() === 'bendemen' || user.email?.toLowerCase() === 'bendemenbv@gmail.com';
     const effectiveRole = isMainOwner ? 'super_admin' : (user.role || 'cashier');
     let stores = [];
+    const storesQueryStartedAt = Date.now();
 
     if (isMainOwner || ['admin', 'super_admin', 'administrator'].includes(String(effectiveRole).toLowerCase())) {
       const [storeRows] = await db.query('SELECT id, store_name, address, pickup_id, terminal_id, payment_methods FROM stores ORDER BY store_name ASC');
@@ -80,6 +92,11 @@ export default async function handler(req, res) {
         stores = Array.isArray(storeRows) ? storeRows : [];
       }
     }
+
+    timings.storesQueryMs = Date.now() - storesQueryStartedAt;
+    const totalMs = Date.now() - startedAt;
+    res.setHeader('Server-Timing', `user-query;dur=${timings.userQueryMs}, password-check;dur=${timings.passwordCheckMs}, stores-query;dur=${timings.storesQueryMs}, total;dur=${totalMs}`);
+    console.info('[LOGIN PERF]', JSON.stringify({ ...timings, totalMs }));
 
     return res.status(200).json({
       success: true,
@@ -95,6 +112,9 @@ export default async function handler(req, res) {
       stores
     });
   } catch (error) {
+    const totalMs = Date.now() - startedAt;
+    res.setHeader('Server-Timing', `user-query;dur=${timings.userQueryMs}, password-check;dur=${timings.passwordCheckMs}, stores-query;dur=${timings.storesQueryMs}, total;dur=${totalMs}`);
+    console.info('[LOGIN PERF]', JSON.stringify({ ...timings, totalMs, failed: true }));
     console.error('[LOGIN API EXCEPTION]:', error);
     return res.status(500).json({ success: false, message: 'Interne serverfout bij inloggen.' });
   }
