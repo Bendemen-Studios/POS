@@ -33,9 +33,7 @@ export default async function handler(req, res) {
 
     const user = userRows[0];
     const isAdmin =
-      user.role === 'admin' ||
-      user.role === 'super_admin' ||
-      user.role === 'administrator' ||
+      ['admin', 'super_admin', 'administrator'].includes(String(session.role || '').toLowerCase()) ||
       user.username?.toLowerCase() === 'bendemen';
 
     let stores = [];
