@@ -165,7 +165,8 @@ export default function LoginPage() {
         }
         localStorage.setItem(`pos_offline_user_${cleanUsername}`, JSON.stringify(data.user));
         localStorage.removeItem(`pos_offline_pass_${cleanUsername}`);
-        if (Array.isArray(data.stores)) localStorage.setItem('pos_login_stores', JSON.stringify(data.stores));
+        // Store data is loaded separately so slow store queries cannot delay authentication.
+        localStorage.removeItem('pos_login_stores');
         localStorage.removeItem('selectedStore');
         localStorage.removeItem('pos_selected_store');
 
