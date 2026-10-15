@@ -5,7 +5,7 @@ import '../styles/globals.css';
 
 const SUMUP_GATEWAY = 'https://pos-sumup.vercel.app';
 const SUMUP_FINAL_STATUSES = new Set(['SUCCESSFUL', 'FAILED', 'CANCELLED', 'REFUNDED']);
-const PRODUCT_SYNC_TIMEOUT = 4000;
+const PRODUCT_SYNC_TIMEOUT = 20000;
 const PRODUCT_SYNC_INTERVAL = 60000;
 const PRODUCT_CACHE_VERSION = 'v3-variations';
 
