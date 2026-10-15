@@ -32,7 +32,7 @@ export default function POSHome() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [checkoutStatus, setCheckoutStatus] = useState(null);
   const [pendingOfflineCount, setPendingOfflineCount] = useState(0);
-  const [serverOnline, setServerOnline] = useState(() => typeof navigator !== 'undefined' ? navigator.onLine !== false : true);
+  const [serverOnline, setServerOnline] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState('sumup');
   const [paymentMethodByStore, setPaymentMethodByStore] = useState(() => { if (typeof window === 'undefined') return {}; try { return JSON.parse(localStorage.getItem('pos_payment_method_by_store') || '{}'); } catch (_) { return {}; } });
