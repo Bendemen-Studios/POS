@@ -2,6 +2,7 @@ import WooCommerceRestApi from '@woocommerce/woocommerce-rest-api';
 import { createHash } from 'crypto';
 import { claimOrder, completeOrder, releaseOrder } from '../../../lib/orderIdempotency';
 import { redeemCustomerPoints } from '../../../lib/customerPoints';
+import { requireSession } from '../../../lib/session';
 
 function getClientOrderId(req) {
   const headerId = req.headers['idempotency-key'];
@@ -17,6 +18,9 @@ export default async function handler(req, res) {
     res.setHeader('Allow', ['POST']);
     return res.status(405).json({ success: false, error: `Method ${req.method} Not Allowed` });
   }
+
+  const session = await requireSession(req, res);
+  if (!session) return;
 
   const clientOrderId = getClientOrderId(req);
   let claimed = false;
