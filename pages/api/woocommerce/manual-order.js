@@ -2,9 +2,9 @@ import WooCommerceRestApi from '@woocommerce/woocommerce-rest-api';
 import { requireSession, requireStoreAccess } from '../../../lib/session';
 
 const WooCommerce = new WooCommerceRestApi({
-  url: process.env.WOOCOMMERCE_URL || 'https://www.bendemen.com',
-  consumerKey: process.env.WOOCOMMERCE_CONSUMER_KEY,
-  consumerSecret: process.env.WOOCOMMERCE_CONSUMER_SECRET,
+  url: process.env.WOO_SITE_URL || process.env.WOOCOMMERCE_URL || 'https://www.bendemen.com',
+  consumerKey: process.env.WOOCOMMERCE_CONSUMER_KEY || process.env.WOO_CONSUMER_KEY || process.env.WOOCOMMERCE_KEY,
+  consumerSecret: process.env.WOOCOMMERCE_CONSUMER_SECRET || process.env.WOO_CONSUMER_SECRET || process.env.WOOCOMMERCE_SECRET,
   version: 'wc/v3',
 });
 
