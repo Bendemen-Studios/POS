@@ -377,17 +377,31 @@ export default function POSHome() {
         triggerOfflineSync(false).catch(err =>
           console.warn('[POST-PURCHASE SYNC] offline queue:', err)
         );
-        Promise.allSettled([
-          fetchProducts(),
-          fetchCustomers(),
-          fetchUsersAsCustomers(),
-          fetchPickupOrders(),
-          fetchStores()
-        ]).then(() => {
+        // Refresh the UI immediately, then re-fetch stock after WooCommerce has
+        // had time to finish its stock reduction hooks. A single immediate
+        // request can race those hooks and leave the POS showing old quantities.
+        (async () => {
+          await Promise.allSettled([
+            fetchProducts(),
+            fetchCustomers(),
+            fetchUsersAsCustomers(),
+            fetchPickupOrders(),
+            fetchStores()
+          ]);
           window.dispatchEvent(new CustomEvent('pos:ajax-refresh', {
             detail: { postPurchaseSync: true }
           }));
-        }).catch(err => console.warn('[POST-PURCHASE SYNC] refresh:', err));
+
+          const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+          for (const delay of [1800, 2500]) {
+            await wait(delay);
+            if (typeof navigator !== 'undefined' && navigator.onLine === false) break;
+            await fetchProducts();
+            window.dispatchEvent(new CustomEvent('pos:ajax-refresh', {
+              detail: { postPurchaseSync: true, stockRetry: true }
+            }));
+          }
+        })().catch(err => console.warn('[POST-PURCHASE SYNC] refresh:', err));
       }
     }
   };
