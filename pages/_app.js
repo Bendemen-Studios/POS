@@ -105,6 +105,48 @@ async function syncProductsToCacheAndNotify() {
   }
 }
 
+function installPosSessionFetch() {
+  if (typeof window === 'undefined' || window.__bendemenPosSessionFetch) return () => {};
+  window.__bendemenPosSessionFetch = true;
+  const originalFetch = window.fetch.bind(window);
+
+  window.fetch = (input, init = {}) => {
+    const rawUrl = typeof input === 'string' ? input : input?.url;
+    if (!rawUrl) return originalFetch(input, init);
+
+    let url;
+    try { url = new URL(rawUrl, window.location.origin); } catch { return originalFetch(input, init); }
+    if (url.origin !== window.location.origin || !url.pathname.startsWith('/api/')) {
+      return originalFetch(input, init);
+    }
+
+    // Login and the public health probe must work without an existing session.
+    if (url.pathname === '/api/auth/login' ||
+        (url.pathname === '/api/admin/store' && (url.searchParams.has('_pos_health') || url.searchParams.has('healthcheck')))) {
+      return originalFetch(input, init);
+    }
+
+    // The regular SumUp actions are redirected to the separate gateway below.
+    // Do not leak the POS session token to that external service.
+    if (url.pathname === '/api/sumup/proxy' && url.searchParams.get('action') !== 'assign-store') {
+      return originalFetch(input, init);
+    }
+
+    const token = localStorage.getItem('pos_token');
+    if (!token) return originalFetch(input, init);
+
+    const headers = new Headers(typeof input !== 'string' ? input?.headers : undefined);
+    new Headers(init?.headers || {}).forEach((value, key) => headers.set(key, value));
+    headers.set('Authorization', `Bearer ${token}`);
+    return originalFetch(input, { ...init, headers });
+  };
+
+  return () => {
+    window.fetch = originalFetch;
+    window.__bendemenPosSessionFetch = false;
+  };
+}
+
 function installSumUpGatewayFetch() {
   if (typeof window === 'undefined' || window.__bendemenSumUpFetchInstalled) return;
   window.__bendemenSumUpFetchInstalled = true;
@@ -303,6 +345,7 @@ export default function App({ Component, pageProps }) {
   useEffect(() => {
     installSumUpGatewayFetch();
     const stopAdminOfflineMutationGuard = installAdminOfflineMutationGuard();
+    const stopPosSessionFetch = installPosSessionFetch();
     registerNativePWA();
     const stopServerWatcher = installFastServerWatcher();
     const stopOfflineBridge = installOfflineAjaxBridge((message) => {
@@ -321,6 +364,7 @@ export default function App({ Component, pageProps }) {
     window.addEventListener('pos:server-status', statusHandler);
     window.addEventListener('pos:admin-change-blocked', blockedHandler);
     return () => {
+      stopPosSessionFetch();
       stopServerWatcher();
       stopAdminOfflineMutationGuard();
       stopOfflineBridge();
