@@ -56,9 +56,12 @@ export default function LoginPage() {
   const getCachedLogin = async (cleanUsername, enteredPassword) => {
     const cachedUser = localStorage.getItem(`pos_offline_user_${cleanUsername}`);
     const credentialKey = `pos_offline_credential_${cleanUsername}`;
+    const cachedToken = localStorage.getItem(`pos_offline_token_${cleanUsername}`);
     let rawCredential = localStorage.getItem(credentialKey);
 
-    if (!cachedUser) return false;
+    // Offline access must also have a server-signed token so queued orders can
+    // safely synchronize when the server returns.
+    if (!cachedUser || !cachedToken) return false;
 
     // One-time migration: remove any legacy plaintext password as soon as it
     // is read, then replace it with a salted verifier if the password matches.
@@ -85,6 +88,7 @@ export default function LoginPage() {
 
       const userObj = JSON.parse(cachedUser);
       localStorage.setItem('pos_user', JSON.stringify(userObj));
+      localStorage.setItem('pos_token', cachedToken);
       localStorage.removeItem('selectedStore');
       localStorage.removeItem('pos_selected_store');
       window.location.replace('/select-store');
@@ -154,7 +158,10 @@ export default function LoginPage() {
 
       if (data.success) {
         localStorage.setItem('pos_user', JSON.stringify(data.user));
-        if (data.token) localStorage.setItem('pos_token', data.token);
+        if (data.token) {
+          localStorage.setItem('pos_token', data.token);
+          localStorage.setItem(`pos_offline_token_${cleanUsername}`, data.token);
+        }
         localStorage.setItem(`pos_offline_user_${cleanUsername}`, JSON.stringify(data.user));
         localStorage.removeItem(`pos_offline_pass_${cleanUsername}`);
         try {
