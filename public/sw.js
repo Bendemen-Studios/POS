@@ -25,19 +25,54 @@ async function cacheResponse(cache, request, response) {
 
 function isCacheableApi(pathname) { return CACHEABLE_API_PREFIXES.some(prefix => pathname === prefix || pathname.startsWith(`${prefix}?`)); }
 
+async function getAuthorizedCacheKey(request) {
+  const authorization = request.headers.get('Authorization');
+  if (!authorization) return null;
+
+  const url = new URL(request.url);
+  // Product catalogue data is shared across POS users; all other cached API
+  // responses are isolated by the signed session to avoid cross-account leaks.
+  if (url.pathname === '/api/woocommerce/products') {
+    url.search = '';
+    return new Request(url.toString(), { method: 'GET' });
+  }
+
+  try {
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(authorization));
+    const sessionHash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+    url.searchParams.delete('_sync');
+    url.searchParams.delete('_');
+    url.searchParams.set('__pos_session_cache', sessionHash);
+    return new Request(url.toString(), { method: 'GET' });
+  } catch (_) {
+    return null;
+  }
+}
+
 async function refreshApiCache(request, timeout = API_TIMEOUT) {
   try {
     const response = await timeoutFetch(request, timeout);
-    if (response.ok) { const cache = await caches.open(CACHE_NAME); await cache.put(request, response.clone()); }
+    if (response.ok) {
+      const cacheKey = await getAuthorizedCacheKey(request);
+      if (cacheKey) {
+        const cache = await caches.open(CACHE_NAME);
+        await cache.put(cacheKey, response.clone());
+      }
+    }
     return response;
   } catch (_) { return null; }
 }
 
 async function onlineFirstApi(request, timeout = API_TIMEOUT) {
+  if (!request.headers.get('Authorization')) {
+    return new Response(JSON.stringify({ success:false, error:'Sessie ontbreekt.' }), { status:401, headers:{'Content-Type':'application/json','Cache-Control':'no-store'} });
+  }
   const fresh = await refreshApiCache(request, timeout);
   if (fresh && fresh.ok) return fresh;
+  if (fresh && (fresh.status === 401 || fresh.status === 403)) return fresh;
+  const cacheKey = await getAuthorizedCacheKey(request);
   const cache = await caches.open(CACHE_NAME);
-  const cached = await cache.match(request);
+  const cached = cacheKey ? await cache.match(cacheKey) : null;
   if (cached) return cached;
   return new Response(JSON.stringify({ success:false, offline:true, error:'Server niet bereikbaar en geen lokale cache beschikbaar.' }), { status:503, headers:{'Content-Type':'application/json','Cache-Control':'no-store'} });
 }
@@ -55,9 +90,16 @@ async function handleProductRequest(request) {
 }
 
 async function handleStaleApiRequest(request) {
+  if (!request.headers.get('Authorization')) {
+    return new Response(JSON.stringify({ success:false, error:'Sessie ontbreekt.' }), { status:401, headers:{'Content-Type':'application/json','Cache-Control':'no-store'} });
+  }
+  const cacheKey = await getAuthorizedCacheKey(request);
   const cache = await caches.open(CACHE_NAME);
-  const cached = await cache.match(request);
-  if (cached) { refreshApiCache(request, API_TIMEOUT).catch(() => {}); return cached; }
+  const cached = cacheKey ? await cache.match(cacheKey) : null;
+  if (cached) {
+    refreshApiCache(request, API_TIMEOUT).catch(() => {});
+    return cached;
+  }
   return onlineFirstApi(request, API_TIMEOUT);
 }
 
@@ -154,6 +196,10 @@ self.addEventListener('fetch', event => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
   if (request.method === 'GET' && url.pathname === '/api/admin/store' && (url.searchParams.has('_pos_health') || url.searchParams.has('healthcheck'))) { event.respondWith(handleServerStatusRequest(request)); return; }
+  if (request.method === 'GET' && isCacheableApi(url.pathname) && !request.headers.get('Authorization')) {
+    event.respondWith(new Response(JSON.stringify({ success:false, error:'Sessie ontbreekt.' }), { status:401, headers:{'Content-Type':'application/json','Cache-Control':'no-store'} }));
+    return;
+  }
   if (request.method === 'GET' && url.pathname === '/api/woocommerce/products') { event.respondWith(handleProductRequest(request)); return; }
   if (request.method === 'GET' && STALE_WHILE_REVALIDATE_API.has(url.pathname)) { event.respondWith(handleStaleApiRequest(request)); return; }
   if (request.method !== 'GET') return;
