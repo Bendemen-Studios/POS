@@ -366,6 +366,34 @@ export default function POSHome() {
       setDiscountValue(0);
       setCashGiven('');
       setLoading(false);
+
+      // Start the normal sync flow after every completed checkout without
+      // blocking the cashier or forcing a page reload. Offline orders remain
+      // queued until the POS server is reachable.
+      window.setTimeout(() => {
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+          checkOfflineQueue();
+          return;
+        }
+        checkServerConnection().then(online => {
+          if (!online) {
+            checkOfflineQueue();
+            return;
+          }
+          // Attempt queued order uploads immediately, then refresh server data
+          // in the background. Never await this from the checkout UI.
+          triggerOfflineSync(false).catch(err => console.warn('[POST-PURCHASE SYNC] offline queue:', err));
+          Promise.allSettled([
+            fetchProducts(),
+            fetchCustomers(),
+            fetchUsersAsCustomers(),
+            fetchPickupOrders(),
+            fetchStores()
+          ]).then(() => {
+            window.dispatchEvent(new CustomEvent('pos:ajax-refresh', { detail: { postPurchaseSync: true } }));
+          }).catch(err => console.warn('[POST-PURCHASE SYNC] refresh:', err));
+        }).catch(err => console.warn('[POST-PURCHASE SYNC] health check:', err));
+      }, 0);
     }
   };
   const storeDisplayName = selectedStore?.store_name || selectedStore?.name || 'Selecteer Filiaal';
