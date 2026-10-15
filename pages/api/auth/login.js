@@ -95,8 +95,7 @@ export default async function handler(req, res) {
         role: effectiveRole,
         store_id: user.store_id || null,
         store_name: 'Geen Filiaal'
-      },
-      stores
+      }
     });
   } catch (error) {
     const totalMs = Date.now() - startedAt;
