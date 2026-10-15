@@ -5,7 +5,7 @@ import '../styles/globals.css';
 
 const SUMUP_GATEWAY = 'https://pos-sumup.vercel.app';
 const SUMUP_FINAL_STATUSES = new Set(['SUCCESSFUL', 'FAILED', 'CANCELLED', 'REFUNDED']);
-const PRODUCT_SYNC_TIMEOUT = 8000;
+const PRODUCT_SYNC_TIMEOUT = 4000;
 const PRODUCT_SYNC_INTERVAL = 60000;
 const PRODUCT_CACHE_VERSION = 'v3-variations';
 
@@ -69,9 +69,10 @@ async function syncProductsToCacheAndNotify() {
   if (!localStorage.getItem('pos_user')) return false;
 
   try {
-    const cacheVersion = localStorage.getItem('pos_cached_products_version');
-    if (cacheVersion !== PRODUCT_CACHE_VERSION) {
-      localStorage.removeItem('pos_cached_products');
+    // Never delete the local product cache during startup. Offline startup must
+    // be instant even when a newer cache schema/version is deployed. The fresh
+    // server response replaces the cache in the background when available.
+    if (!localStorage.getItem('pos_cached_products_version')) {
       localStorage.setItem('pos_cached_products_version', PRODUCT_CACHE_VERSION);
     }
 
@@ -256,11 +257,11 @@ function installFastServerWatcher() {
         lastOnline = true;
       } else {
         failures += 1;
-        if (failures >= 3) lastOnline = false;
+        if (failures >= 1) lastOnline = false;
       }
     } catch {
       failures += 1;
-      if (failures >= 3) lastOnline = false;
+      if (failures >= 1) lastOnline = false;
     } finally {
       clearTimeout(timeout);
       window.dispatchEvent(new CustomEvent('pos:server-status', { detail: { online: lastOnline } }));
