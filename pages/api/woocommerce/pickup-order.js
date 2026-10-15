@@ -63,15 +63,23 @@ async function getOrdersForStatus(api, status) {
 
   if (totalPages === 1) return firstOrders;
 
-  const responses = await Promise.all(
-    Array.from({ length: totalPages - 1 }, (_, index) => api.get('orders', {
+  const responses = [];
+  // Bound concurrent requests to avoid flooding WooCommerce when the order
+  // history spans many pages.
+  for (let startPage = 2; startPage <= totalPages; startPage += 5) {
+    const pageBatch = Array.from(
+      { length: Math.min(5, totalPages - startPage + 1) },
+      (_, index) => startPage + index
+    );
+    const batchResponses = await Promise.all(pageBatch.map(page => api.get('orders', {
       per_page: perPage,
-      page: index + 2,
+      page,
       status,
       orderby: 'date',
       order: 'desc',
-    }))
-  );
+    })));
+    responses.push(...batchResponses);
+  }
 
   return firstOrders.concat(
     ...responses.map((response) => Array.isArray(response.data) ? response.data : [])
