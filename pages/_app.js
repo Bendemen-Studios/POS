@@ -147,6 +147,10 @@ function installPosSessionFetch() {
   };
 }
 
+// Install before React effects so the page's initial API requests already carry
+// the signed session token. The wrapper reads localStorage on every request.
+if (typeof window !== 'undefined') installPosSessionFetch();
+
 function installSumUpGatewayFetch() {
   if (typeof window === 'undefined' || window.__bendemenSumUpFetchInstalled) return;
   window.__bendemenSumUpFetchInstalled = true;
@@ -345,7 +349,6 @@ export default function App({ Component, pageProps }) {
   useEffect(() => {
     installSumUpGatewayFetch();
     const stopAdminOfflineMutationGuard = installAdminOfflineMutationGuard();
-    const stopPosSessionFetch = installPosSessionFetch();
     registerNativePWA();
     const stopServerWatcher = installFastServerWatcher();
     const stopOfflineBridge = installOfflineAjaxBridge((message) => {
@@ -364,7 +367,6 @@ export default function App({ Component, pageProps }) {
     window.addEventListener('pos:server-status', statusHandler);
     window.addEventListener('pos:admin-change-blocked', blockedHandler);
     return () => {
-      stopPosSessionFetch();
       stopServerWatcher();
       stopAdminOfflineMutationGuard();
       stopOfflineBridge();
