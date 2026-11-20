@@ -40,6 +40,11 @@ export default function AdminDashboard() {
 
   const [loading, setLoading] = useState(false);
 
+  const [excludedProducts, setExcludedProducts] = useState([]);
+  const [excludedCategories, setExcludedCategories] = useState([]);
+  const [exclusionSearch, setExclusionSearch] = useState('');
+  const [exclusionsSaving, setExclusionsSaving] = useState(false);
+
   const [products, setProducts] = useState(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('admin_products');
@@ -138,13 +143,40 @@ export default function AdminDashboard() {
     fetchAllData();
   }, [router]);
 
+  const fetchCatalogExclusions = async () => {
+    try {
+      const res = await fetch('/api/admin/product-exclusions');
+      const data = await res.json();
+      if (data.success) {
+        setExcludedProducts(data.excludedProducts || []);
+        setExcludedCategories(data.excludedCategories || []);
+      }
+    } catch (err) { console.error('Uitsluitingen ophalen mislukt:', err); }
+  };
+
+  const saveCatalogExclusions = async () => {
+    setExclusionsSaving(true);
+    try {
+      const res = await fetch('/api/admin/product-exclusions', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ excludedProducts, excludedCategories })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || 'Opslaan mislukt');
+      alert('Product- en categorie-uitsluitingen opgeslagen. Voer daarna een productsync uit.');
+    } catch (err) { alert(err.message || 'Opslaan mislukt'); }
+    finally { setExclusionsSaving(false); }
+  };
+
   const fetchAllData = async () => {
     setLoading(true);
     await Promise.all([
       fetchUsers(),
       fetchStores(),
       fetchOrders(),
-      fetchSumUpReaders()
+      fetchSumUpReaders(),
+      fetchCatalogExclusions()
     ]);
     
     const savedProducts = localStorage.getItem('admin_products');
@@ -528,6 +560,7 @@ export default function AdminDashboard() {
         <button onClick={() => setActiveTab('sumup')} className={`px-3 sm:px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'sumup' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'}`}>💳 SumUp</button>
         <button onClick={() => setActiveTab('orders')} className={`px-3 sm:px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'orders' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'}`}>📦 Bestellingen</button>
         <button onClick={() => setActiveTab('inventory')} className={`px-3 sm:px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'inventory' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'}`}>📦 Voorraad & Variaties</button>
+        <button onClick={() => { setActiveTab('exclusions'); fetchCatalogExclusions(); }} className={`px-3 sm:px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'exclusions' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'}`}>🚫 Productuitsluitingen</button>
       </div>
 
       <div className="flex-1 p-3 sm:p-6 max-w-7xl mx-auto w-full">
@@ -538,6 +571,34 @@ export default function AdminDashboard() {
           </div>
         ) : (
           <>
+            {activeTab === 'exclusions' && (
+              <div className="space-y-5">
+                <div className="bg-white rounded-lg shadow p-4 sm:p-6 space-y-3">
+                  <div><h2 className="font-bold text-base">Producten en categorieën uitsluiten</h2><p className="text-xs text-gray-500">Aangevinkte onderdelen worden niet getoond in de POS-catalogus. Dit verandert niets aan WooCommerce of de webshop.</p></div>
+                  <input value={exclusionSearch} onChange={e => setExclusionSearch(e.target.value)} placeholder="Zoek product of categorie..." className="w-full border rounded p-2.5 text-xs" />
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                    <section className="border rounded p-3 space-y-2">
+                      <h3 className="font-bold text-sm">Categorieën ({new Set(products.flatMap(p => (p.categories || []).map(c => c.id))).size})</h3>
+                      <div className="max-h-[55vh] overflow-y-auto space-y-1">
+                        {[...new Map(products.flatMap(p => p.categories || []).map(c => [String(c.id), c])).values()].filter(c => c.name.toLowerCase().includes(exclusionSearch.toLowerCase())).sort((a,b)=>a.name.localeCompare(b.name)).map(c => (
+                          <label key={c.id} className="flex items-center gap-2 text-xs p-2 hover:bg-gray-50 rounded"><input type="checkbox" checked={excludedCategories.includes(String(c.id))} onChange={e => setExcludedCategories(prev => e.target.checked ? [...prev, String(c.id)] : prev.filter(id => id !== String(c.id)))} />{c.name}</label>
+                        ))}
+                      </div>
+                    </section>
+                    <section className="border rounded p-3 space-y-2">
+                      <h3 className="font-bold text-sm">Producten ({products.length})</h3>
+                      <div className="max-h-[55vh] overflow-y-auto space-y-1">
+                        {products.filter(p => (p.name || '').toLowerCase().includes(exclusionSearch.toLowerCase())).sort((a,b)=>a.name.localeCompare(b.name)).map(p => (
+                          <label key={p.id} className="flex items-center gap-2 text-xs p-2 hover:bg-gray-50 rounded"><input type="checkbox" checked={excludedProducts.includes(Number(p.id))} onChange={e => setExcludedProducts(prev => e.target.checked ? [...prev, Number(p.id)] : prev.filter(id => id !== Number(p.id)))} /><span className="truncate">{p.name}</span><span className="ml-auto text-gray-400">#{p.id}</span></label>
+                        ))}
+                      </div>
+                    </section>
+                  </div>
+                  <div className="flex justify-end"><button onClick={saveCatalogExclusions} disabled={exclusionsSaving} className="bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-bold px-5 py-2.5 rounded text-xs">{exclusionsSaving ? 'OPSLAAN...' : 'UITSUITINGEN OPSLAAN'}</button></div>
+                </div>
+              </div>
+            )}
+
             {activeTab === 'users' && (
               <div className="space-y-6">
                 <div className="bg-white rounded-lg shadow p-4 sm:p-6">

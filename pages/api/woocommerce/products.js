@@ -1,5 +1,6 @@
 import WooCommerceRestApi from '@woocommerce/woocommerce-rest-api';
 import { requireSession } from '../../../lib/session';
+import db from '../../../lib/db';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const SERVER_CACHE_TTL = 5 * 60 * 1000;
@@ -196,10 +197,36 @@ export default async function handler(req, res) {
       };
     });
 
+    // Apply centrally stored admin exclusions to the POS catalog only.
+    // WooCommerce products and categories remain untouched on the webshop.
+    let excludedProductIds = [];
+    let excludedCategoryIds = [];
+    try {
+      await db.query(`CREATE TABLE IF NOT EXISTS pos_catalog_exclusions (
+        id TINYINT NOT NULL PRIMARY KEY,
+        excluded_products LONGTEXT NOT NULL,
+        excluded_categories LONGTEXT NOT NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      )`);
+      const [exclusionRows] = await db.query('SELECT excluded_products, excluded_categories FROM pos_catalog_exclusions WHERE id = 1');
+      if (exclusionRows[0]) {
+        excludedProductIds = JSON.parse(exclusionRows[0].excluded_products || '[]').map(Number);
+        excludedCategoryIds = JSON.parse(exclusionRows[0].excluded_categories || '[]').map(String);
+      }
+    } catch (exclusionError) {
+      console.error('[PRODUCTS API] Uitsluitingen konden niet worden geladen:', exclusionError.message);
+    }
+    const excludedProductSet = new Set(excludedProductIds);
+    const excludedCategorySet = new Set(excludedCategoryIds);
+    const visibleProducts = normalizedProducts.filter(product =>
+      !excludedProductSet.has(Number(product.id)) &&
+      !(product.categories || []).some(category => excludedCategorySet.has(String(category.id)))
+    );
+
     return {
       success: true,
-      count: normalizedProducts.length,
-      products: normalizedProducts,
+      count: visibleProducts.length,
+      products: visibleProducts,
       cached_at: new Date().toISOString()
     };
   })();
