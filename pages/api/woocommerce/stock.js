@@ -37,8 +37,10 @@ export default async function handler(req, res) {
   try {
     const assignedStoreIds = String(session.store_id || '').split(',').map(id => id.trim()).filter(Boolean);
     const isAdmin = ['admin', 'super_admin', 'administrator'].includes(String(session.role || '').toLowerCase());
-    const storeId = isAdmin && req.query.store_id ? String(req.query.store_id) : (assignedStoreIds[0] || null);
-    if (isAdmin && req.query.store_id) {
+    const storeId = req.query.store_id && (isAdmin || assignedStoreIds.includes(String(req.query.store_id)))
+      ? String(req.query.store_id)
+      : (assignedStoreIds[0] || null);
+    if (req.query.store_id && isAdmin) {
       const [storeRows] = await db.query('SELECT id FROM stores WHERE id = ? LIMIT 1', [storeId]);
       if (!storeRows[0]) return res.status(400).json({ success: false, error: 'Ongeldig filiaal.' });
     }

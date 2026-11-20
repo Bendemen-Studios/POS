@@ -9,7 +9,8 @@ export default function POSHome() {
   const [allStores, setAllStores] = useState([]);
   const [activeTab, setActiveTab] = useState(() => { if (typeof window !== 'undefined') return localStorage.getItem('pos_active_tab') || 'pos'; return 'pos'; });
   const [isChecking, setIsChecking] = useState(false);
-  const [products, setProducts] = useState(() => { if (typeof window !== 'undefined') { try { const saved = localStorage.getItem('pos_cached_products'); return saved ? JSON.parse(saved) : []; } catch (_) { return []; } } return []; });
+  const [products, setProducts] = useState(() => { if (typeof window !== 'undefined') { try { const savedStore = JSON.parse(localStorage.getItem('selectedStore') || localStorage.getItem('pos_selected_store') || 'null'); const storeId = savedStore?.id || savedStore?.store_id || 'default'; const saved = localStorage.getItem('pos_cached_products_' + storeId) || localStorage.getItem('pos_cached_products'); return saved ? JSON.parse(saved) : []; } catch (_) { return []; } } return []; });
+  const [catalogCategoryRules, setCatalogCategoryRules] = useState(() => { if (typeof window !== 'undefined') { try { const store = JSON.parse(localStorage.getItem('selectedStore') || localStorage.getItem('pos_selected_store') || 'null'); return JSON.parse(localStorage.getItem('pos_category_rules_' + (store?.id || store?.store_id || 'default')) || '{}'); } catch (_) {} } return {}; });
   const [cart, setCart] = useState(() => { if (typeof window !== 'undefined') { try { const saved = localStorage.getItem('pos_cart'); return saved ? JSON.parse(saved) : []; } catch (_) { return []; } } return []; });
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('ALL');
@@ -171,14 +172,38 @@ export default function POSHome() {
   }, []);
 
   const checkOfflineQueue = () => setPendingOfflineCount(readLocalArray('pos_offline_orders').length);
-  useEffect(() => { const refreshLocalState = () => { setPendingOfflineCount(readLocalArray('pos_offline_orders').length); const cached = readLocalArray('pos_cached_products'); setProducts(cached); const stored = localStorage.getItem('pos_selected_store') || localStorage.getItem('selectedStore'); if (stored) { try { setSelectedStore(JSON.parse(stored)); } catch (_) {} } }; window.addEventListener('storage', refreshLocalState); window.addEventListener('pos:ajax-refresh', refreshLocalState); window.addEventListener('pos:inventory-synced', refreshLocalState); return () => { window.removeEventListener('storage', refreshLocalState); window.removeEventListener('pos:ajax-refresh', refreshLocalState); window.removeEventListener('pos:inventory-synced', refreshLocalState); }; }, []);
+  useEffect(() => {
+    const refreshLocalState = event => {
+      setPendingOfflineCount(readLocalArray('pos_offline_orders').length);
+      const stored = localStorage.getItem('pos_selected_store') || localStorage.getItem('selectedStore');
+      let storeId = String(selectedStore?.id || selectedStore?.store_id || 1);
+      if (stored) {
+        try {
+          const savedStore = JSON.parse(stored);
+          storeId = String(savedStore.id || savedStore.store_id || 1);
+          setSelectedStore(savedStore);
+        } catch (_) {}
+      }
+      if (event?.detail?.storeId && String(event.detail.storeId) !== storeId) return;
+      const cached = readLocalArray('pos_cached_products_' + storeId, []);
+      if (cached.length || localStorage.getItem('pos_cached_products_' + storeId)) setProducts(cached);
+    };
+    window.addEventListener('storage', refreshLocalState);
+    window.addEventListener('pos:ajax-refresh', refreshLocalState);
+    window.addEventListener('pos:inventory-synced', refreshLocalState);
+    return () => {
+      window.removeEventListener('storage', refreshLocalState);
+      window.removeEventListener('pos:ajax-refresh', refreshLocalState);
+      window.removeEventListener('pos:inventory-synced', refreshLocalState);
+    };
+  }, [selectedStore?.id, selectedStore?.store_id]);
   const fetchStores = async () => { try { const res = await fetchWithServerCheck('/api/admin/store'); const data = await res.json(); if (!data.success) return; const parsedStores = (Array.isArray(data.stores) ? data.stores : data.store ? [data.store] : []).map(s => ({ ...s, payment_methods: parsePaymentMethods(s.payment_methods) })); setAllStores(parsedStores); localStorage.setItem('admin_cached_stores', JSON.stringify(parsedStores)); const storeStr = localStorage.getItem('selectedStore') || localStorage.getItem('pos_selected_store'); if (storeStr) { try { const savedStoreObj = JSON.parse(storeStr); const matchedCurrent = parsedStores.find(st => String(st.id || st.store_id) === String(savedStoreObj.id || savedStoreObj.store_id)); if (matchedCurrent) handleSelectStore(matchedCurrent, false); else if (parsedStores.length) handleSelectStore(parsedStores[0], false); } catch (_) { if (parsedStores.length) handleSelectStore(parsedStores[0], false); } } else if (parsedStores.length) handleSelectStore(parsedStores[0], false); } catch (err) { console.error('Fout bij ophalen winkels:', err); } };
   const handleSyncData = async () => { if (isSyncing) return; setIsSyncing(true); try { const results = await Promise.allSettled([fetchProducts(true), fetchCustomers(), fetchUsersAsCustomers(), fetchPickupOrders(), fetchStores()]); const productResult = results[0]; if (productResult.status === 'rejected') throw productResult.reason; await triggerOfflineSync(false); alert('Synchronisatie voltooid. Producten zijn opnieuw opgehaald.'); } catch (err) { console.error('[MANUAL SYNC] mislukt:', err); alert(`Synchronisatie niet volledig gelukt: ${err.message || 'De actuele productlijst kon niet worden opgehaald.'}`); } finally { setIsSyncing(false); } };
   const fetchQuickStock = async (orderItems = []) => {
     const ids = [...new Set(orderItems.map(item => Number(item.product_id || item.id)).filter(id => Number.isInteger(id) && id > 0 && !String(id).startsWith('custom_')))].slice(0, 40);
     if (!ids.length) return;
     try {
-      const res = await fetchWithServerCheck(`/api/woocommerce/stock?ids=${ids.join(',')}`, {}, 9000);
+      const res = await fetchWithServerCheck(`/api/woocommerce/stock?ids=${ids.join(',')}&store_id=${encodeURIComponent(selectedStore?.id || selectedStore?.store_id || 1)}`, {}, 9000);
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success || !Array.isArray(data.products)) return;
       setProducts(previous => {
@@ -193,28 +218,66 @@ export default function POSHome() {
           return { ...product, stock_quantity: fresh.stock_quantity, in_stock: fresh.in_stock, variations_data: variationsData };
         });
         try {
+          localStorage.setItem('pos_cached_products_' + String(selectedStore?.id || selectedStore?.store_id || 1), JSON.stringify(updated));
           localStorage.setItem('pos_cached_products', JSON.stringify(updated));
           localStorage.setItem('admin_products', JSON.stringify(updated));
           localStorage.setItem('pos_cached_products_updated_at', String(Date.now()));
         } catch (_) {}
         return updated;
       });
-      window.dispatchEvent(new CustomEvent('pos:inventory-synced', { detail: { quick: true, products: data.products } }));
+      window.dispatchEvent(new CustomEvent('pos:inventory-synced', { detail: { quick: true, products: data.products, storeId: String(selectedStore?.id || selectedStore?.store_id || 1) } }));
     } catch (err) {
       console.warn('[QUICK STOCK SYNC] voorraad blijft uit cache tot volgende sync:', err);
     }
   };
-  const fetchProducts = async (requireFresh = false) => { const cached = readLocalArray('pos_cached_products'); if (cached.length) setProducts(prev => prev.length ? prev : cached); try { const params = new URLSearchParams({ _sync: String(Date.now()) }); if (requireFresh) params.set('fresh', '1'); const res = await fetchWithServerCheck(`/api/woocommerce/products?${params.toString()}`, {}, requireFresh ? 90000 : 30000); const data = await res.json().catch(() => ({})); if (!res.ok || !data.success || !Array.isArray(data.products) || data.stale) { throw new Error(data.error || (data.stale ? 'WooCommerce gaf alleen verouderde cachegegevens terug.' : `Product-sync mislukt (HTTP ${res.status}).`)); } setProducts(data.products); localStorage.setItem('pos_cached_products', JSON.stringify(data.products)); localStorage.setItem('admin_products', JSON.stringify(data.products)); localStorage.setItem('pos_cached_products_updated_at', String(Date.now())); window.dispatchEvent(new CustomEvent('pos:inventory-synced', { detail: { products: data.products } })); return true; } catch (err) { console.warn('[PRODUCTS] Server niet bereikbaar; lokale productcache behouden.', err); if (requireFresh) throw err; return false; } };
+  const fetchProducts = async (requireFresh = false) => {
+    const storeId = String(selectedStore?.id || selectedStore?.store_id || 1);
+    const cacheKey = 'pos_cached_products_' + storeId;
+    const cached = readLocalArray(cacheKey, []);
+    if (cached.length) setProducts(cached);
+    try {
+      const params = new URLSearchParams({ _sync: String(Date.now()), store_id: storeId });
+      if (requireFresh) params.set('fresh', '1');
+      const res = await fetchWithServerCheck('/api/woocommerce/products?' + params.toString(), {}, requireFresh ? 90000 : 30000);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success || !Array.isArray(data.products) || data.stale) throw new Error(data.error || 'Product-sync mislukt.');
+      setProducts(data.products);
+      setCatalogCategoryRules(data.categoryRules || {});
+      localStorage.setItem(cacheKey, JSON.stringify(data.products));
+      localStorage.setItem('pos_cached_products', JSON.stringify(data.products));
+      localStorage.setItem('pos_category_rules_' + storeId, JSON.stringify(data.categoryRules || {}));
+      localStorage.setItem('admin_products', JSON.stringify(data.products));
+      localStorage.setItem('pos_cached_products_updated_at', String(Date.now()));
+      window.dispatchEvent(new CustomEvent('pos:inventory-synced', { detail: { products: data.products, storeId } }));
+      return true;
+    } catch (err) {
+      console.warn('[PRODUCTS] Server niet bereikbaar; lokale productcache behouden.', err);
+      if (requireFresh) throw err;
+      return false;
+    }
+  };
+  useEffect(() => {
+    if (selectedStore?.id || selectedStore?.store_id) { setSelectedCategory('ALL'); fetchProducts(false); }
+  }, [selectedStore?.id, selectedStore?.store_id]);
+
   const fetchCustomers = async () => { try { const res = await fetchWithServerCheck('/api/woocommerce/customers'); const data = await res.json(); if (data.success && data.customers) { setCustomers(data.customers); localStorage.setItem('pos_cached_customers', JSON.stringify(data.customers)); } } catch (err) { console.error('Fout bij ophalen klanten:', err); } };
   const fetchUsersAsCustomers = async () => { try { const res = await fetchWithServerCheck('/api/admin/users'); const data = await res.json(); if (data.success && data.users) { const staffAsCustomers = data.users.map(u => ({ id: `user_${u.id}`, username: u.username || '', user_login: u.username || '', first_name: u.username || '', last_name: u.role ? `(${u.role})` : '(Gebruiker)', email: u.email || `${u.username}@bendemen.local` })); setCustomers(prev => { const existingIds = new Set(prev.map(c => String(c.id))); const merged = [...prev, ...staffAsCustomers.filter(s => !existingIds.has(String(s.id)))]; localStorage.setItem('pos_cached_customers', JSON.stringify(merged)); return merged; }); } } catch (err) { console.error('Fout bij ophalen gebruikers:', err); } };
   const fetchPickupOrders = async () => { const cached = readLocalArray('pos_cached_pickup_orders'); if (cached.length) setPickupOrders(prev => prev.length ? prev : cached); try { setLoadingPickup(true); const res = await fetchWithServerCheck('/api/woocommerce/pickup-order'); const data = await res.json().catch(() => ({})); if (res.ok && data.success) { const orders = Array.isArray(data.orders) ? data.orders : []; setPickupOrders(orders); localStorage.setItem('pos_cached_pickup_orders', JSON.stringify(orders)); } } catch (err) { console.warn('[PICKUP] Server niet bereikbaar; lokale afhaalcache behouden.', err); } finally { setLoadingPickup(false); } };
   const syncOfflinePickupActions = async () => { const queue = readLocalArray('pos_offline_pickup_actions'); if (!queue.length || (typeof navigator !== 'undefined' && navigator.onLine === false)) return; const remaining = []; for (const action of queue) { try { const res = await fetchWithServerCheck('/api/woocommerce/pickup-order', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ order_id: action.orderId, status: action.status || 'completed' }) }, 15000); const data = await res.json().catch(() => ({})); if (!(res.ok && data.success)) remaining.push(action); } catch (_) { remaining.push(action); } } if (remaining.length) localStorage.setItem('pos_offline_pickup_actions', JSON.stringify(remaining)); else localStorage.removeItem('pos_offline_pickup_actions'); if (!remaining.length) await fetchPickupOrders(); };
   const handleMarkAsPickedUp = async orderId => { if (!confirm(`Weet je zeker dat bestelling #${orderId} is opgehaald? De status wordt gewijzigd naar Voltooid.`)) return; setPickupOrders(prev => prev.filter(o => o.id !== orderId)); try { const res = await fetchWithServerCheck('/api/woocommerce/pickup-order', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ order_id: orderId, status: 'completed' }) }, 15000); const data = await res.json().catch(() => ({})); if (res.ok && data.success) { localStorage.setItem('pos_cached_pickup_orders', JSON.stringify(pickupOrders.filter(o => o.id !== orderId))); alert(`Bestelling #${orderId} succesvol gemarkeerd als opgehaald!`); } else throw new Error(data.error || 'Onbekende fout'); } catch (err) { const queue = readLocalArray('pos_offline_pickup_actions'); if (!queue.some(a => String(a.orderId) === String(orderId))) queue.push({ orderId, status: 'completed', timestamp: new Date().toISOString() }); localStorage.setItem('pos_offline_pickup_actions', JSON.stringify(queue)); localStorage.setItem('pos_cached_pickup_orders', JSON.stringify(pickupOrders.filter(o => o.id !== orderId))); alert(`⚠️ Server niet bereikbaar. Bestelling #${orderId} is lokaal als opgehaald gemarkeerd en wordt automatisch gesynchroniseerd.`); } };
   const handleLogout = () => { localStorage.removeItem('pos_user'); localStorage.removeItem('pos_token'); localStorage.removeItem('pos_cart'); localStorage.removeItem('pos_selected_customer'); router.replace('/login'); };
-  const EXCLUDED_CATEGORIES = ['Ophaal Geschikt', 'Externe Productie', 'Kids'];
-  const getProductCategory = product => { if (product.categories?.length) { const validCategory = product.categories.find(cat => !EXCLUDED_CATEGORIES.includes(cat.name)); if (validCategory) return validCategory.name; } return 'Overige'; };
-  const activeProducts = products.filter(p => !p.categories?.length || p.categories.some(cat => !EXCLUDED_CATEGORIES.includes(cat.name)));
-  const categoriesList = Array.from(new Set(activeProducts.map(getProductCategory)));
+  const getProductCategory = product => {
+    const assigned = Array.isArray(product.categories) ? product.categories : [];
+    if (!assigned.length) return 'Overige';
+    const primaryId = Number(product.primary_category_id || product.primary_category?.id || 0);
+    const primary = assigned.find(category => Number(category.id) === primaryId);
+    if (primary) return primary.name;
+    return [...assigned].sort((a, b) => (Number(catalogCategoryRules[String(b.id)]?.priority) || 0) - (Number(catalogCategoryRules[String(a.id)]?.priority) || 0) || String(a.name).localeCompare(String(b.name)))[0]?.name || 'Overige';
+  };
+  // Server applies this branch's exclusions; legacy name-based filters caused incorrect hiding.
+  const activeProducts = products;
+  const categoryPriority = name => activeProducts.flatMap(product => (product.categories || []).filter(category => category.name === name).map(category => String(category.id))).reduce((max, id) => Math.max(max, Number(catalogCategoryRules[id]?.priority) || 0), 0);
+  const categoriesList = Array.from(new Set(activeProducts.map(getProductCategory))).sort((a, b) => categoryPriority(b) - categoryPriority(a) || a.localeCompare(b));
   const handleProductClick = product => { const productVariations = Array.isArray(product.variations_data) && product.variations_data.length ? product.variations_data : (Array.isArray(product.variations) && typeof product.variations[0] === 'object' ? product.variations : []); if (productVariations.length) { setSelectedProductForVariations({ ...product, variations_data: productVariations }); return; } const stock = product.stock_quantity; const price = parseFloat(product.price || 0); if (stock !== null && stock !== undefined && Number(stock) <= 0) { setStockWarningModal({ show: true, product, variation: null, price, cartItemId: null, quantityDelta: 1 }); return; } if (product.price === '' || product.price === null || (price === 0 && !product.is_fixed_zero)) { setOpenAmountProduct(product); setCustomPriceInput(''); return; } addToCart(product, price); };
   const handleConfirmOpenAmount = () => { const price = parseFloat(customPriceInput); if (isNaN(price) || price < 0) { alert('Voer een geldig bedrag in (0 of hoger).'); return; } const stock = openAmountProduct.stock_quantity; if (stock !== null && stock !== undefined && Number(stock) <= 0) { setStockWarningModal({ show: true, product: openAmountProduct, variation: null, price }); setOpenAmountProduct(null); setCustomPriceInput(''); return; } const openAmountId = `${openAmountProduct.id}_open_${price.toFixed(2)}`; addToCartCustom({ ...openAmountProduct, id: openAmountId, product_id: openAmountProduct.id, variation_id: 0, price, name: openAmountProduct.name, is_open_amount: true }); setOpenAmountProduct(null); setCustomPriceInput(''); };
   const handleAddCustomItem = () => { if (!customItem.name || customItem.price === '') { alert('Vul aub een naam en bedrag in.'); return; } const price = parseFloat(customItem.price); if (isNaN(price) || price < 0) { alert('Voer een geldig bedrag in.'); return; } addToCartCustom({ id: `custom_${Date.now()}`, product_id: 0, variation_id: 0, name: customItem.name, price, quantity: 1 }); setCustomItem({ name: '', price: '' }); setShowCustomModal(false); };
