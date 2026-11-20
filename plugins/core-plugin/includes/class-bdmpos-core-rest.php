@@ -247,7 +247,7 @@ final class BDMPOS_Core_REST {
 			}
 		}
 		if ( ! $service_user_id ) {
-			return new WP_Error( 'bdmpos_core_service_user_missing', 'Create or enable a WooCommerce administrator/shop manager account for Core operations.', array( 'status' => 503 ) );
+			return new WP_Error( 'bdmpos_core_service_user_missing', 'Create or enable a WordPress administrator account with WooCommerce management permissions for Core operations.', array( 'status' => 503 ) );
 		}
 		$previous_user_id = get_current_user_id();
 		try {
