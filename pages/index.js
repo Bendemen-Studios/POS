@@ -179,7 +179,7 @@ export default function POSHome() {
     const ids = [...new Set(orderItems.map(item => Number(item.product_id || item.id)).filter(id => Number.isInteger(id) && id > 0 && !String(id).startsWith('custom_')))].slice(0, 40);
     if (!ids.length) return;
     try {
-      const res = await fetchWithServerCheck(`/api/woocommerce/stock?ids=${ids.join(',')}`, {}, 9000);
+      const res = await fetchWithServerCheck(`/api/woocommerce/stock?ids=${ids.join(',')}&store_id=${encodeURIComponent(selectedStore?.id || selectedStore?.store_id || 1)}`, {}, 9000);
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success || !Array.isArray(data.products)) return;
       setProducts(previous => {
