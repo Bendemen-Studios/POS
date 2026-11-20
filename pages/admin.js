@@ -319,11 +319,16 @@ export default function AdminDashboard() {
       const res = await fetch(`/api/woocommerce/products?include_excluded=1&_sync=${Date.now()}`, { cache: 'no-store' });
       const data = await res.json();
       if (data.success) {
-        setProducts(data.products || []);
+        const syncedProducts = data.products || [];
+        setProducts(syncedProducts);
         setCatalogCategories(data.catalogCategories || []);
         localStorage.setItem('admin_catalog_categories', JSON.stringify(data.catalogCategories || []));
-        localStorage.setItem('admin_products', JSON.stringify(data.products || []));
-        alert('Producten succesvol gesynchroniseerd met WooCommerce!');
+        localStorage.setItem('admin_products', JSON.stringify(syncedProducts));
+        localStorage.setItem('pos_cached_products', JSON.stringify(syncedProducts));
+        localStorage.setItem('pos_cached_products_updated_at', String(Date.now()));
+        window.dispatchEvent(new CustomEvent('pos:inventory-synced', { detail: { products: syncedProducts, manual: true } }));
+        window.dispatchEvent(new CustomEvent('pos:ajax-refresh', { detail: { manualProductSync: true } }));
+        alert('Producten succesvol gesynchroniseerd. De POS is ververst.');
       } else {
         alert('Fout bij synchroniseren van producten.');
       }
