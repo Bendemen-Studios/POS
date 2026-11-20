@@ -346,12 +346,26 @@ export default function POSHome() {
     return result;
   };
   const getAssignedCategoryIds = product => {
-    const ids = (Array.isArray(product.categories) ? product.categories : [])
-      .map(category => String(category?.id ?? category))
-      .filter(id => id && id !== 'undefined' && id !== 'null');
-    const primaryId = product.primary_category_id || product.primary_category?.id;
-    if (primaryId) ids.push(String(primaryId));
-    return [...new Set(ids)];
+    const assigned = Array.isArray(product.categories)
+      ? product.categories.filter(category => category && (category.id ?? category) != null)
+      : [];
+    const primaryId = Number(product.primary_category_id || product.primary_category?.id || 0);
+    if (!assigned.length) return primaryId ? [String(primaryId)] : [];
+
+    // A product is shown under its highest-priority assigned category only.
+    // This prevents excluded secondary categories (for example Ophaal Geschikt)
+    // from reintroducing products that belong to a higher-priority category.
+    const winner = [...assigned].sort((a, b) => {
+      const idA = String(a.id ?? a);
+      const idB = String(b.id ?? b);
+      const priorityA = Number(catalogCategoryRules[idA]?.priority) || 0;
+      const priorityB = Number(catalogCategoryRules[idB]?.priority) || 0;
+      return priorityB - priorityA ||
+        (Number(idB) === primaryId ? 1 : 0) - (Number(idA) === primaryId ? 1 : 0) ||
+        idA.localeCompare(idB);
+    })[0];
+    const winnerId = String(winner.id ?? winner);
+    return winnerId ? [winnerId] : [];
   };
   const topLevelCategories = catalogCategories.filter(category => {
     const parentId = String(category.parent || '0');
