@@ -10,7 +10,7 @@ export default function POSHome() {
   const [allStores, setAllStores] = useState([]);
   const [activeTab, setActiveTab] = useState(() => { if (typeof window !== 'undefined') return localStorage.getItem('pos_active_tab') || 'pos'; return 'pos'; });
   const [isChecking, setIsChecking] = useState(false);
-  const [products, setProducts] = useState(() => { if (typeof window !== 'undefined') { try { const savedStore = JSON.parse(localStorage.getItem('selectedStore') || localStorage.getItem('pos_selected_store') || 'null'); const storeId = savedStore?.id || savedStore?.store_id || 'default'; const saved = localStorage.getItem('pos_cached_products_' + storeId) || localStorage.getItem('pos_cached_products'); return saved ? JSON.parse(saved) : []; } catch (_) { return []; } } return []; });
+  const [products, setProducts] = useState(() => { if (typeof window !== 'undefined') { try { const savedStore = JSON.parse(localStorage.getItem('selectedStore') || localStorage.getItem('pos_selected_store') || 'null'); const storeId = savedStore?.id || savedStore?.store_id; if (!storeId) return []; const saved = localStorage.getItem('pos_cached_products_' + storeId); return saved ? JSON.parse(saved) : []; } catch (_) { return []; } } return []; });
   const [catalogCategoryRules, setCatalogCategoryRules] = useState(() => { if (typeof window !== 'undefined') { try { const store = JSON.parse(localStorage.getItem('selectedStore') || localStorage.getItem('pos_selected_store') || 'null'); return JSON.parse(localStorage.getItem('pos_category_rules_' + (store?.id || store?.store_id || 'default')) || '{}'); } catch (_) {} } return {}; });
   const [cart, setCart] = useState(() => { if (typeof window !== 'undefined') { try { const saved = localStorage.getItem('pos_cart'); return saved ? JSON.parse(saved) : []; } catch (_) { return []; } } return []; });
   const [searchQuery, setSearchQuery] = useState('');
@@ -208,7 +208,8 @@ export default function POSHome() {
       await fetchStores();
       let storeId = selectedStore?.id || selectedStore?.store_id || null;
       try { const saved = JSON.parse(localStorage.getItem('selectedStore') || localStorage.getItem('pos_selected_store') || 'null'); storeId = saved?.id || saved?.store_id || storeId; } catch (_) {}
-      const productsOk = await fetchProducts(true, String(storeId || 1));
+      if (!storeId) throw new Error('Selecteer eerst een filiaal voordat je synchroniseert.');
+      const productsOk = await fetchProducts(true, String(storeId));
       if (!productsOk) throw new Error('De productcatalogus kon niet worden bijgewerkt. Controleer de verbinding met de POS-server en probeer opnieuw.');
       await Promise.allSettled([fetchCustomers(), fetchUsersAsCustomers(), fetchPickupOrders()]);
       await triggerOfflineSync(false);
@@ -251,19 +252,18 @@ export default function POSHome() {
   };
   const fetchProducts = async (requireFresh = false, requestedStoreId = null) => {
     const storedSelection = (() => { try { return JSON.parse(localStorage.getItem('selectedStore') || localStorage.getItem('pos_selected_store') || 'null'); } catch (_) { return null; } })();
-    const storeId = String(requestedStoreId || selectedStore?.id || selectedStore?.store_id || storedSelection?.id || storedSelection?.store_id || 1);
-    const cacheKey = 'pos_cached_products_' + storeId;
-    // Migrate the pre-branch cache once for installations upgrading from the
-    // older POS. This avoids an empty catalog while the first branch sync runs.
-    let cached = readLocalArray(cacheKey, []);
-    if (!cached.length) {
-      const legacyCached = readLocalArray('pos_cached_products', []);
-      if (legacyCached.length) {
-        cached = legacyCached;
-        try { localStorage.setItem(cacheKey, JSON.stringify(legacyCached)); } catch (_) {}
-      }
+    const selectedId = requestedStoreId || selectedStore?.id || selectedStore?.store_id || storedSelection?.id || storedSelection?.store_id;
+    if (!selectedId) {
+      setProducts([]);
+      setCatalogCategoryRules({});
+      return false;
     }
-    if (cached.length) setProducts(cached);
+    const storeId = String(selectedId);
+    const cacheKey = 'pos_cached_products_' + storeId;
+    // Never fall back to the old shared cache: it may contain products excluded
+    // for another branch. Only this branch's own cache is safe to display.
+    const cached = readLocalArray(cacheKey, []);
+    setProducts(cached);
     try {
       const params = new URLSearchParams({ _sync: String(Date.now()), store_id: storeId });
       if (requireFresh) params.set('fresh', '1');
@@ -521,7 +521,7 @@ export default function POSHome() {
   };
   const storeDisplayName = selectedStore?.store_name || selectedStore?.name || 'Selecteer Filiaal';
   const filteredPickupOrders = pickupOrders.filter(order => !selectedStore?.pickup_id || order.shipping_lines?.some(s => s.meta_data?.some(m => m.key === 'pickup_location_id' && m.value === String(selectedStore.pickup_id))));
-  const filteredProducts = activeProducts.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase()) && (selectedCategory === 'ALL' || getProductCategory(p) === selectedCategory));
+  const filteredProducts = selectedStore ? activeProducts.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase()) && (selectedCategory === 'ALL' || getProductCategory(p) === selectedCategory)) : [];
   const filteredCustomers = customers.filter(c => `${c.first_name || ''} ${c.last_name || ''} ${c.email || ''} ${c.username || ''} ${c.user_login || ''} ${c.login || ''}`.toLowerCase().includes(customerSearch.toLowerCase()));
   if (isChecking || !currentUser) return <div className="min-h-screen bg-black flex flex-col items-center justify-center p-4"><div className="text-center space-y-2"><h1 className="text-white font-black text-xl tracking-wider">BDM POS</h1><div className="text-red-600 font-bold text-xs uppercase tracking-widest animate-pulse">Sessie controleren...</div></div></div>;
   const paymentMethods = selectedStore?.payment_methods || { sumup: true, manual_pin: true, cash: true };
