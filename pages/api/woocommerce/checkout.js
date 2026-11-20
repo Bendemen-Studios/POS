@@ -38,7 +38,7 @@ async function findExistingWooOrder(url, authHeader, clientOrderId) {
           Connection: 'close',
         },
       },
-      7000
+      20000
     );
     if (!response.ok) {
       throw new Error(`WooCommerce kon bestaande bestellingen niet controleren (HTTP ${response.status}).`);
@@ -289,7 +289,7 @@ export default async function handler(req, res) {
         method: 'POST',
         headers: customHeaders,
         body: JSON.stringify(orderData)
-      }, 25000);
+      }, 60000);
       const responseText = await fetchRes.text();
       if (!fetchRes.ok) throw new Error(`HTTP ${fetchRes.status}: ${responseText}`);
       responseOrder = JSON.parse(responseText);
@@ -343,7 +343,7 @@ export default async function handler(req, res) {
         console.error('[CHECKOUT IDEMPOTENCY RELEASE ERROR]:', releaseError.message);
       }
     }
-    console.error('[CHECKOUT API ERROR]:', error);
+    console.error('[CHECKOUT API ERROR]:', error?.name || 'Error', error?.message || error, error?.stack || '');
     return res.status(500).json({ success: false, error: error.message || 'Checkout mislukt.' });
   }
 }
