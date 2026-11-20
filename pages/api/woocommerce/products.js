@@ -1,4 +1,6 @@
 import WooCommerceRestApi from '@woocommerce/woocommerce-rest-api';
+import axios from 'axios';
+import https from 'https';
 import { requireSession } from '../../../lib/session';
 import db from '../../../lib/db';
 import { getStoreCatalogExclusions, isCatalogProductVisible } from '../../../lib/catalog-exclusions';
@@ -92,24 +94,19 @@ export default async function handler(req, res) {
       'Cache-Control': 'no-cache'
     };
 
+    // Bind only WooCommerce HTTPS traffic to the VPS IP that can reach
+    // bendemen.com. Leave the server-wide default route and Mailcow untouched.
+    const wooLocalAddress = process.env.WOOCOMMERCE_LOCAL_ADDRESS || '45.135.148.12';
+    const wooHttpsAgent = new https.Agent({ keepAlive: true, localAddress: wooLocalAddress });
+
     const fetchJson = async (endpoint, options = {}, timeoutMs = 20000) => {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-      try {
-        const response = await fetch(endpoint, {
-          ...options,
-          headers: { ...customHeaders, ...(options.headers || {}) },
-          cache: 'no-store',
-          signal: controller.signal
-        });
-        const text = await response.text();
-        let data = null;
-        try { data = text ? JSON.parse(text) : null; } catch (_) { data = null; }
-        if (!response.ok) throw new Error(`HTTP ${response.status}: ${text.slice(0, 500)}`);
-        return data;
-      } finally {
-        clearTimeout(timer);
-      }
+      const response = await axios.get(endpoint, {
+        headers: { ...customHeaders, ...(options.headers || {}) },
+        timeout: timeoutMs,
+        httpsAgent: wooHttpsAgent,
+        ...(options.params ? { params: options.params } : {})
+      });
+      return response.data;
     };
 
     const batchSize = 100;
@@ -127,7 +124,7 @@ export default async function handler(req, res) {
         } catch (fetchErr) {
           console.warn(`[PRODUCTS API]: ${productStatus} batch ${page} via fetch mislukt: ${fetchErr.message}. Probeert SDK fallback...`);
           try {
-            const api = new WooCommerceRestApi({ url, consumerKey, consumerSecret, version: 'wc/v3', axiosConfig: { timeout: 25000, headers: customHeaders } });
+            const api = new WooCommerceRestApi({ url, consumerKey, consumerSecret, version: 'wc/v3', axiosConfig: { timeout: 25000, headers: customHeaders, httpsAgent: wooHttpsAgent } });
             const response = await api.get('products', { per_page: batchSize, page, status: productStatus, orderby: 'menu_order', order: 'asc' });
             rawProducts = response.data || [];
           } catch (sdkErr) {
