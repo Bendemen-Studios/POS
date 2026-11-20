@@ -301,12 +301,18 @@ export default function POSHome() {
   const handleMarkAsPickedUp = async orderId => { if (!confirm(`Weet je zeker dat bestelling #${orderId} is opgehaald? De status wordt gewijzigd naar Voltooid.`)) return; setPickupOrders(prev => prev.filter(o => o.id !== orderId)); try { const res = await fetchWithServerCheck('/api/woocommerce/pickup-order', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ order_id: orderId, status: 'completed' }) }, 15000); const data = await res.json().catch(() => ({})); if (res.ok && data.success) { localStorage.setItem('pos_cached_pickup_orders_' + String(selectedStore?.id || selectedStore?.store_id || 1), JSON.stringify(pickupOrders.filter(o => o.id !== orderId))); alert(`Bestelling #${orderId} succesvol gemarkeerd als opgehaald!`); } else throw new Error(data.error || 'Onbekende fout'); } catch (err) { const queue = readLocalArray('pos_offline_pickup_actions'); if (!queue.some(a => String(a.orderId) === String(orderId))) queue.push({ orderId, status: 'completed', timestamp: new Date().toISOString() }); localStorage.setItem('pos_offline_pickup_actions', JSON.stringify(queue)); localStorage.setItem('pos_cached_pickup_orders_' + String(selectedStore?.id || selectedStore?.store_id || 1), JSON.stringify(pickupOrders.filter(o => o.id !== orderId))); alert(`⚠️ Server niet bereikbaar. Bestelling #${orderId} is lokaal als opgehaald gemarkeerd en wordt automatisch gesynchroniseerd.`); } };
   const handleLogout = () => { localStorage.removeItem('pos_user'); localStorage.removeItem('pos_token'); localStorage.removeItem('pos_cart'); localStorage.removeItem('pos_selected_customer'); localStorage.removeItem('selectedStore'); localStorage.removeItem('pos_selected_store'); localStorage.removeItem('admin_cached_stores'); router.replace('/login'); };
   const getProductCategory = product => {
-    const assigned = Array.isArray(product.categories) ? product.categories : [];
+    const assigned = Array.isArray(product.categories) ? product.categories.filter(category => category && category.id != null) : [];
     if (!assigned.length) return 'Overige';
     const primaryId = Number(product.primary_category_id || product.primary_category?.id || 0);
-    const primary = assigned.find(category => Number(category.id) === primaryId);
-    if (primary) return primary.name;
-    return [...assigned].sort((a, b) => (Number(catalogCategoryRules[String(b.id)]?.priority) || 0) - (Number(catalogCategoryRules[String(a.id)]?.priority) || 0) || String(a.name).localeCompare(String(b.name)))[0]?.name || 'Overige';
+    // Category priority is the explicit POS rule: the highest priority wins.
+    // WooCommerce's primary category is only a tie-breaker when priorities match.
+    return [...assigned].sort((a, b) => {
+      const priorityA = Number(catalogCategoryRules[String(a.id)]?.priority) || 0;
+      const priorityB = Number(catalogCategoryRules[String(b.id)]?.priority) || 0;
+      return priorityB - priorityA ||
+        (Number(b.id) === primaryId ? 1 : 0) - (Number(a.id) === primaryId ? 1 : 0) ||
+        String(a.name || '').localeCompare(String(b.name || ''));
+    })[0]?.name || 'Overige';
   };
   // Server applies this branch's exclusions; legacy name-based filters caused incorrect hiding.
   const activeProducts = products;
