@@ -365,27 +365,14 @@ export default function POSHome() {
     })
     .filter(category => category.count > 0);
 
-  // Safety fallback: if the category endpoint/cache is missing or its IDs do
-  // not match the product payload, never leave the POS with only "Alles".
-  // Reconstruct the categories from assigned product categories until the
-  // full category tree is available again.
-  const categoriesFromProducts = new Map();
-  activeProducts.forEach(product => {
-    (Array.isArray(product.categories) ? product.categories : []).forEach(category => {
-      if (category && category.id != null) {
-        const id = String(category.id);
-        if (!categoriesFromProducts.has(id)) {
-          categoriesFromProducts.set(id, { id, name: category.name || 'Categorie', count: 0 });
-        }
-        categoriesFromProducts.get(id).count += 1;
-      }
-    });
-  });
-  const categoriesList = (categoriesFromTree.length ? categoriesFromTree : [...categoriesFromProducts.values()])
-    .sort((a, b) =>
-      (Number(catalogCategoryRules[String(b.id)]?.priority) || 0) - (Number(catalogCategoryRules[String(a.id)]?.priority) || 0) ||
-      a.name.localeCompare(b.name) || a.id.localeCompare(b.id)
-    );
+  // Never infer a category's parent from product assignments: products only
+  // carry category IDs/names, not the hierarchy. If the full WooCommerce tree
+  // is unavailable, keep the category bar empty until refresh rather than
+  // accidentally exposing every subcategory as a top-level button.
+  const categoriesList = categoriesFromTree.sort((a, b) =>
+    (Number(catalogCategoryRules[String(b.id)]?.priority) || 0) - (Number(catalogCategoryRules[String(a.id)]?.priority) || 0) ||
+    a.name.localeCompare(b.name) || a.id.localeCompare(b.id)
+  );
   const handleProductClick = product => { const productVariations = Array.isArray(product.variations_data) && product.variations_data.length ? product.variations_data : (Array.isArray(product.variations) && typeof product.variations[0] === 'object' ? product.variations : []); if (productVariations.length) { setSelectedProductForVariations({ ...product, variations_data: productVariations }); return; } const stock = product.stock_quantity; const price = parseFloat(product.price || 0); if (stock !== null && stock !== undefined && Number(stock) <= 0) { setStockWarningModal({ show: true, product, variation: null, price, cartItemId: null, quantityDelta: 1 }); return; } if (product.price === '' || product.price === null || (price === 0 && !product.is_fixed_zero)) { setOpenAmountProduct(product); setCustomPriceInput(''); return; } addToCart(product, price); };
   const handleConfirmOpenAmount = () => { const price = parseFloat(customPriceInput); if (isNaN(price) || price < 0) { alert('Voer een geldig bedrag in (0 of hoger).'); return; } const stock = openAmountProduct.stock_quantity; if (stock !== null && stock !== undefined && Number(stock) <= 0) { setStockWarningModal({ show: true, product: openAmountProduct, variation: null, price }); setOpenAmountProduct(null); setCustomPriceInput(''); return; } const openAmountId = `${openAmountProduct.id}_open_${price.toFixed(2)}`; addToCartCustom({ ...openAmountProduct, id: openAmountId, product_id: openAmountProduct.id, variation_id: 0, price, name: openAmountProduct.name, is_open_amount: true }); setOpenAmountProduct(null); setCustomPriceInput(''); };
   const handleAddCustomItem = () => { if (!customItem.name || customItem.price === '') { alert('Vul aub een naam en bedrag in.'); return; } const price = parseFloat(customItem.price); if (isNaN(price) || price < 0) { alert('Voer een geldig bedrag in.'); return; } addToCartCustom({ id: `custom_${Date.now()}`, product_id: 0, variation_id: 0, name: customItem.name, price, quantity: 1 }); setCustomItem({ name: '', price: '' }); setShowCustomModal(false); };
