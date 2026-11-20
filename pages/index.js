@@ -21,6 +21,7 @@ export default function POSHome() {
   const [showCustomModal, setShowCustomModal] = useState(false);
   const [customItem, setCustomItem] = useState({ name: '', price: '' });
   const [showStoreModal, setShowStoreModal] = useState(false);
+  useEffect(() => { if (!selectedStore && allStores.length > 0) setShowStoreModal(true); }, [selectedStore, allStores.length]);
   const [completedOrderForReceipt, setCompletedOrderForReceipt] = useState(null);
   const [stockWarningModal, setStockWarningModal] = useState({ show: false, product: null, variation: null, price: 0, cartItemId: null, quantityDelta: 1 });
   const [customers, setCustomers] = useState(() => { if (typeof window !== 'undefined') { try { const saved = localStorage.getItem('pos_cached_customers'); return saved ? JSON.parse(saved) : []; } catch (_) { return []; } } return []; });
