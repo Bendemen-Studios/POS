@@ -1,20 +1,16 @@
+import axios from 'axios';
+import { getWooHttpsAgent } from '../../../lib/woocommerce-transport';
 import { requireSession } from '../../../lib/session';
 import db from '../../../lib/db';
 import { getStoreCatalogExclusions, isCatalogProductVisible } from '../../../lib/catalog-exclusions';
 
-const fetchWithTimeout = async (url, options, timeoutMs = 7000) => {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(url, { ...options, signal: controller.signal, cache: 'no-store' });
-    const text = await response.text();
-    let data;
-    try { data = text ? JSON.parse(text) : null; } catch (_) { data = null; }
-    if (!response.ok) throw new Error(`WooCommerce HTTP ${response.status}`);
-    return data;
-  } finally {
-    clearTimeout(timer);
-  }
+const fetchWithTimeout = async (url, options = {}, timeoutMs = 7000) => {
+  const response = await axios.get(url, {
+    timeout: timeoutMs,
+    httpsAgent: getWooHttpsAgent(),
+    headers: options.headers || {},
+  });
+  return response.data;
 };
 
 export default async function handler(req, res) {
