@@ -326,6 +326,10 @@ export default function AdminDashboard() {
     }
   };
 
+  useEffect(() => {
+    if (selectedCatalogStoreId) fetchProductsSilently();
+  }, [selectedCatalogStoreId]);
+
   const handleManualSyncProducts = async () => {
     setLoading(true);
     try {
@@ -945,7 +949,17 @@ export default function AdminDashboard() {
             {activeTab === 'inventory' && (
               <div className="bg-white rounded-lg shadow p-4 sm:p-6">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
-                  <h3 className="text-sm sm:text-md font-bold">📦 Producten & Variaties Voorraad ({products.length})</h3>
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                    <h3 className="text-sm sm:text-md font-bold">📦 Producten & Variaties Voorraad ({products.length})</h3>
+                    <select value={selectedCatalogStoreId} onChange={e => {
+                      const id = e.target.value;
+                      setSelectedCatalogStoreId(id);
+                      localStorage.setItem('admin_catalog_store_id', id);
+                    }} className="border rounded p-2 text-xs">
+                      <option value="">Selecteer filiaal...</option>
+                      {stores.map(store => <option key={store.id || store.store_id} value={store.id || store.store_id}>{store.store_name || store.name}</option>)}
+                    </select>
+                  </div>
                   <button onClick={handleManualSyncProducts} disabled={loading} className="bg-black text-white px-3 py-2 rounded text-xs font-bold w-full sm:w-auto">🔄 Sync</button>
                 </div>
 
