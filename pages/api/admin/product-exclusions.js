@@ -42,15 +42,9 @@ export default async function handler(req, res) {
       if (rows[0]) {
         return res.status(200).json({ success: true, storeId, excludedProducts: parse(rows[0].excluded_products, []), excludedCategories: [], categoryRules: parse(rows[0].category_rules, {}), configured: true });
       }
-      // Show the existing global configuration as the initial settings for a branch,
-      // without changing or deleting the original global record.
-      const [legacyRows] = await db.query('SELECT excluded_products, excluded_categories, category_rules FROM pos_catalog_exclusions WHERE id = 1');
-      const legacy = legacyRows[0] || {};
-      const categoryRules = parse(legacy.category_rules, {});
-      for (const id of parse(legacy.excluded_categories, [])) {
-        if (!categoryRules[String(id)]) categoryRules[String(id)] = { excluded: true, priority: 0 };
-      }
-      return res.status(200).json({ success: true, storeId, excludedProducts: parse(legacy.excluded_products, []), excludedCategories: parse(legacy.excluded_categories, []), categoryRules, configured: false });
+      // A branch without its own row starts with empty settings. Do not
+      // silently inherit another/global configuration.
+      return res.status(200).json({ success: true, storeId, excludedProducts: [], excludedCategories: [], categoryRules: {}, configured: false });
     }
     if (req.method === 'PUT') {
       const products = [...new Set((Array.isArray(req.body?.excludedProducts) ? req.body.excludedProducts : []).map(Number).filter(id => Number.isInteger(id) && id > 0))];
