@@ -248,7 +248,7 @@ export default async function handler(req, res) {
     cache.updatedAt = Date.now();
     res.setHeader('Cache-Control', 'private, max-age=0, stale-while-revalidate=300');
     res.setHeader('X-POS-Product-Cache', 'MISS');
-    return res.status(200).json(data);
+    return res.status(200).json(formatResponse(data));
   } catch (error) {
     // If WooCommerce is temporarily down, serve the last VPS cache rather than failing the POS.
     if (cache.data) {
