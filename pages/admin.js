@@ -13,20 +13,22 @@ function buildCategoryRows(categories, search = '') {
   });
   byParent.forEach(children => children.sort((a, b) => String(a.name).localeCompare(String(b.name))));
   const query = String(search || '').trim().toLowerCase();
-  const rows = [];
   const visited = new Set();
   const visit = (parentId, depth) => {
+    const output = [];
     for (const category of byParent.get(parentId) || []) {
       if (visited.has(Number(category.id))) continue;
       visited.add(Number(category.id));
-      const start = rows.length;
-      visit(Number(category.id), depth + 1);
-      const descendants = rows.slice(start);
-      if (!query || String(category.name || '').toLowerCase().includes(query) || descendants.length) rows.unshift({ category, depth });
-      else rows.splice(start, descendants.length);
+      const descendants = visit(Number(category.id), depth + 1);
+      const matches = !query || String(category.name || '').toLowerCase().includes(query);
+      if (matches || descendants.length) {
+        output.push({ category, depth }, ...descendants);
+      }
     }
+    return output;
   };
-  visit(0, 0);
+  const rows = visit(0, 0);
+  // Include orphaned terms (e.g. a missing parent) without dropping them.
   items.filter(category => !visited.has(Number(category.id))).sort((a, b) => String(a.name).localeCompare(String(b.name))).forEach(category => {
     if (!query || String(category.name || '').toLowerCase().includes(query)) rows.push({ category, depth: 0 });
   });
