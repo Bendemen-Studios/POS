@@ -6,7 +6,7 @@ export default function POSHome() {
   const router = useRouter();
   const effectCallbacks = useRef({});
   const [currentUser, setCurrentUser] = useState(null);
-  const [selectedStore, setSelectedStore] = useState(null);
+  const [selectedStore, setSelectedStore] = useState(() => { if (typeof window === 'undefined') return null; try { return JSON.parse(localStorage.getItem('selectedStore') || localStorage.getItem('pos_selected_store') || 'null'); } catch (_) { return null; } });
   const [allStores, setAllStores] = useState([]);
   const [activeTab, setActiveTab] = useState(() => { if (typeof window !== 'undefined') return localStorage.getItem('pos_active_tab') || 'pos'; return 'pos'; });
   const [isChecking, setIsChecking] = useState(false);
