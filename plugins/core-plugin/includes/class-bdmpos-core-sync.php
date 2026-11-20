@@ -75,10 +75,9 @@ final class BDMPOS_Core_Sync {
 	public function category_changed( $id ) { $this->queue( 'category.updated', 'category', $id ); }
 
 	private function configured() {
-		return defined( 'BDMPOS_CORE_WEBHOOK_URL' ) && is_string( BDMPOS_CORE_WEBHOOK_URL )
-			&& 0 === strpos( BDMPOS_CORE_WEBHOOK_URL, 'https://' )
-			&& defined( 'BDMPOS_CORE_WEBHOOK_SECRET' ) && is_string( BDMPOS_CORE_WEBHOOK_SECRET )
-			&& strlen( BDMPOS_CORE_WEBHOOK_SECRET ) >= 32;
+		$url = class_exists( 'BDMPOS_Core_Settings' ) ? BDMPOS_Core_Settings::get( 'webhook_url' ) : ( defined( 'BDMPOS_CORE_WEBHOOK_URL' ) ? (string) BDMPOS_CORE_WEBHOOK_URL : '' );
+		$secret = class_exists( 'BDMPOS_Core_Settings' ) ? BDMPOS_Core_Settings::get( 'webhook_secret' ) : ( defined( 'BDMPOS_CORE_WEBHOOK_SECRET' ) ? (string) BDMPOS_CORE_WEBHOOK_SECRET : '' );
+		return 0 === strpos( $url, 'https://' ) && strlen( $secret ) >= 32;
 	}
 
 	private function queue( $event, $resource_type, $resource_id, $extra = array() ) {
@@ -108,9 +107,11 @@ final class BDMPOS_Core_Sync {
 			return;
 		}
 		$body = wp_json_encode( $payload );
-		$signature = hash_hmac( 'sha256', $body, BDMPOS_CORE_WEBHOOK_SECRET );
+		$webhook_secret = BDMPOS_Core_Settings::get( 'webhook_secret' );
+		$webhook_url = BDMPOS_Core_Settings::get( 'webhook_url' );
+		$signature = hash_hmac( 'sha256', $body, $webhook_secret );
 		$response = wp_remote_post(
-			BDMPOS_CORE_WEBHOOK_URL,
+			$webhook_url,
 			array(
 				'timeout'     => 15,
 				'redirection' => 0,
