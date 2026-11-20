@@ -95,6 +95,29 @@ export default async function handler(req, res) {
     const batchSize = 100;
     const maxPages = 1000;
     const products = [];
+    const catalogCategories = [];
+    // Load the full WooCommerce category tree so subcategories can be shown
+    // nested under their parent, including categories with no current products.
+    try {
+      for (let page = 1; page <= maxPages; page += 1) {
+        const pageCategories = await fetchJson(
+          `${url}/wp-json/wc/v3/products/categories?per_page=${batchSize}&page=${page}&hide_empty=false&orderby=name&order=asc`,
+          {},
+          20000
+        );
+        if (!Array.isArray(pageCategories) || pageCategories.length === 0) break;
+        catalogCategories.push(...pageCategories.map(category => ({
+          id: Number(category.id),
+          name: category.name,
+          slug: category.slug,
+          parent: Number(category.parent || 0)
+        })));
+        if (pageCategories.length < batchSize) break;
+      }
+    } catch (categoryError) {
+      console.warn('[PRODUCTS API] Categorieboom niet volledig beschikbaar:', categoryError.message);
+    }
+    const categoryById = new Map(catalogCategories.map(category => [category.id, category]));
 
     // Fetch each allowed status separately: WooCommerce versions and plugins
     // do not consistently support comma-separated status filters.
@@ -196,8 +219,18 @@ export default async function handler(req, res) {
         in_stock: product.in_stock ?? product.stock_status === 'instock',
         type: product.type,
         categories: Array.isArray(product.categories)
-          ? product.categories.map((c) => ({ id: c.id, name: c.name, slug: c.slug }))
+          ? product.categories.map((c) => {
+              const fullCategory = categoryById.get(Number(c.id));
+              return { id: Number(c.id), name: c.name, slug: c.slug, parent: fullCategory?.parent ?? 0 };
+            })
           : [],
+        primary_category_id: (() => {
+          const meta = Array.isArray(product.meta_data) ? product.meta_data : [];
+          const primaryMeta = meta.find(item => ['_yoast_wpseo_primary_product_cat', 'rank_math_primary_product_cat', '_rank_math_primary_product_cat'].includes(String(item?.key || '')));
+          const explicitPrimary = Number(primaryMeta?.value || product.primary_category_id || product.primary_category?.id || 0);
+          const assignedIds = (product.categories || []).map(category => Number(category.id));
+          return explicitPrimary > 0 && assignedIds.includes(explicitPrimary) ? explicitPrimary : (assignedIds[0] || null);
+        })(),
         images: Array.isArray(product.images)
           ? product.images.map((img) => ({ id: img.id, src: img.src, alt: img.alt }))
           : [],
@@ -228,9 +261,11 @@ export default async function handler(req, res) {
     }
     const excludedProductSet = new Set(excludedProductIds);
     const excludedCategorySet = new Set(excludedCategoryIds);
+    // A product belongs to exactly one POS category: its configured primary
+    // category. Secondary category assignments must not affect visibility.
     const visibleProducts = normalizedProducts.filter(product =>
       !excludedProductSet.has(Number(product.id)) &&
-      !(product.categories || []).some(category => excludedCategorySet.has(String(category.id)))
+      !excludedCategorySet.has(String(product.primary_category_id || ''))
     );
 
     return {
@@ -238,6 +273,7 @@ export default async function handler(req, res) {
       count: visibleProducts.length,
       products: visibleProducts,
       allProducts: normalizedProducts,
+      catalogCategories,
       cached_at: new Date().toISOString()
     };
   })();
