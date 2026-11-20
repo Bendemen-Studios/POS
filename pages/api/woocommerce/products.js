@@ -8,11 +8,13 @@ const SERVER_CACHE_TTL = 5 * 60 * 1000;
 
 // VPS-side warm cache. Next/PM2 processes keep this in memory so the POS
 // does not have to wait for WooCommerce on every request.
-const getCache = () => {
-  if (!globalThis.__bdmPosProductsCache) {
-    globalThis.__bdmPosProductsCache = { data: null, updatedAt: 0, loading: null };
+const getCache = (storeId) => {
+  if (!globalThis.__bdmPosProductsCaches) globalThis.__bdmPosProductsCaches = new Map();
+  const key = String(storeId || 'global');
+  if (!globalThis.__bdmPosProductsCaches.has(key)) {
+    globalThis.__bdmPosProductsCaches.set(key, { data: null, updatedAt: 0, loading: null });
   }
-  return globalThis.__bdmPosProductsCache;
+  return globalThis.__bdmPosProductsCaches.get(key);
 };
 
 export default async function handler(req, res) {
@@ -24,7 +26,15 @@ export default async function handler(req, res) {
   const session = await requireSession(req, res);
   if (!session) return;
 
-  const includeExcluded = req.query?.include_excluded === '1' && ['admin', 'super_admin', 'administrator'].includes(String(session.role || '').toLowerCase());
+  const role = String(session.role || '').toLowerCase();
+  const isAdmin = ['admin', 'super_admin', 'administrator'].includes(role);
+  const assignedStoreIds = String(session.store_id || '').split(',').map(id => id.trim()).filter(Boolean);
+  const requestedStoreId = isAdmin && req.query?.store_id ? String(req.query.store_id) : (assignedStoreIds[0] || null);
+  if (isAdmin && req.query?.store_id) {
+    const [storeRows] = await db.query('SELECT id FROM stores WHERE id = ? LIMIT 1', [requestedStoreId]);
+    if (!storeRows[0]) return res.status(400).json({ success: false, error: 'Ongeldig filiaal voor catalogusfilter.' });
+  }
+  const includeExcluded = req.query?.include_excluded === '1' && isAdmin;
   const formatResponse = (data) => {
     if (!includeExcluded) {
       const { allProducts, ...publicData } = data;
@@ -36,7 +46,7 @@ export default async function handler(req, res) {
     return { ...data, products: data.products, allProducts, count: data.products.length };
   };
 
-  const cache = getCache();
+  const cache = getCache(requestedStoreId);
   const forceRefresh = req.query?.refresh === '1' || req.query?.preload === '1' || req.query?._sync != null;
   const cacheAge = Date.now() - cache.updatedAt;
 
@@ -227,16 +237,6 @@ export default async function handler(req, res) {
 
     // Apply centrally stored admin exclusions to the POS catalog only.
     // WooCommerce products and categories remain untouched on the webshop.
-    const role = String(session.role || '').toLowerCase();
-    const isAdmin = ['admin', 'super_admin', 'administrator'].includes(role);
-    const assignedStoreIds = String(session.store_id || '').split(',').map(id => id.trim()).filter(Boolean);
-    const requestedStoreId = isAdmin && req.query?.store_id
-      ? String(req.query.store_id)
-      : (assignedStoreIds[0] || null);
-    if (isAdmin && req.query?.store_id) {
-      const [storeRows] = await db.query('SELECT id FROM stores WHERE id = ? LIMIT 1', [requestedStoreId]);
-      if (!storeRows[0]) throw new Error('Ongeldig filiaal voor catalogusfilter.');
-    }
     const exclusions = await getStoreCatalogExclusions(requestedStoreId);
     const visibleProducts = normalizedProducts.filter(product =>
       isCatalogProductVisible(product, exclusions, catalogCategories)
