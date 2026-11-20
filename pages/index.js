@@ -264,6 +264,10 @@ export default function POSHome() {
     // for another branch. Only this branch's own cache is safe to display.
     const cached = readLocalArray(cacheKey, []);
     if (cached.length || localStorage.getItem(cacheKey)) setProducts(cached);
+    try {
+      const cachedCategories = JSON.parse(localStorage.getItem('pos_catalog_categories_' + storeId) || '[]');
+      setCatalogCategories(Array.isArray(cachedCategories) ? cachedCategories : []);
+    } catch (_) { setCatalogCategories([]); }
     // Reuse a recently synchronized branch catalog after reload. The saved
     // branch is still checked against the server's authorized store list.
     const cacheTimeKey = 'pos_cached_products_updated_at_' + storeId;
