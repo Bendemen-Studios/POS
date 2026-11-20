@@ -39,3 +39,12 @@ jobs:
         run: npm run lint
       - name: Build production app
         run: npm run build
+      - name: Package BDM POS Core plugin
+        run: zip -r bdmpos-core-0.7.0.zip plugins/core-plugin
+      - name: Upload BDM POS Core plugin ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: bdmpos-core-0.7.0
+          path: bdmpos-core-0.7.0.zip
+          if-no-files-found: error
+          retention-days: 30
