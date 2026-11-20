@@ -4,6 +4,7 @@ import { getWooHttpsAgent } from '../../../lib/woocommerce-transport';
 import { requireSession } from '../../../lib/session';
 import db from '../../../lib/db';
 import { getStoreCatalogExclusions, isCatalogProductVisible } from '../../../lib/catalog-exclusions';
+import { fetchBdmposCatalog } from '../../../lib/bdmpos-core';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const SERVER_CACHE_TTL = 5 * 60 * 1000;
@@ -81,6 +82,39 @@ export default async function handler(req, res) {
 
   cache.loading = (async () => {
     const url = process.env.WOOCOMMERCE_URL || process.env.NEXT_PUBLIC_WOOCOMMERCE_URL || 'https://www.bendemen.com';
+
+    // Opt-in migration: when both server-only Core settings exist, use the
+    // authenticated bridge. Otherwise retain the legacy WooCommerce API path.
+    if (process.env.BDMPOS_CORE_URL && process.env.BDMPOS_CORE_SECRET) {
+      const coreCatalog = await fetchBdmposCatalog();
+      const normalizedProducts = coreCatalog.products.map(product => ({
+        ...product,
+        id: Number(product.id),
+        menu_order: product.menu_order ?? 0,
+        primary_category_id: Number(product.primary_category_id || product.categories?.[0]?.id || 0),
+        categories: Array.isArray(product.categories) ? product.categories : [],
+        images: Array.isArray(product.images) ? product.images : [],
+        attributes: Array.isArray(product.attributes) ? product.attributes : [],
+        variations: Array.isArray(product.variations) ? product.variations : [],
+        variations_data: Array.isArray(product.variations_data) ? product.variations_data : []
+      }));
+      const exclusions = await getStoreCatalogExclusions(requestedStoreId);
+      const visibleProducts = normalizedProducts.filter(product =>
+        isCatalogProductVisible(product, exclusions, coreCatalog.categories)
+      );
+      return {
+        success: true,
+        count: visibleProducts.length,
+        products: visibleProducts,
+        allProducts: normalizedProducts,
+        catalogCategories: coreCatalog.categories,
+        categoryRules: exclusions.categoryRules || {},
+        store_id: requestedStoreId,
+        cached_at: new Date().toISOString(),
+        source: 'bdmpos-core'
+      };
+    }
+
     const consumerKey = process.env.WOOCOMMERCE_CONSUMER_KEY || process.env.WOO_CONSUMER_KEY || process.env.WOOCOMMERCE_KEY || process.env.NEXT_PUBLIC_WOOCOMMERCE_KEY;
     const consumerSecret = process.env.WOOCOMMERCE_CONSUMER_SECRET || process.env.WOO_CONSUMER_SECRET || process.env.WOOCOMMERCE_SECRET || process.env.NEXT_PUBLIC_WOOCOMMERCE_SECRET;
 
