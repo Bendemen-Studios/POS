@@ -23,7 +23,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'POST' && ['add', 'remove'].includes(action)) {
-      if (!customerId || !/^\\d+$/.test(String(customerId))) return res.status(400).json({ success: false, message: 'Een geldig klantnummer is verplicht.' });
+      if (!customerId || !/^\d+$/.test(String(customerId))) return res.status(400).json({ success: false, message: 'Een geldig klantnummer is verplicht.' });
       if (!process.env.BDMPOS_CORE_URL || !process.env.BDMPOS_CORE_SECRET) {
         return res.status(503).json({ success: false, message: 'BDM POS Core is vereist voor handmatige puntenmutaties.' });
       }
