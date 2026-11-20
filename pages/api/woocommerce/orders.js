@@ -2,7 +2,7 @@ import WooCommerceRestApi from '@woocommerce/woocommerce-rest-api';
 import axios from 'axios';
 import { getWooHttpsAgent } from '../../../lib/woocommerce-transport';
 import { requireSession } from '../../../lib/session';
-import { fetchBdmposOrders } from '../../../lib/bdmpos-core';
+import { fetchBdmposOrders, completeBdmposOrder } from '../../../lib/bdmpos-core';
 
 export default async function handler(req, res) {
   const { method } = req;
@@ -109,6 +109,15 @@ export default async function handler(req, res) {
   // PUT: Orderstatus bijwerken
   if (method === 'PUT') {
     const { id, status } = req.body;
+    if (String(status || '').toLowerCase() === 'completed' && process.env.BDMPOS_CORE_URL && process.env.BDMPOS_CORE_SECRET) {
+      try {
+        const result = await completeBdmposOrder(id, 'Order afgerond via Bendemen POS.');
+        return res.status(200).json({ success: true, order: result.order, source: 'bdmpos-core', already_completed: result.already_completed });
+      } catch (error) {
+        console.error('[ORDERS API]: BDM POS Core completion failed:', error.message);
+        return res.status(503).json({ success: false, error: error.message || 'Bestelling afronden via BDM POS Core mislukt.' });
+      }
+    }
     if (!id || !status) {
       return res.status(400).json({ success: false, error: 'Order ID en status zijn verplicht.' });
     }
