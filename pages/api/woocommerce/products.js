@@ -245,10 +245,22 @@ export default async function handler(req, res) {
     } catch (exclusionError) { console.error('[PRODUCTS API] Uitsluitingen konden niet worden geladen:', exclusionError.message); }
     const excludedProductSet = new Set(excludedProductIds);
     const legacyExcludedSet = new Set(excludedCategoryIds);
+    const categoryById = new Map(catalogCategories.map(category => [String(category.id), category]));
     const visibleProducts = normalizedProducts.filter(product => {
       if (excludedProductSet.has(Number(product.id))) return false;
-      const assigned = (product.categories || []).map(category => String(category.id));
-      const matchingRules = assigned.map(id => {
+      // A rule on a parent category is inherited by products assigned to its subcategories.
+      const relevantIds = new Set();
+      (product.categories || []).forEach(category => {
+        let current = categoryById.get(String(category.id));
+        let guard = 0;
+        while (current && guard < 30) {
+          relevantIds.add(String(current.id));
+          current = categoryById.get(String(current.parent || 0));
+          guard += 1;
+        }
+        relevantIds.add(String(category.id));
+      });
+      const matchingRules = [...relevantIds].map(id => {
         const rule = categoryRules[id];
         if (rule && typeof rule === 'object') return { id, excluded: rule.excluded === true, priority: Math.max(0, Math.min(999, Number(rule.priority) || 0)) };
         return { id, excluded: legacyExcludedSet.has(id), priority: 0 };
