@@ -20,7 +20,7 @@ export default function PickupDashboard() {
   useEffect(() => {
     const store = JSON.parse(localStorage.getItem('selectedStore') || '{}');
     setSelectedStore(store);
-    effectCallbacks.current.fetchPickupOrders?.();
+    effectCallbacks.current.fetchPickupOrders?.(store);
     effectCallbacks.current.triggerOfflinePickupSync?.();
 
     const handleOnline = () => effectCallbacks.current.triggerOfflinePickupSync?.();
@@ -39,9 +39,9 @@ export default function PickupDashboard() {
     }
   }, [orders]);
 
-  const fetchPickupOrders = async () => {
-    const storeId = String(selectedStore?.id || selectedStore?.store_id || 1);
-    const pickupId = selectedStore?.pickup_id ? String(selectedStore.pickup_id) : '';
+  const fetchPickupOrders = async (storeOverride = selectedStore) => {
+    const storeId = String(storeOverride?.id || storeOverride?.store_id || 1);
+    const pickupId = storeOverride?.pickup_id ? String(storeOverride.pickup_id) : '';
     const cacheKey = 'pos_cached_pickup_orders_' + storeId;
     const cached = JSON.parse(localStorage.getItem(cacheKey) || '[]');
     if (Array.isArray(cached) && cached.length) setOrders(prev => prev.length ? prev : cached);
