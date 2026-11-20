@@ -958,10 +958,36 @@ export default function AdminDashboard() {
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
                   <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                     <h3 className="text-sm sm:text-md font-bold">📦 Producten & Variaties Voorraad ({products.length})</h3>
-                    <select value={selectedCatalogStoreId} onChange={e => {
+                    <select value={selectedCatalogStoreId} onChange={async e => {
                       const id = e.target.value;
                       setSelectedCatalogStoreId(id);
                       localStorage.setItem('admin_catalog_store_id', id);
+                      if (!id) {
+                        setProducts([]);
+                        setAllCatalogProducts([]);
+                        return;
+                      }
+                      try {
+                        await fetchCatalogExclusions(id);
+                        const response = await fetch(`/api/woocommerce/products?include_excluded=1&fresh=1&store_id=${encodeURIComponent(id)}&_sync=${Date.now()}`, { cache: 'no-store' });
+                        const data = await response.json();
+                        if (!response.ok || !data.success || data.stale) throw new Error(data.error || 'Voorraad kon niet worden ververst.');
+                        const visibleProducts = Array.isArray(data.products) ? data.products : [];
+                        const sourceProducts = Array.isArray(data.allProducts) ? data.allProducts : visibleProducts;
+                        setProducts(visibleProducts);
+                        setAllCatalogProducts(sourceProducts);
+                        setCatalogCategories(data.catalogCategories || []);
+                        localStorage.setItem('admin_products', JSON.stringify(visibleProducts));
+                        localStorage.setItem('admin_all_catalog_products', JSON.stringify(sourceProducts));
+                        localStorage.setItem('admin_catalog_categories', JSON.stringify(data.catalogCategories || []));
+                        localStorage.setItem('pos_cached_products_' + id, JSON.stringify(visibleProducts));
+                        localStorage.setItem('pos_cached_products', JSON.stringify(visibleProducts));
+                        localStorage.setItem('pos_cached_products_updated_at', String(Date.now()));
+                        window.dispatchEvent(new CustomEvent('pos:inventory-synced', { detail: { products: visibleProducts, storeId: id } }));
+                      } catch (error) {
+                        console.error('Voorraad voor geselecteerd filiaal verversen mislukt:', error);
+                        alert(error.message || 'Voorraad kon niet worden ververst.');
+                      }
                     }} className="border rounded p-2 text-xs">
                       <option value="">Selecteer filiaal...</option>
                       {stores.map(store => <option key={store.id || store.store_id} value={store.id || store.store_id}>{store.store_name || store.name}</option>)}
