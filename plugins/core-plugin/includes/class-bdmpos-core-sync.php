@@ -37,8 +37,12 @@ final class BDMPOS_Core_Sync {
 		add_action( 'woocommerce_new_order', array( $this, 'order_changed' ), 10, 1 );
 		add_action( 'woocommerce_update_order', array( $this, 'order_changed' ), 10, 1 );
 		add_action( 'woocommerce_order_status_changed', array( $this, 'order_status_changed' ), 10, 4 );
+		add_action( 'woocommerce_order_refunded', array( $this, 'order_refunded' ), 10, 2 );
 		add_action( 'woocommerce_created_customer', array( $this, 'customer_changed' ), 10, 1 );
 		add_action( 'profile_update', array( $this, 'customer_changed' ), 10, 1 );
+		add_action( 'added_user_meta', array( $this, 'customer_meta_changed' ), 10, 3 );
+		add_action( 'updated_user_meta', array( $this, 'customer_meta_changed' ), 10, 3 );
+		add_action( 'deleted_user_meta', array( $this, 'customer_meta_changed' ), 10, 3 );
 		add_action( 'created_product_cat', array( $this, 'category_changed' ), 10, 1 );
 		add_action( 'edited_product_cat', array( $this, 'category_changed' ), 10, 1 );
 		add_action( 'delete_product_cat', array( $this, 'category_changed' ), 10, 1 );
@@ -58,7 +62,16 @@ final class BDMPOS_Core_Sync {
 	public function order_status_changed( $id, $from, $to, $order ) {
 		$this->queue( 'order.status_changed', 'order', $id, array( 'from' => $from, 'to' => $to ) );
 	}
+	public function order_refunded( $order_id, $refund_id ) {
+		$this->queue( 'order.refunded', 'order', $order_id, array( 'refund_id' => absint( $refund_id ) ) );
+	}
 	public function customer_changed( $id ) { $this->queue( 'customer.updated', 'customer', $id ); }
+	public function customer_meta_changed( $meta_id, $user_id, $meta_key ) {
+		$key = (string) $meta_key;
+		if ( 0 === strpos( $key, 'billing_' ) || 0 === strpos( $key, 'shipping_' ) || in_array( $key, array( 'wc_points_balance', '_wc_points_balance' ), true ) ) {
+			$this->queue( 'customer.meta_updated', 'customer', $user_id, array( 'meta_key' => sanitize_key( $key ) ) );
+		}
+	}
 	public function category_changed( $id ) { $this->queue( 'category.updated', 'category', $id ); }
 
 	private function configured() {
