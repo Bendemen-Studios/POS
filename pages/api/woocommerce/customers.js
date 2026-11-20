@@ -2,6 +2,7 @@ import WooCommerceRestApi from "@woocommerce/woocommerce-rest-api";
 import { getWooHttpsAgent } from "../../../lib/woocommerce-transport";
 import { extractCustomerPoints, getCustomersPoints } from "../../../lib/customerPoints";
 import { requireSession } from '../../../lib/session';
+import { fetchBdmposCustomers } from '../../../lib/bdmpos-core';
 
 const WooCommerce = WooCommerceRestApi.default || WooCommerceRestApi;
 
@@ -23,6 +24,17 @@ export default async function handler(req, res) {
   if (!session) return;
 
   try {
+    if (process.env.BDMPOS_CORE_URL && process.env.BDMPOS_CORE_SECRET) {
+      const result = await fetchBdmposCustomers();
+      res.setHeader('Cache-Control', 'private, max-age=0, no-cache, no-store, must-revalidate');
+      return res.status(200).json({
+        success: true,
+        customers: result.customers,
+        total: result.total,
+        source: 'bdmpos-core'
+      });
+    }
+
     const allCustomers = [];
     const perPage = 100;
     let page = 1;
