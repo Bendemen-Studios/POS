@@ -359,7 +359,8 @@ export default function AdminDashboard() {
       window.dispatchEvent(new CustomEvent('pos:ajax-refresh', { detail: { manualProductSync: true, storeId: selectedCatalogStoreId } }));
       alert('Producten gesynchroniseerd. Voorraad en POS tonen nu alleen niet-uitgesloten artikelen.');
     } catch (err) {
-      alert('Kan geen verbinding maken met WooCommerce.');
+      console.error('[ADMIN PRODUCT SYNC] Synchronisatie mislukt:', err);
+      alert('Synchronisatie mislukt: ' + (err?.message || 'Onbekende fout. Bekijk de browserconsole en PM2-logs.'));
     } finally {
       setLoading(false);
     }

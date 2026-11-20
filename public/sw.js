@@ -1,9 +1,9 @@
-const CACHE_NAME = 'bendemen-pos-v28';
+const CACHE_NAME = 'bendemen-pos-v29';
 const OFFLINE_URL = '/login';
 const OFFLINE_FALLBACK_URL = '/offline.html';
 const NAVIGATION_TIMEOUT = 500;
 const API_TIMEOUT = 5000;
-const PRODUCT_API_TIMEOUT = 10000;
+const PRODUCT_API_TIMEOUT = 180000;
 const CHECKOUT_TIMEOUT = 15000;
 
 const APP_SHELL = ['/','/login','/select-store','/pickup','/admin','/manifest.json','/favicon.ico',OFFLINE_FALLBACK_URL];
@@ -97,7 +97,8 @@ async function handleProductRequest(request) {
     const fresh = await refreshApiCache(request, PRODUCT_API_TIMEOUT);
     if (fresh && fresh.ok) return fresh;
     if (fresh && (fresh.status === 401 || fresh.status === 403)) return fresh;
-    return new Response(JSON.stringify({ success:false, offline:true, error:'Actuele productcatalogus niet bereikbaar; oude catalogus niet als actueel tonen.' }), { status:503, headers:{'Content-Type':'application/json','Cache-Control':'no-store'} });
+    if (fresh) return fresh;
+    return new Response(JSON.stringify({ success:false, offline:true, error:'Geen antwoord van de POS-server binnen 180 seconden.' }), { status:503, headers:{'Content-Type':'application/json','Cache-Control':'no-store'} });
   }
 
   const cached = cacheKey ? await cache.match(cacheKey) : null;
