@@ -228,9 +228,9 @@ final class BDMPOS_Core_REST {
 		}
 
 		try {
-			$query = new WC_Customer_Query( $args );
-			$customers = $query->get_customers();
-			$total = (int) $query->get_total();
+			$query = wc_get_customers( array_merge( $args, array( 'paginate' => true ) ) );
+			$customers = is_object( $query ) && isset( $query->customers ) ? $query->customers : array();
+			$total = is_object( $query ) && isset( $query->total ) ? (int) $query->total : count( $customers );
 			$items = array();
 			foreach ( $customers as $customer ) {
 				if ( $customer instanceof WC_Customer ) {
@@ -279,22 +279,12 @@ final class BDMPOS_Core_REST {
 	}
 
 	private function serialize_customer( WC_Customer $customer ) {
-		$data = array(
-			'id'                  => $customer->get_id(),
-			'email'               => $customer->get_email(),
-			'first_name'          => $customer->get_first_name(),
-			'last_name'           => $customer->get_last_name(),
-			'username'            => $customer->get_username(),
-			'role'                => $customer->get_role(),
-			'billing'             => $customer->get_billing(),
-			'shipping'            => $customer->get_shipping(),
-			'is_paying_customer'  => $customer->get_is_paying_customer(),
-			'avatar_url'          => $customer->get_avatar_url(),
-			'date_created'        => $customer->get_date_created() ? $customer->get_date_created()->date( 'c' ) : null,
-			'date_modified'       => $customer->get_date_modified() ? $customer->get_date_modified()->date( 'c' ) : null,
-			'meta_data'           => array(),
-			'points_balance'      => 0,
-		);
+		$data = $customer->get_data();
+		$data['date_created']  = $customer->get_date_created() ? $customer->get_date_created()->date( 'c' ) : null;
+		$data['date_modified'] = $customer->get_date_modified() ? $customer->get_date_modified()->date( 'c' ) : null;
+		$data['meta_data'] = array();
+		$data['points_balance'] = 0;
+
 		foreach ( $customer->get_meta_data() as $meta ) {
 			$meta_data = $meta->get_data();
 			$data['meta_data'][] = array(
