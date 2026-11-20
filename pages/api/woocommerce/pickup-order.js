@@ -2,7 +2,7 @@ import WooCommerceRestApi from '@woocommerce/woocommerce-rest-api';
 import { getWooHttpsAgent } from '../../../lib/woocommerce-transport';
 import { requireSession } from '../../../lib/session';
 import db from '../../../lib/db';
-import { completeBdmposOrder } from '../../../lib/bdmpos-core';
+import { completeBdmposOrder, callBdmposWooApi } from '../../../lib/bdmpos-core';
 
 function getWooCommerceApi() {
   const url = process.env.WOO_SITE_URL || process.env.WOOCOMMERCE_URL || 'https://www.bendemen.com';
@@ -54,6 +54,18 @@ function matchesPickupId(order, pickupId) {
 
 async function getOrdersForStatus(api, status) {
   const perPage = 100;
+  if (process.env.BDMPOS_CORE_URL && process.env.BDMPOS_CORE_SECRET) {
+    const first = await callBdmposWooApi({ method: 'GET', path: '/orders', params: { per_page: perPage, page: 1, status, orderby: 'date', order: 'desc' } });
+    const firstOrders = Array.isArray(first.data) ? first.data : [];
+    const totalPages = Math.min(100, Math.max(1, Number(first.headers?.['x-wp-totalpages'] || 1)));
+    const pages = [];
+    for (let startPage = 2; startPage <= totalPages; startPage += 3) {
+      const batch = Array.from({ length: Math.min(3, totalPages - startPage + 1) }, (_, index) => startPage + index);
+      const responses = await Promise.all(batch.map(page => callBdmposWooApi({ method: 'GET', path: '/orders', params: { per_page: perPage, page, status, orderby: 'date', order: 'desc' } })));
+      pages.push(...responses.map(response => Array.isArray(response.data) ? response.data : []));
+    }
+    return firstOrders.concat(...pages);
+  }
   const first = await api.get('orders', {
     per_page: perPage,
     page: 1,
@@ -130,7 +142,7 @@ export default async function handler(req, res) {
     }
   }
 
-  if (!api) {
+  if (!api && !(process.env.BDMPOS_CORE_URL && process.env.BDMPOS_CORE_SECRET)) {
     return sendApiError(res, 500, 'WooCommerce API-sleutels ontbreken op de POS-server. Controleer WOO_CONSUMER_KEY/WOO_CONSUMER_SECRET (of WOOCOMMERCE_CK/WOOCOMMERCE_CS).');
   }
 
@@ -190,7 +202,9 @@ export default async function handler(req, res) {
     try {
       const { order_id } = req.body || {};
       if (!order_id || !/^\d+$/.test(String(order_id))) return sendApiError(res, 400, 'Een geldig order-ID is verplicht.');
-      const existingResponse = await api.get(`orders/${encodeURIComponent(String(order_id))}`);
+      const existingResponse = process.env.BDMPOS_CORE_URL && process.env.BDMPOS_CORE_SECRET
+        ? await callBdmposWooApi({ method: 'GET', path: `/orders/${encodeURIComponent(String(order_id))}` })
+        : await api.get(`orders/${encodeURIComponent(String(order_id))}`);
       const existingOrder = existingResponse.data;
       if (!existingOrder?.id || !isPickupOrder(existingOrder)) return sendApiError(res, 404, 'Deze bestelling is geen geldige afhaalbestelling.');
       if (!isAdmin) {
