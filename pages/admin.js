@@ -3,6 +3,38 @@ import { useRouter } from 'next/router';
 import Link from 'next/link';
 import React from 'react';
 
+function buildCategoryRows(categories, search = '') {
+  const items = Array.isArray(categories) ? categories : [];
+  const byParent = new Map();
+  items.forEach(category => {
+    const parentId = Number(category.parent || 0);
+    if (!byParent.has(parentId)) byParent.set(parentId, []);
+    byParent.get(parentId).push(category);
+  });
+  byParent.forEach(children => children.sort((a, b) => String(a.name).localeCompare(String(b.name))));
+  const query = String(search || '').trim().toLowerCase();
+  const visited = new Set();
+  const visit = (parentId, depth) => {
+    const output = [];
+    for (const category of byParent.get(parentId) || []) {
+      if (visited.has(Number(category.id))) continue;
+      visited.add(Number(category.id));
+      const descendants = visit(Number(category.id), depth + 1);
+      const matches = !query || String(category.name || '').toLowerCase().includes(query);
+      if (matches || descendants.length) {
+        output.push({ category, depth }, ...descendants);
+      }
+    }
+    return output;
+  };
+  const rows = visit(0, 0);
+  // Include orphaned terms (e.g. a missing parent) without dropping them.
+  items.filter(category => !visited.has(Number(category.id))).sort((a, b) => String(a.name).localeCompare(String(b.name))).forEach(category => {
+    if (!query || String(category.name || '').toLowerCase().includes(query)) rows.push({ category, depth: 0 });
+  });
+  return rows;
+}
+
 export default function AdminDashboard() {
   const router = useRouter();
   const [currentUser, setCurrentUser] = useState(null);
@@ -42,6 +74,12 @@ export default function AdminDashboard() {
 
   const [excludedProducts, setExcludedProducts] = useState([]);
   const [excludedCategories, setExcludedCategories] = useState([]);
+  const [catalogCategories, setCatalogCategories] = useState(() => {
+    if (typeof window !== 'undefined') {
+      try { return JSON.parse(localStorage.getItem('admin_catalog_categories') || '[]'); } catch (_) {}
+    }
+    return [];
+  });
   const [exclusionSearch, setExclusionSearch] = useState('');
   const [exclusionsSaving, setExclusionsSaving] = useState(false);
 
@@ -264,6 +302,8 @@ export default function AdminDashboard() {
       const data = await res.json();
       if (data.success) {
         setProducts(data.products || []);
+        setCatalogCategories(data.catalogCategories || []);
+        localStorage.setItem('admin_catalog_categories', JSON.stringify(data.catalogCategories || []));
         localStorage.setItem('admin_products', JSON.stringify(data.products || []));
         localStorage.setItem('pos_cached_products', JSON.stringify(data.products || []));
         localStorage.setItem('pos_cached_products_updated_at', String(Date.now()));
@@ -280,6 +320,8 @@ export default function AdminDashboard() {
       const data = await res.json();
       if (data.success) {
         setProducts(data.products || []);
+        setCatalogCategories(data.catalogCategories || []);
+        localStorage.setItem('admin_catalog_categories', JSON.stringify(data.catalogCategories || []));
         localStorage.setItem('admin_products', JSON.stringify(data.products || []));
         alert('Producten succesvol gesynchroniseerd met WooCommerce!');
       } else {
@@ -578,18 +620,26 @@ export default function AdminDashboard() {
                   <input value={exclusionSearch} onChange={e => setExclusionSearch(e.target.value)} placeholder="Zoek product of categorie..." className="w-full border rounded p-2.5 text-xs" />
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
                     <section className="border rounded p-3 space-y-2">
-                      <h3 className="font-bold text-sm">Categorieën ({new Set(products.flatMap(p => (p.categories || []).map(c => c.id))).size})</h3>
+                      <h3 className="font-bold text-sm">Categorieën ({catalogCategories.length})</h3>
+                      <p className="text-[11px] text-gray-500">Producten worden uitsluitend ingedeeld op hun primaire categorie. Subcategorieën zijn apart uit te sluiten.</p>
                       <div className="max-h-[55vh] overflow-y-auto space-y-1">
-                        {[...new Map(products.flatMap(p => p.categories || []).map(c => [String(c.id), c])).values()].filter(c => c.name.toLowerCase().includes(exclusionSearch.toLowerCase())).sort((a,b)=>a.name.localeCompare(b.name)).map(c => (
-                          <label key={c.id} className="flex items-center gap-2 text-xs p-2 hover:bg-gray-50 rounded"><input type="checkbox" checked={excludedCategories.includes(String(c.id))} onChange={e => setExcludedCategories(prev => e.target.checked ? [...prev, String(c.id)] : prev.filter(id => id !== String(c.id)))} />{c.name}</label>
-                        ))}
+                        {buildCategoryRows(catalogCategories, exclusionSearch).map(({ category, depth }) => {
+                          const primaryCount = products.filter(product => String(product.primary_category_id || '') === String(category.id)).length;
+                          return (
+                            <label key={category.id} className="flex items-center gap-2 text-xs p-2 hover:bg-gray-50 rounded" style={{ paddingLeft: `${8 + depth * 18}px` }}>
+                              <input type="checkbox" checked={excludedCategories.includes(String(category.id))} onChange={e => setExcludedCategories(prev => e.target.checked ? [...prev, String(category.id)] : prev.filter(id => id !== String(category.id)))} />
+                              <span className={depth === 0 ? 'font-semibold' : 'text-gray-700'}>{depth > 0 ? '↳ ' : ''}{category.name}</span>
+                              <span className="ml-auto text-gray-400">{primaryCount}</span>
+                            </label>
+                          );
+                        })}
                       </div>
                     </section>
                     <section className="border rounded p-3 space-y-2">
                       <h3 className="font-bold text-sm">Producten ({products.length})</h3>
                       <div className="max-h-[55vh] overflow-y-auto space-y-1">
                         {products.filter(p => (p.name || '').toLowerCase().includes(exclusionSearch.toLowerCase())).sort((a,b)=>a.name.localeCompare(b.name)).map(p => (
-                          <label key={p.id} className="flex items-center gap-2 text-xs p-2 hover:bg-gray-50 rounded"><input type="checkbox" checked={excludedProducts.includes(Number(p.id))} onChange={e => setExcludedProducts(prev => e.target.checked ? [...prev, Number(p.id)] : prev.filter(id => id !== Number(p.id)))} /><span className="truncate">{p.name}</span><span className="ml-auto text-gray-400">#{p.id}</span></label>
+                          <label key={p.id} className="flex items-center gap-2 text-xs p-2 hover:bg-gray-50 rounded"><input type="checkbox" checked={excludedProducts.includes(Number(p.id))} onChange={e => setExcludedProducts(prev => e.target.checked ? [...prev, Number(p.id)] : prev.filter(id => id !== Number(p.id)))} /><span className="truncate">{p.name}</span><span className="ml-auto text-gray-400">{catalogCategories.find(c => String(c.id) === String(p.primary_category_id))?.name || 'Geen primaire categorie'} · #{p.id}</span></label>
                         ))}
                       </div>
                     </section>
