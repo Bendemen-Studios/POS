@@ -60,7 +60,7 @@ export default async function handler(req, res) {
     };
 
     const response = process.env.BDMPOS_CORE_URL && process.env.BDMPOS_CORE_SECRET
-      ? await callBdmposWooApi({ method: "POST", path: "/orders", data: orderData })
+      ? await callBdmposWooApi({ method: "POST", path: "/orders", data: orderData, requestId: req.headers["idempotency-key"] || req.body?.clientOrderId || req.body?.requestId || "" })
       : await api.post("orders", orderData);
     const createdOrder = response.data;
 
