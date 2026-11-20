@@ -2,12 +2,44 @@ import WooCommerceRestApi from '@woocommerce/woocommerce-rest-api';
 import axios from 'axios';
 import { getWooHttpsAgent } from '../../../lib/woocommerce-transport';
 import { requireSession } from '../../../lib/session';
+import { fetchBdmposOrders } from '../../../lib/bdmpos-core';
 
 export default async function handler(req, res) {
   const { method } = req;
 
   const session = await requireSession(req, res, { roles: ['admin', 'super_admin', 'administrator'] });
   if (!session) return;
+
+  // Read-only order sync through Core. The existing PUT path below remains
+  // the sole status-update workflow and is intentionally not routed through Core.
+  if (method === 'GET' && process.env.BDMPOS_CORE_URL && process.env.BDMPOS_CORE_SECRET) {
+    try {
+      const data = await fetchBdmposOrders({
+        page: req.query?.page || 1,
+        perPage: req.query?.per_page || 50,
+        after: req.query?.after,
+        before: req.query?.before,
+        status: req.query?.status
+      });
+      return res.status(200).json({
+        success: true,
+        count: data.orders.length,
+        total: Number(data.total || data.orders.length),
+        total_pages: Number(data.total_pages || 1),
+        orders: data.orders,
+        source: 'bdmpos-core',
+        read_only: true
+      });
+    } catch (error) {
+      console.error('[ORDERS API]: BDM POS Core read failed:', error.message);
+      return res.status(503).json({
+        success: false,
+        error: error.message || 'Fout bij synchroniseren van bestellingen via BDM POS Core',
+        orders: [],
+        source: 'bdmpos-core'
+      });
+    }
+  }
 
   // Fallbacks voor verschillende .env-variabelennamen
   const url = process.env.WOOCOMMERCE_URL || process.env.NEXT_PUBLIC_WOOCOMMERCE_URL || 'https://www.bendemen.com';
