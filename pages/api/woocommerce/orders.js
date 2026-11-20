@@ -10,8 +10,8 @@ export default async function handler(req, res) {
   const session = await requireSession(req, res, { roles: ['admin', 'super_admin', 'administrator'] });
   if (!session) return;
 
-  // Read-only order sync through Core. The existing PUT path below remains
-  // the sole status-update workflow and is intentionally not routed through Core.
+  // Order reads and writes use Core when configured. The existing POS route
+  // remains the single application workflow; Core only forwards the WooCommerce operation.
   if (method === 'GET' && process.env.BDMPOS_CORE_URL && process.env.BDMPOS_CORE_SECRET) {
     try {
       const data = await fetchBdmposOrders({
