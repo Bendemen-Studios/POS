@@ -139,7 +139,7 @@ export default function POSHome() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Idempotency-Key': clientOrderId },
             body: JSON.stringify(queuedOrder)
-          }, 40000);
+          }, 120000);
           let data = {};
           try { data = await res.json(); } catch (_) {}
           if (res.ok && data.success) {
