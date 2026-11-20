@@ -248,6 +248,7 @@ export default async function handler(req, res) {
       products: visibleProducts,
       allProducts: normalizedProducts,
       catalogCategories,
+      categoryRules: exclusions.categoryRules || {},
       store_id: requestedStoreId,
       cached_at: new Date().toISOString()
     };
