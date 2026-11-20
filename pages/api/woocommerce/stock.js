@@ -1,4 +1,5 @@
 import { requireSession } from '../../../lib/session';
+import db from '../../../lib/db';
 
 const fetchWithTimeout = async (url, options, timeoutMs = 7000) => {
   const controller = new AbortController();
@@ -33,8 +34,26 @@ export default async function handler(req, res) {
   const headers = { Authorization: 'Basic ' + Buffer.from(`${key}:${secret}`).toString('base64'), 'User-Agent': 'BDM-POS-Client/1.0' };
 
   try {
-    const products = await Promise.all(ids.map(async id => {
+    let excludedProductIds = new Set();
+    let excludedCategoryIds = new Set();
+    try {
+      const [rows] = await db.query('SELECT excluded_products, excluded_categories FROM pos_catalog_exclusions WHERE id = 1');
+      if (rows[0]) {
+        excludedProductIds = new Set(JSON.parse(rows[0].excluded_products || '[]').map(Number));
+        excludedCategoryIds = new Set(JSON.parse(rows[0].excluded_categories || '[]').map(String));
+      }
+    } catch (exclusionError) {
+      console.error('[QUICK STOCK SYNC] Uitsluitingen laden mislukt:', exclusionError.message);
+    }
+    const products = (await Promise.all(ids.map(async id => {
+      if (excludedProductIds.has(id)) return null;
       const product = await fetchWithTimeout(`${url}/wp-json/wc/v3/products/${id}`, { headers });
+      const metadata = Array.isArray(product.meta_data) ? product.meta_data : [];
+      const primaryMeta = metadata.find(item => ['_yoast_wpseo_primary_product_cat', 'rank_math_primary_product_cat', '_rank_math_primary_product_cat'].includes(String(item?.key || '')));
+      const assignedCategoryIds = (product.categories || []).map(category => Number(category.id));
+      const explicitPrimaryId = Number(primaryMeta?.value || product.primary_category_id || product.primary_category?.id || 0);
+      const primaryCategoryId = explicitPrimaryId > 0 && assignedCategoryIds.includes(explicitPrimaryId) ? explicitPrimaryId : (assignedCategoryIds[0] || null);
+      if (excludedCategoryIds.has(String(primaryCategoryId || ''))) return null;
       let variations = [];
       if (product.type === 'variable') {
         variations = await fetchWithTimeout(`${url}/wp-json/wc/v3/products/${id}/variations?per_page=100`, { headers });
@@ -52,7 +71,7 @@ export default async function handler(req, res) {
           attributes: Array.isArray(v.attributes) ? v.attributes.map(a => ({ id: a.id, name: a.name, option: a.option })) : []
         }))
       };
-    }));
+    }))).filter(Boolean);
     res.setHeader('Cache-Control', 'private, no-store');
     return res.status(200).json({ success: true, products, synced_at: new Date().toISOString() });
   } catch (error) {
