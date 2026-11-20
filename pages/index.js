@@ -198,7 +198,23 @@ export default function POSHome() {
     };
   }, [selectedStore?.id, selectedStore?.store_id]);
   const fetchStores = async () => { try { const res = await fetchWithServerCheck('/api/admin/store'); const data = await res.json(); if (!data.success) return; const parsedStores = (Array.isArray(data.stores) ? data.stores : data.store ? [data.store] : []).map(s => ({ ...s, payment_methods: parsePaymentMethods(s.payment_methods) })); setAllStores(parsedStores); localStorage.setItem('admin_cached_stores', JSON.stringify(parsedStores)); const storeStr = localStorage.getItem('selectedStore') || localStorage.getItem('pos_selected_store'); if (storeStr) { try { const savedStoreObj = JSON.parse(storeStr); const matchedCurrent = parsedStores.find(st => String(st.id || st.store_id) === String(savedStoreObj.id || savedStoreObj.store_id)); if (matchedCurrent) handleSelectStore(matchedCurrent, false); else if (parsedStores.length) handleSelectStore(parsedStores[0], false); } catch (_) { if (parsedStores.length) handleSelectStore(parsedStores[0], false); } } else if (parsedStores.length) handleSelectStore(parsedStores[0], false); } catch (err) { console.error('Fout bij ophalen winkels:', err); } };
-  const handleSyncData = async () => { if (isSyncing) return; setIsSyncing(true); try { const results = await Promise.allSettled([fetchProducts(true), fetchCustomers(), fetchUsersAsCustomers(), fetchPickupOrders(), fetchStores()]); const productResult = results[0]; if (productResult.status === 'rejected') throw productResult.reason; await triggerOfflineSync(false); alert('Synchronisatie voltooid. Producten zijn opnieuw opgehaald.'); } catch (err) { console.error('[MANUAL SYNC] mislukt:', err); alert(`Synchronisatie niet volledig gelukt: ${err.message || 'De actuele productlijst kon niet worden opgehaald.'}`); } finally { setIsSyncing(false); } };
+  const handleSyncData = async () => {
+    if (isSyncing) return;
+    setIsSyncing(true);
+    try {
+      await fetchStores();
+      let storeId = selectedStore?.id || selectedStore?.store_id || null;
+      try { const saved = JSON.parse(localStorage.getItem('selectedStore') || localStorage.getItem('pos_selected_store') || 'null'); storeId = saved?.id || saved?.store_id || storeId; } catch (_) {}
+      const productsOk = await fetchProducts(true, String(storeId || 1));
+      if (!productsOk) throw new Error('De productcatalogus kon niet worden bijgewerkt. Controleer de verbinding met de POS-server en probeer opnieuw.');
+      await Promise.allSettled([fetchCustomers(), fetchUsersAsCustomers(), fetchPickupOrders()]);
+      await triggerOfflineSync(false);
+      alert('Synchronisatie voltooid. Producten zijn opnieuw opgehaald voor het geselecteerde filiaal.');
+    } catch (err) {
+      console.error('[MANUAL SYNC] mislukt:', err);
+      alert('Synchronisatie niet gelukt: ' + (err?.message || 'De POS-server of WooCommerce is tijdelijk niet bereikbaar. Je bestaande productcache is behouden.'));
+    } finally { setIsSyncing(false); }
+  };
   const fetchQuickStock = async (orderItems = []) => {
     const ids = [...new Set(orderItems.map(item => Number(item.product_id || item.id)).filter(id => Number.isInteger(id) && id > 0 && !String(id).startsWith('custom_')))].slice(0, 40);
     if (!ids.length) return;
@@ -230,8 +246,9 @@ export default function POSHome() {
       console.warn('[QUICK STOCK SYNC] voorraad blijft uit cache tot volgende sync:', err);
     }
   };
-  const fetchProducts = async (requireFresh = false) => {
-    const storeId = String(selectedStore?.id || selectedStore?.store_id || 1);
+  const fetchProducts = async (requireFresh = false, requestedStoreId = null) => {
+    const storedSelection = (() => { try { return JSON.parse(localStorage.getItem('selectedStore') || localStorage.getItem('pos_selected_store') || 'null'); } catch (_) { return null; } })();
+    const storeId = String(requestedStoreId || selectedStore?.id || selectedStore?.store_id || storedSelection?.id || storedSelection?.store_id || 1);
     const cacheKey = 'pos_cached_products_' + storeId;
     const cached = readLocalArray(cacheKey, []);
     if (cached.length) setProducts(cached);
