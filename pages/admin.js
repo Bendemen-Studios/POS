@@ -42,6 +42,7 @@ export default function AdminDashboard() {
 
   const [excludedProducts, setExcludedProducts] = useState([]);
   const [excludedCategories, setExcludedCategories] = useState([]);
+  const [categoryRules, setCategoryRules] = useState({});
   const [exclusionSearch, setExclusionSearch] = useState('');
   const [exclusionsSaving, setExclusionsSaving] = useState(false);
 
@@ -162,6 +163,9 @@ export default function AdminDashboard() {
       if (data.success) {
         setExcludedProducts(data.excludedProducts || []);
         setExcludedCategories(data.excludedCategories || []);
+        const rules = { ...(data.categoryRules || {}) };
+        for (const id of data.excludedCategories || []) if (!rules[String(id)]) rules[String(id)] = { excluded: true, priority: 0 };
+        setCategoryRules(rules);
       }
     } catch (err) { console.error('Uitsluitingen ophalen mislukt:', err); }
   };
@@ -172,7 +176,7 @@ export default function AdminDashboard() {
       const res = await fetch('/api/admin/product-exclusions', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ excludedProducts, excludedCategories })
+        body: JSON.stringify({ excludedProducts, excludedCategories, categoryRules })
       });
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.error || 'Opslaan mislukt');
@@ -620,10 +624,37 @@ export default function AdminDashboard() {
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
                     <section className="border rounded p-3 space-y-2">
                       <h3 className="font-bold text-sm">Categorieën ({catalogCategories.length})</h3>
+                      <p className="text-[11px] text-gray-500">Hoogste prio wint bij producten met meerdere categorieën. 0 = standaard; 1–999 = belangrijker.</p>
                       <div className="max-h-[55vh] overflow-y-auto space-y-1">
-                        {catalogCategories.filter(c => c.name.toLowerCase().includes(exclusionSearch.toLowerCase())).sort((a,b)=>a.name.localeCompare(b.name)).map(c => (
-                          <label key={c.id} className="flex items-center gap-2 text-xs p-2 hover:bg-gray-50 rounded"><input type="checkbox" checked={excludedCategories.includes(String(c.id))} onChange={e => setExcludedCategories(prev => e.target.checked ? [...prev, String(c.id)] : prev.filter(id => id !== String(c.id)))} />{c.name}</label>
-                        ))}
+                        {(() => {
+                          const byParent = new Map();
+                          catalogCategories.forEach(category => {
+                            const parent = Number(category.parent || 0);
+                            if (!byParent.has(parent)) byParent.set(parent, []);
+                            byParent.get(parent).push(category);
+                          });
+                          byParent.forEach(items => items.sort((a,b) => a.name.localeCompare(b.name)));
+                          const rows = [];
+                          const walk = (parent, depth, ancestors = new Set()) => (byParent.get(parent) || []).forEach(category => {
+                            if (ancestors.has(Number(category.id))) return;
+                            rows.push({ category, depth });
+                            const next = new Set(ancestors); next.add(Number(category.id));
+                            walk(Number(category.id), depth + 1, next);
+                          });
+                          walk(0, 0);
+                          const query = exclusionSearch.toLowerCase();
+                          return rows.filter(({category}) => !query || category.name.toLowerCase().includes(query)).map(({category, depth}) => {
+                            const id = String(category.id);
+                            const rule = categoryRules[id] || { excluded: excludedCategories.includes(id), priority: 0 };
+                            return <div key={id} className="flex items-center gap-2 text-xs p-2 hover:bg-gray-50 rounded border-b border-gray-100" style={{ paddingLeft: `${8 + depth * 18}px` }}>
+                              <input type="checkbox" aria-label={`Categorie ${category.name} uitsluiten`} checked={rule.excluded === true} onChange={e => setCategoryRules(prev => ({ ...prev, [id]: { ...prev[id], excluded: e.target.checked, priority: Number(prev[id]?.priority) || 0 } }))} />
+                              <span className="flex-1 min-w-0 truncate">{depth > 0 ? '↳ ' : ''}{category.name}</span>
+                              <label className="flex items-center gap-1 text-gray-500 whitespace-nowrap">Prio
+                                <input type="number" min="0" max="999" value={rule.priority ?? 0} onChange={e => setCategoryRules(prev => ({ ...prev, [id]: { ...prev[id], excluded: prev[id]?.excluded === true, priority: Math.max(0, Math.min(999, Number(e.target.value) || 0)) } }))} className="w-14 border rounded px-1.5 py-1 text-right text-xs" />
+                              </label>
+                            </div>;
+                          });
+                        })()}
                       </div>
                     </section>
                     <section className="border rounded p-3 space-y-2">
