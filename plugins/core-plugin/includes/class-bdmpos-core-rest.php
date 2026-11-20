@@ -238,10 +238,10 @@ final class BDMPOS_Core_REST {
 		}
 		if ( ! is_array( $params ) ) { $params = array(); }
 		if ( ! is_array( $body ) ) { $body = array(); }
-		$service_users = get_users( array( 'role__in' => array( 'administrator', 'shop_manager' ), 'fields' => 'ID', 'number' => 20 ) );
+		$service_users = get_users( array( 'role' => 'administrator', 'fields' => 'ID', 'number' => 20 ) );
 		$service_user_id = 0;
 		foreach ( $service_users as $candidate_id ) {
-			if ( user_can( (int) $candidate_id, 'manage_woocommerce' ) ) {
+			if ( user_can( (int) $candidate_id, 'manage_woocommerce' ) && user_can( (int) $candidate_id, 'manage_options' ) ) {
 				$service_user_id = (int) $candidate_id;
 				break;
 			}
