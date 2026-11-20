@@ -3,6 +3,7 @@ import { createHash } from 'crypto';
 import { claimOrder, completeOrder, releaseOrder } from '../../../lib/orderIdempotency';
 import { redeemCustomerPoints } from '../../../lib/customerPoints';
 import { requireSession, requireStoreAccess } from '../../../lib/session';
+import { callBdmposWooApi } from '../../../lib/bdmpos-core';
 
 function getClientOrderId(req) {
   const headerId = req.headers['idempotency-key'];
@@ -126,10 +127,16 @@ export default async function handler(req, res) {
     let responseOrder;
 
     try {
-      const WooCommerce = new WooCommerceRestApi({ url: wcUrl, consumerKey, consumerSecret, version: 'wc/v3' });
-      const { data } = await WooCommerce.post('orders', orderData);
-      responseOrder = data;
+      if (process.env.BDMPOS_CORE_URL && process.env.BDMPOS_CORE_SECRET) {
+        const result = await callBdmposWooApi({ method: 'POST', path: '/orders', data: orderData });
+        responseOrder = result.data;
+      } else {
+        const WooCommerce = new WooCommerceRestApi({ url: wcUrl, consumerKey, consumerSecret, version: 'wc/v3' });
+        const { data } = await WooCommerce.post('orders', orderData);
+        responseOrder = data;
+      }
     } catch (sdkError) {
+      if (process.env.BDMPOS_CORE_URL && process.env.BDMPOS_CORE_SECRET) throw sdkError;
       console.warn('[OFFLINE ORDER]: SDK faalt, schakelt over naar fetch fallback...', sdkError?.message);
       const authHeader = 'Basic ' + Buffer.from(`${consumerKey}:${consumerSecret}`).toString('base64');
       const fetchRes = await fetch(`${wcUrl}/wp-json/wc/v3/orders`, {
