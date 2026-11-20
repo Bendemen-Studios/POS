@@ -983,8 +983,8 @@ export default function AdminDashboard() {
                         localStorage.setItem('admin_all_catalog_products', JSON.stringify(sourceProducts));
                         localStorage.setItem('admin_catalog_categories', JSON.stringify(data.catalogCategories || []));
                         localStorage.setItem('pos_cached_products_' + id, JSON.stringify(visibleProducts));
-                        localStorage.setItem('pos_cached_products', JSON.stringify(visibleProducts));
-                        localStorage.setItem('pos_cached_products_updated_at', String(Date.now()));
+                        localStorage.setItem('pos_cached_products_updated_at_' + id, String(Date.now()));
+                        localStorage.setItem('pos_category_rules_' + id, JSON.stringify(data.categoryRules || {}));
                         window.dispatchEvent(new CustomEvent('pos:inventory-synced', { detail: { products: visibleProducts, storeId: id } }));
                       } catch (error) {
                         console.error('Voorraad voor geselecteerd filiaal verversen mislukt:', error);
