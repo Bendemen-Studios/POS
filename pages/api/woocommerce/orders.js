@@ -1,4 +1,6 @@
 import WooCommerceRestApi from '@woocommerce/woocommerce-rest-api';
+import axios from 'axios';
+import { getWooHttpsAgent } from '../../../lib/woocommerce-transport';
 import { requireSession } from '../../../lib/session';
 
 export default async function handler(req, res) {
@@ -20,6 +22,7 @@ export default async function handler(req, res) {
   }
 
   const authHeader = 'Basic ' + Buffer.from(`${consumerKey}:${consumerSecret}`).toString('base64');
+  const httpsAgent = getWooHttpsAgent();
 
   // GET: Bestellingen ophalen
   if (method === 'GET') {
@@ -33,7 +36,8 @@ export default async function handler(req, res) {
           consumerSecret,
           version: 'wc/v3',
           axiosConfig: {
-            timeout: 15000,
+            timeout: 30000,
+            httpsAgent,
             headers: {
               'Content-Type': 'application/json',
               'Connection': 'close'
@@ -50,20 +54,8 @@ export default async function handler(req, res) {
       } catch (sdkErr) {
         console.warn('[ORDERS API]: SDK GET mislukt/timeout, schakelt over naar native fetch fallback...', sdkErr.message);
 
-        const fetchRes = await fetch(`${url}/wp-json/wc/v3/orders?per_page=50&order=desc&orderby=date`, {
-          method: 'GET',
-          headers: {
-            'Authorization': authHeader,
-            'Content-Type': 'application/json'
-          }
-        });
-
-        if (!fetchRes.ok) {
-          const errText = await fetchRes.text();
-          throw new Error(`HTTP ${fetchRes.status}: ${errText}`);
-        }
-
-        orders = await fetchRes.json();
+        const fallbackResponse = await axios.get(`${url}/wp-json/wc/v3/orders`, { params: { per_page: 50, order: 'desc', orderby: 'date' }, timeout: 30000, httpsAgent, headers: { Authorization: authHeader, 'Content-Type': 'application/json' } });
+        orders = fallbackResponse.data;
       }
 
       return res.status(200).json({
@@ -112,21 +104,8 @@ export default async function handler(req, res) {
       } catch (sdkErr) {
         console.warn(`[ORDERS API]: SDK PUT mislukt voor order #${id}, schakelt over naar native fetch fallback...`, sdkErr.message);
 
-        const fetchRes = await fetch(`${url}/wp-json/wc/v3/orders/${id}`, {
-          method: 'PUT',
-          headers: {
-            'Authorization': authHeader,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ status })
-        });
-
-        if (!fetchRes.ok) {
-          const errText = await fetchRes.text();
-          throw new Error(`HTTP ${fetchRes.status}: ${errText}`);
-        }
-
-        updatedOrder = await fetchRes.json();
+        const fallbackResponse = await axios.put(`${url}/wp-json/wc/v3/orders/${id}`, { status }, { timeout: 30000, httpsAgent, headers: { Authorization: authHeader, 'Content-Type': 'application/json' } });
+        updatedOrder = fallbackResponse.data;
       }
 
       return res.status(200).json({ success: true, order: updatedOrder });

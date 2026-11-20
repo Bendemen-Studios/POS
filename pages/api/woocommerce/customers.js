@@ -1,4 +1,5 @@
 import WooCommerceRestApi from "@woocommerce/woocommerce-rest-api";
+import { getWooHttpsAgent } from "../../../lib/woocommerce-transport";
 import { extractCustomerPoints, getCustomersPoints } from "../../../lib/customerPoints";
 import { requireSession } from '../../../lib/session';
 
@@ -9,7 +10,7 @@ const api = new WooCommerce({
   consumerKey: process.env.WOO_CONSUMER_KEY || process.env.WOOCOMMERCE_CONSUMER_KEY || process.env.WOOCOMMERCE_KEY,
   consumerSecret: process.env.WOO_CONSUMER_SECRET || process.env.WOOCOMMERCE_CONSUMER_SECRET || process.env.WOOCOMMERCE_SECRET,
   version: "wc/v3",
-  axiosConfig: { timeout: 15000 },
+  axiosConfig: { timeout: 30000, httpsAgent: getWooHttpsAgent() },
 });
 
 export default async function handler(req, res) {

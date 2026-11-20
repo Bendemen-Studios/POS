@@ -1,6 +1,6 @@
 import WooCommerceRestApi from '@woocommerce/woocommerce-rest-api';
 import axios from 'axios';
-import https from 'https';
+import { getWooHttpsAgent } from '../../../lib/woocommerce-transport';
 import { requireSession } from '../../../lib/session';
 import db from '../../../lib/db';
 import { getStoreCatalogExclusions, isCatalogProductVisible } from '../../../lib/catalog-exclusions';
@@ -96,8 +96,7 @@ export default async function handler(req, res) {
 
     // Bind only WooCommerce HTTPS traffic to the VPS IP that can reach
     // bendemen.com. Leave the server-wide default route and Mailcow untouched.
-    const wooLocalAddress = process.env.WOOCOMMERCE_LOCAL_ADDRESS || '45.135.148.12';
-    const wooHttpsAgent = new https.Agent({ keepAlive: true, localAddress: wooLocalAddress });
+    const wooHttpsAgent = getWooHttpsAgent();
 
     const fetchJson = async (endpoint, options = {}, timeoutMs = 20000) => {
       const response = await axios.get(endpoint, {
@@ -153,7 +152,7 @@ export default async function handler(req, res) {
       (product) => product.type === 'variable' && Array.isArray(product.variations) && product.variations.length > 0
     );
     const variationMap = new Map();
-    const variationBatchSize = 20;
+    const variationBatchSize = 5;
 
     for (let start = 0; start < variableProducts.length; start += variationBatchSize) {
       const batch = variableProducts.slice(start, start + variationBatchSize);
@@ -164,7 +163,7 @@ export default async function handler(req, res) {
             const variations = await fetchJson(
               `${url}/wp-json/wc/v3/products/${product.id}/variations?per_page=${batchSize}&page=${page}&orderby=menu_order&order=asc`,
               {},
-              20000
+              40000
             );
             if (!Array.isArray(variations) || variations.length === 0) break;
             allVariations.push(...variations);
