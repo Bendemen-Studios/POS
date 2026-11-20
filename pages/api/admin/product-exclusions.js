@@ -21,7 +21,7 @@ const parse = (value, fallback) => { try { return JSON.parse(value || JSON.strin
 const normalizeRules = incoming => {
   const rules = {};
   for (const [id, rule] of Object.entries(incoming && typeof incoming === 'object' ? incoming : {})) {
-    if (!/^\\d+$/.test(id) || !rule || typeof rule !== 'object') continue;
+    if (!/^\d+$/.test(id) || !rule || typeof rule !== 'object') continue;
     rules[id] = { excluded: rule.excluded === true, priority: Math.max(0, Math.min(999, Math.round(Number(rule.priority) || 0))) };
   }
   return rules;
