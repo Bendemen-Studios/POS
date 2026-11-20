@@ -102,6 +102,12 @@ export default async function handler(req, res) {
     String(session.username || '').toLowerCase() === 'bendemen';
   let assignedStoreIds = [];
   let assignedPickupIds = [];
+  let requestedStorePickupIds = [];
+  const requestedStoreId = req.query?.store_id ? String(req.query.store_id) : '';
+  if (isAdmin && requestedStoreId) {
+    const [requestedStores] = await db.query('SELECT id, pickup_id FROM stores WHERE CAST(id AS CHAR) = ?', [requestedStoreId]);
+    requestedStorePickupIds = Array.isArray(requestedStores) ? requestedStores.map(store => String(store.pickup_id || '')).filter(Boolean) : [];
+  }
 
   if (!isAdmin) {
     assignedStoreIds = String(session.store_id || '').split(',').map(id => id.trim()).filter(Boolean);
@@ -132,13 +138,14 @@ export default async function handler(req, res) {
       const pickup_id = req.query?.pickup_id ? String(req.query.pickup_id) : null;
       res.setHeader('Cache-Control', 'private, no-store, max-age=0, must-revalidate');
 
-      const [pendingOrders, processingOrders] = await Promise.all([
+      const [pendingOrders, processingOrders, onHoldOrders] = await Promise.all([
         getOrdersForStatus(api, 'pending'),
         getOrdersForStatus(api, 'processing'),
+        getOrdersForStatus(api, 'on-hold'),
       ]);
 
       const byId = new Map();
-      [...pendingOrders, ...processingOrders].forEach((order) => {
+      [...pendingOrders, ...processingOrders, ...onHoldOrders].forEach((order) => {
         if (order?.id) byId.set(String(order.id), order);
       });
 
@@ -147,6 +154,10 @@ export default async function handler(req, res) {
           const pickup = isPickupOrder(order);
           if (!pickup) return false;
           if (pickup_id) return matchesPickupId(order, pickup_id);
+          if (isAdmin && requestedStoreId) {
+            const storeMeta = Array.isArray(order.meta_data) ? order.meta_data.find(meta => String(meta.key || '') === '_pos_store_id') : null;
+            return String(storeMeta?.value || '') === requestedStoreId || requestedStorePickupIds.some(id => matchesPickupId(order, id));
+          }
           if (isAdmin) return true;
 
           const storeMeta = Array.isArray(order.meta_data)
@@ -177,7 +188,7 @@ export default async function handler(req, res) {
   if (method === 'PUT') {
     try {
       const { order_id } = req.body || {};
-      if (!order_id || !/^\\d+$/.test(String(order_id))) return sendApiError(res, 400, 'Een geldig order-ID is verplicht.');
+      if (!order_id || !/^\d+$/.test(String(order_id))) return sendApiError(res, 400, 'Een geldig order-ID is verplicht.');
       const existingResponse = await api.get(`orders/${encodeURIComponent(String(order_id))}`);
       const existingOrder = existingResponse.data;
       if (!existingOrder?.id || !isPickupOrder(existingOrder)) return sendApiError(res, 404, 'Deze bestelling is geen geldige afhaalbestelling.');
