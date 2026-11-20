@@ -673,7 +673,7 @@ export default function AdminDashboard() {
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
                     <section className="border rounded p-3 space-y-2">
                       <h3 className="font-bold text-sm">Categorieën ({catalogCategories.length})</h3>
-                      <p className="text-[11px] text-gray-500">Hoogste prio wint bij producten met meerdere categorieën. Subcategorieën zijn onafhankelijk, behalve: een uitgesloten hoofdcategorie sluit ook alle onderliggende categorieën uit. Het opnieuw inschakelen van de hoofdcategorie schakelt subcategorieën niet automatisch in. 0 = standaard; 1–999 = belangrijker.</p>
+                      <p className="text-[11px] text-gray-500">Een uitgesloten categorie verbergt producten uit die categorie volledig in de POS, ook als ze daarnaast aan de hoofdcategorie zijn gekoppeld. Uitsluiten werkt ook door naar onderliggende subcategorieën; een uitgesloten subcategorie verbergt nooit producten die alleen aan de hoofdcategorie zijn gekoppeld. 0 = standaard; 1–999 = belangrijker.</p>
                       <div className="max-h-[55vh] overflow-y-auto space-y-1">
                         {(() => {
                           const byParent = new Map();
