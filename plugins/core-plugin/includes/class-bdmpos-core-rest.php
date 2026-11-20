@@ -98,6 +98,20 @@ final class BDMPOS_Core_REST {
 
 		register_rest_route(
 			self::REST_NAMESPACE,
+			'/orders/(?P<id>\\d+)/complete',
+			array(
+				'methods'             => WP_REST_Server::CREATABLE,
+				'callback'            => array( $this, 'complete_order' ),
+				'permission_callback' => array( $this, 'authenticate' ),
+				'args'                => array(
+					'id' => array( 'sanitize_callback' => 'absint', 'validate_callback' => static function ( $value ) { return (int) $value > 0; } ),
+					'note' => array( 'sanitize_callback' => 'sanitize_text_field' ),
+				),
+			)
+		);
+
+		register_rest_route(
+			self::REST_NAMESPACE,
 			'/customers',
 			array(
 				'methods'             => WP_REST_Server::READABLE,
