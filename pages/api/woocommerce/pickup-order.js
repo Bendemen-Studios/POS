@@ -2,6 +2,7 @@ import WooCommerceRestApi from '@woocommerce/woocommerce-rest-api';
 import { getWooHttpsAgent } from '../../../lib/woocommerce-transport';
 import { requireSession } from '../../../lib/session';
 import db from '../../../lib/db';
+import { completeBdmposOrder } from '../../../lib/bdmpos-core';
 
 function getWooCommerceApi() {
   const url = process.env.WOO_SITE_URL || process.env.WOOCOMMERCE_URL || 'https://www.bendemen.com';
@@ -201,11 +202,18 @@ export default async function handler(req, res) {
         if (!allowed) return sendApiError(res, 403, 'Deze afhaalbestelling hoort niet bij jouw filiaal.');
       }
 
-      const response = await api.put(`orders/${encodeURIComponent(String(order_id))}`, { status: 'completed' });
+      let completedOrder;
+      if (process.env.BDMPOS_CORE_URL && process.env.BDMPOS_CORE_SECRET) {
+        const result = await completeBdmposOrder(order_id, 'Afhaalbestelling opgehaald en afgerond via Bendemen POS.');
+        completedOrder = result.order;
+      } else {
+        const response = await api.put(`orders/${encodeURIComponent(String(order_id))}`, { status: 'completed' });
+        completedOrder = response.data;
+      }
 
       return res.status(200).json({
         success: true,
-        order: response.data,
+        order: completedOrder,
         message: 'Afhaalbestelling succesvol afgerond!',
       });
     } catch (error) {
