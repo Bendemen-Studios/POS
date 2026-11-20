@@ -185,7 +185,7 @@ export default async function handler(req, res) {
     let catalogCategories = [];
     try {
       for (let page = 1; page <= maxPages; page += 1) {
-        const pageCategories = await fetchJson(`${url}/wp-json/wc/v3/products/categories?per_page=${batchSize}&page=${page}&hide_empty=false&orderby=parent&order=asc`, {}, 20000);
+        const pageCategories = await fetchJson(`${url}/wp-json/wc/v3/products/categories?per_page=${batchSize}&page=${page}&hide_empty=false&orderby=id&order=asc`, {}, 20000);
         if (!Array.isArray(pageCategories) || pageCategories.length === 0) break;
         catalogCategories.push(...pageCategories.map(category => ({ id: Number(category.id), name: category.name, slug: category.slug || '', parent: Number(category.parent || 0) })));
         if (pageCategories.length < batchSize) break;
