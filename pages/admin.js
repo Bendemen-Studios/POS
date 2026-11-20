@@ -207,9 +207,11 @@ export default function AdminDashboard() {
       localStorage.setItem('admin_products', JSON.stringify(visibleProducts));
       localStorage.setItem('admin_all_catalog_products', JSON.stringify(sourceProducts));
       localStorage.setItem('admin_catalog_categories', JSON.stringify(syncData.catalogCategories || []));
+      localStorage.setItem('pos_cached_products_' + selectedCatalogStoreId, JSON.stringify(visibleProducts));
+      localStorage.setItem('pos_cached_products_' + selectedCatalogStoreId, JSON.stringify(visibleProducts));
       localStorage.setItem('pos_cached_products', JSON.stringify(visibleProducts));
       localStorage.setItem('pos_cached_products_updated_at', String(Date.now()));
-      window.dispatchEvent(new CustomEvent('pos:inventory-synced', { detail: { products: visibleProducts, exclusionsUpdated: true } }));
+      window.dispatchEvent(new CustomEvent('pos:inventory-synced', { detail: { products: visibleProducts, storeId: selectedCatalogStoreId, exclusionsUpdated: true } }));
       window.dispatchEvent(new CustomEvent('pos:ajax-refresh', { detail: { exclusionsUpdated: true } }));
       alert('Uitsluitingen opgeslagen en direct toegepast op voorraad en POS.');
     } catch (err) { alert(err.message || 'Opslaan mislukt'); }
@@ -346,8 +348,8 @@ export default function AdminDashboard() {
       localStorage.setItem('admin_catalog_categories', JSON.stringify(data.catalogCategories || []));
       localStorage.setItem('pos_cached_products', JSON.stringify(visibleProducts));
       localStorage.setItem('pos_cached_products_updated_at', String(Date.now()));
-      window.dispatchEvent(new CustomEvent('pos:inventory-synced', { detail: { products: visibleProducts, manual: true } }));
-      window.dispatchEvent(new CustomEvent('pos:ajax-refresh', { detail: { manualProductSync: true } }));
+      window.dispatchEvent(new CustomEvent('pos:inventory-synced', { detail: { products: visibleProducts, storeId: selectedCatalogStoreId, manual: true } }));
+      window.dispatchEvent(new CustomEvent('pos:ajax-refresh', { detail: { manualProductSync: true, storeId: selectedCatalogStoreId } }));
       alert('Producten gesynchroniseerd. Voorraad en POS tonen nu alleen niet-uitgesloten artikelen.');
     } catch (err) {
       alert('Kan geen verbinding maken met WooCommerce.');
