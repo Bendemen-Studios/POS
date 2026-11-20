@@ -23,6 +23,16 @@ export default async function handler(req, res) {
   const session = await requireSession(req, res);
   if (!session) return;
 
+  const includeExcluded = req.query?.include_excluded === '1' && ['admin', 'super_admin', 'administrator'].includes(String(session.role || '').toLowerCase());
+  const formatResponse = (data) => {
+    if (!includeExcluded) {
+      const { allProducts, ...publicData } = data;
+      return publicData;
+    }
+    const allProducts = Array.isArray(data.allProducts) ? data.allProducts : data.products;
+    return { ...data, products: allProducts, count: allProducts.length };
+  };
+
   const cache = getCache();
   const forceRefresh = req.query?.refresh === '1' || req.query?.preload === '1' || req.query?._sync != null;
   const cacheAge = Date.now() - cache.updatedAt;
@@ -32,7 +42,7 @@ export default async function handler(req, res) {
   if (!forceRefresh && cache.data && cacheAge < SERVER_CACHE_TTL) {
     res.setHeader('Cache-Control', 'private, max-age=0, stale-while-revalidate=300');
     res.setHeader('X-POS-Product-Cache', 'HIT');
-    return res.status(200).json(cache.data);
+    return res.status(200).json(formatResponse(cache.data));
   }
 
   // Prevent 10 POS terminals from all rebuilding the same WooCommerce cache.
@@ -41,7 +51,7 @@ export default async function handler(req, res) {
       const data = await cache.loading;
       res.setHeader('Cache-Control', 'private, max-age=0, stale-while-revalidate=300');
       res.setHeader('X-POS-Product-Cache', 'WAIT');
-      return res.status(200).json(data);
+      return res.status(200).json(formatResponse(data));
     } catch (_) {
       // Continue and try a fresh request below.
     }
@@ -227,6 +237,7 @@ export default async function handler(req, res) {
       success: true,
       count: visibleProducts.length,
       products: visibleProducts,
+      allProducts: normalizedProducts,
       cached_at: new Date().toISOString()
     };
   })();
@@ -242,7 +253,7 @@ export default async function handler(req, res) {
     // If WooCommerce is temporarily down, serve the last VPS cache rather than failing the POS.
     if (cache.data) {
       res.setHeader('X-POS-Product-Cache', 'STALE');
-      return res.status(200).json({ ...cache.data, stale: true });
+      return res.status(200).json({ ...formatResponse(cache.data), stale: true });
     }
     console.error('Fout bij ophalen WooCommerce producten:', error);
     return res.status(500).json({ success: false, error: error.message || 'Fout bij ophalen producten' });
