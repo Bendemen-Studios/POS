@@ -15,7 +15,9 @@ It is intentionally a **thin bridge**, not a second business-logic system:
 | GET | `/wp-json/bdmpos/v1/catalog?page=1&per_page=100` | Paginated products, including product category IDs and variation IDs |
 | GET | `/wp-json/bdmpos/v1/categories` | Complete WooCommerce product-category tree |
 
-The catalog endpoint returns product and variation IDs. Detailed variation records and write operations will be added in later migration steps before the POS switches away from the existing WooCommerce API.
+The catalog endpoint returns product records with assigned category IDs, the selected primary category, image and attribute data, variation IDs, and full variation details (`variations_data`). Category records include their parent IDs so the POS can build the complete hierarchy. Results are paginated (maximum 100 products per page). The POS still applies branch-specific exclusions and category rules; those rules do not alter WooCommerce data.
+
+The catalog contract is now sufficient to replace the POS's separate WooCommerce product-variation reads. The next migration step is to add a server-side POS adapter that calls these endpoints with `BDMPOS_CORE_SECRET`, then compare the resulting catalog against the current WooCommerce REST API before switching production traffic.
 
 ## Install on bendemen.com
 
