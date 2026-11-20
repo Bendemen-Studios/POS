@@ -129,7 +129,7 @@ export default function AdminDashboard() {
     }
     try {
       const parsed = JSON.parse(userStr);
-      if (parsed.role !== 'admin' && parsed.role !== 'super_admin') {
+      if (!['admin', 'super_admin', 'administrator'].includes(String(parsed.role || '').toLowerCase())) {
         alert('Geen toegang tot het admin-gedeelte.');
         router.replace('/');
         return;
@@ -260,7 +260,7 @@ export default function AdminDashboard() {
 
   const fetchProductsSilently = async () => {
     try {
-      const res = await fetch(`/api/woocommerce/products?_sync=${Date.now()}`, { cache: 'no-store' });
+      const res = await fetch(`/api/woocommerce/products?include_excluded=1&_sync=${Date.now()}`, { cache: 'no-store' });
       const data = await res.json();
       if (data.success) {
         setProducts(data.products || []);
@@ -276,7 +276,7 @@ export default function AdminDashboard() {
   const handleManualSyncProducts = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/woocommerce/products?_sync=${Date.now()}`, { cache: 'no-store' });
+      const res = await fetch(`/api/woocommerce/products?include_excluded=1&_sync=${Date.now()}`, { cache: 'no-store' });
       const data = await res.json();
       if (data.success) {
         setProducts(data.products || []);
