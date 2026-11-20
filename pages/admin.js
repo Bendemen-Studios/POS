@@ -673,7 +673,7 @@ export default function AdminDashboard() {
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
                     <section className="border rounded p-3 space-y-2">
                       <h3 className="font-bold text-sm">Categorieën ({catalogCategories.length})</h3>
-                      <p className="text-[11px] text-gray-500">Hoogste prio wint bij producten met meerdere categorieën. Hoofd- en subcategorieën hebben onafhankelijke uitsluitingen. 0 = standaard; 1–999 = belangrijker.</p>
+                      <p className="text-[11px] text-gray-500">Hoogste prio wint bij producten met meerdere categorieën. Subcategorieën zijn onafhankelijk, behalve: een uitgesloten hoofdcategorie sluit ook alle onderliggende categorieën uit. Het opnieuw inschakelen van de hoofdcategorie schakelt subcategorieën niet automatisch in. 0 = standaard; 1–999 = belangrijker.</p>
                       <div className="max-h-[55vh] overflow-y-auto space-y-1">
                         {(() => {
                           const byParent = new Map();
@@ -696,7 +696,29 @@ export default function AdminDashboard() {
                             const id = String(category.id);
                             const rule = categoryRules[id] || { excluded: excludedCategories.includes(id), priority: 0 };
                             return <div key={id} className="flex items-center gap-2 text-xs p-2 hover:bg-gray-50 rounded border-b border-gray-100" style={{ paddingLeft: `${8 + depth * 18}px` }}>
-                              <input type="checkbox" aria-label={`Categorie ${category.name} uitsluiten`} checked={rule.excluded === true} onChange={e => { const excluded = e.target.checked; setCategoryRules(prev => ({ ...prev, [id]: { ...prev[id], excluded, priority: Number(prev[id]?.priority) || 0 } })); }} />
+                              <input type="checkbox" aria-label={`Categorie ${category.name} uitsluiten`} checked={rule.excluded === true} onChange={e => {
+                                const excluded = e.target.checked;
+                                setCategoryRules(prev => {
+                                  const next = { ...prev, [id]: { ...prev[id], excluded, priority: Number(prev[id]?.priority) || 0 } };
+                                  // Exception: excluding a parent also excludes every descendant.
+                                  // Re-enabling a parent does not silently re-enable children;
+                                  // child exclusions remain independently manageable.
+                                  if (excluded) {
+                                    const descendants = new Set();
+                                    const collect = parentId => catalogCategories.forEach(child => {
+                                      if (Number(child.parent || 0) === Number(parentId) && !descendants.has(String(child.id))) {
+                                        descendants.add(String(child.id));
+                                        collect(child.id);
+                                      }
+                                    });
+                                    collect(id);
+                                    descendants.forEach(childId => {
+                                      next[childId] = { ...next[childId], excluded: true, priority: Number(next[childId]?.priority) || 0 };
+                                    });
+                                  }
+                                  return next;
+                                });
+                              }} />
                               <span className="flex-1 min-w-0 truncate">{depth > 0 ? '↳ ' : ''}{category.name}</span>
                               <label className="flex items-center gap-1 text-gray-500 whitespace-nowrap">Prio
                                 <input type="number" min="0" max="999" value={rule.priority ?? 0} onChange={e => setCategoryRules(prev => ({ ...prev, [id]: { ...prev[id], excluded: prev[id]?.excluded === true, priority: Math.max(0, Math.min(999, Number(e.target.value) || 0)) } }))} className="w-14 border rounded px-1.5 py-1 text-right text-xs" />
