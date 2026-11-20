@@ -14,15 +14,16 @@ export default function PickupDashboard() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncError, setLastSyncError] = useState('');
   const syncInFlight = useRef(null);
+  const effectCallbacks = useRef({});
 
   useEffect(() => {
     const store = JSON.parse(localStorage.getItem('selectedStore') || '{}');
     setSelectedStore(store);
-    fetchPickupOrders();
-    triggerOfflinePickupSync();
+    effectCallbacks.current.fetchPickupOrders?.();
+    effectCallbacks.current.triggerOfflinePickupSync?.();
 
-    const handleOnline = () => triggerOfflinePickupSync();
-    const interval = setInterval(() => triggerOfflinePickupSync(), 5000);
+    const handleOnline = () => effectCallbacks.current.triggerOfflinePickupSync?.();
+    const interval = setInterval(() => effectCallbacks.current.triggerOfflinePickupSync?.(), 5000);
     window.addEventListener('online', handleOnline);
 
     return () => {
@@ -88,6 +89,9 @@ export default function PickupDashboard() {
     })();
     return syncInFlight.current;
   };
+
+  effectCallbacks.current.fetchPickupOrders = fetchPickupOrders;
+  effectCallbacks.current.triggerOfflinePickupSync = triggerOfflinePickupSync;
 
   const handleMarkAsPickedUp = async (orderId) => {
     if (!confirm(`Weet je zeker dat bestelling #${orderId} is opgehaald?`)) return;
