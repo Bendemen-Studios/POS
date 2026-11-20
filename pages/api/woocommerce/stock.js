@@ -3,6 +3,7 @@ import { getWooHttpsAgent } from '../../../lib/woocommerce-transport';
 import { requireSession } from '../../../lib/session';
 import db from '../../../lib/db';
 import { getStoreCatalogExclusions, isCatalogProductVisible } from '../../../lib/catalog-exclusions';
+import { fetchBdmposCatalog } from '../../../lib/bdmpos-core';
 
 const fetchWithTimeout = async (url, options = {}, timeoutMs = 7000) => {
   const response = await axios.get(url, {
@@ -41,6 +42,30 @@ export default async function handler(req, res) {
       if (!storeRows[0]) return res.status(400).json({ success: false, error: 'Ongeldig filiaal.' });
     }
     const exclusions = await getStoreCatalogExclusions(storeId);
+
+    // Core is used only for stock reads. The response is filtered to the
+    // requested product IDs and the caller's existing store visibility rules.
+    if (process.env.BDMPOS_CORE_URL && process.env.BDMPOS_CORE_SECRET) {
+      const catalog = await fetchBdmposCatalog();
+      const wanted = new Set(ids);
+      const products = catalog.products
+        .filter(product => wanted.has(Number(product.id)))
+        .filter(product => isCatalogProductVisible(product, exclusions, catalog.categories))
+        .map(product => ({
+          id: Number(product.id),
+          stock_quantity: product.stock_quantity ?? null,
+          in_stock: Boolean(product.in_stock),
+          variations_data: Array.isArray(product.variations_data) ? product.variations_data : []
+        }));
+      res.setHeader('Cache-Control', 'private, no-store');
+      return res.status(200).json({
+        success: true,
+        products,
+        source: 'bdmpos-core',
+        read_only: true,
+        synced_at: new Date().toISOString()
+      });
+    }
     let catalogCategories = [];
     try {
       catalogCategories = await fetchWithTimeout(url + '/wp-json/wc/v3/products/categories?per_page=100&hide_empty=false', { headers });
