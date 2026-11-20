@@ -67,6 +67,37 @@ final class BDMPOS_Core_REST {
 
 		register_rest_route(
 			self::REST_NAMESPACE,
+			'/stock',
+			array(
+				'methods' => WP_REST_Server::READABLE,
+				'callback' => array( $this, 'stock' ),
+				'permission_callback' => array( $this, 'authenticate' ),
+				'args' => array(
+					'page' => array( 'default' => 1, 'sanitize_callback' => 'absint', 'validate_callback' => static function ( $value ) { return (int) $value >= 1; } ),
+					'per_page' => array( 'default' => 100, 'sanitize_callback' => 'absint', 'validate_callback' => static function ( $value ) { return (int) $value >= 1 && (int) $value <= self::MAX_PAGE_SIZE; } ),
+				),
+			)
+		);
+
+		register_rest_route(
+			self::REST_NAMESPACE,
+			'/orders',
+			array(
+				' methods' => WP_REST_Server::READABLE,
+				'callback' => array( $this, 'orders' ),
+				'permission_callback' => array( $this, 'authenticate' ),
+				'args' => array(
+					'page' => array( 'default' => 1, 'sanitize_callback' => 'absint', 'validate_callback' => static function ( $value ) { return (int) $value >= 1; } ),
+					'per_page' => array( 'default' => 50, 'sanitize_callback' => 'absint', 'validate_callback' => static function ( $value ) { return (int) $value >= 1 && (int) $value <= self::MAX_PAGE_SIZE; } ),
+					'after' => array( 'sanitize_callback' => 'sanitize_text_field' ),
+					'before' => array( 'sanitize_callback' => 'sanitize_text_field' ),
+					'status' => array( 'sanitize_callback' => 'sanitize_text_field' ),
+				),
+			)
+		);
+
+		register_rest_route(
+			self::REST_NAMESPACE,
 			'/customers',
 			array(
 				'methods'             => WP_REST_Server::READABLE,
@@ -206,6 +237,138 @@ final class BDMPOS_Core_REST {
 				)
 			);
 		}
+	}
+
+	/**
+	 * Read-only stock snapshot for products and their variations.
+	 * This endpoint only reads WooCommerce stock fields; it has no write path.
+	 */
+	public function stock( WP_REST_Request $request ) {
+		$page = max( 1, (int) $request->get_param( 'page' ) );
+		$per_page = min( self::MAX_PAGE_SIZE, max( 1, (int) $request->get_param( 'per_page' ) ) );
+		try {
+			$products = wc_get_products( array(
+				'status' => array( 'publish', 'private' ),
+				'limit' => $per_page,
+				'page' => $page,
+				'orderby' => 'ID',
+				'order' => 'ASC',
+				'return' => 'objects',
+			) );
+			$items = array();
+			foreach ( $products as $product ) {
+				if ( ! $product instanceof WC_Product ) {
+					continue;
+				}
+				$items[] = $this->serialize_stock_item( $product, 0 );
+				if ( $product->is_type( 'variable' ) ) {
+					foreach ( $product->get_children() as $variation_id ) {
+						$variation = wc_get_product( $variation_id );
+						if ( $variation instanceof WC_Product_Variation ) {
+							$items[] = $this->serialize_stock_item( $variation, $product->get_id() );
+						}
+					}
+				}
+			}
+			return rest_ensure_response( array(
+				'success' => true,
+				'page' => $page,
+				'per_page' => $per_page,
+				'count' => count( $items ),
+				'has_more' => count( $products ) === $per_page,
+				'items' => $items,
+				'read_only' => true,
+				'generated_at' => gmdate( 'c' ),
+			) );
+		} catch ( Throwable $error ) {
+			return new WP_Error( 'bdmpos_core_stock_failed', 'Unable to load WooCommerce stock.', array( 'status' => 500 ) );
+		}
+	}
+
+	private function serialize_stock_item( WC_Product $product, $parent_id ) {
+		return array(
+			'id' => $product->get_id(),
+			'product_id' => $product->get_id(),
+			'parent_id' => absint( $parent_id ),
+			'sku' => $product->get_sku(),
+			'name' => $product->get_name(),
+			'type' => $product->get_type(),
+			'manage_stock' => $product->managing_stock(),
+			'stock_quantity' => $product->get_stock_quantity(),
+			'stock_status' => $product->get_stock_status(),
+			'in_stock' => $product->is_in_stock(),
+			'backorders' => $product->get_backorders(),
+			'backorders_allowed' => $product->backorders_allowed(),
+			'low_stock_amount' => $product->get_low_stock_amount(),
+		);
+	}
+
+	/**
+	 * Read-only order synchronization. No order creation or status changes occur here.
+	 */
+	public function orders( WP_REST_Request $request ) {
+		$page = max( 1, (int) $request->get_param( 'page' ) );
+		$per_page = min( self::MAX_PAGE_SIZE, max( 1, (int) $request->get_param( 'per_page' ) ) );
+		$args = array(
+			'limit' => $per_page,
+			'page' => $page,
+			'orderby' => 'date',
+			'order' => 'DESC',
+			'return' => 'objects',
+			'paginate' => true,
+		);
+		$status = sanitize_text_field( (string) $request->get_param( 'status' ) );
+		if ( '' !== $status ) {
+			$args['status'] = array( 'wc-' . preg_replace( '/^wc-/', '', $status ) );
+		}
+		$after = sanitize_text_field( (string) $request->get_param( 'after' ) );
+		$before = sanitize_text_field( (string) $request->get_param( 'before' ) );
+		if ( '' !== $after ) { $args['date_created'] = '>=' . $after; }
+		if ( '' !== $before ) { $args['date_created'] = isset( $args['date_created'] ) ? array( $args['date_created'], '<=' . $before ) : '<=' . $before; }
+		try {
+			$query = wc_get_orders( $args );
+			$orders = is_object( $query ) && isset( $query->orders ) ? $query->orders : array();
+			$total = is_object( $query ) && isset( $query->total ) ? (int) $query->total : count( $orders );
+			$items = array();
+			foreach ( $orders as $order ) {
+				if ( $order instanceof WC_Order ) { $items[] = $this->serialize_order( $order ); }
+			}
+			return rest_ensure_response( array(
+				'success' => true,
+				'page' => $page,
+				'per_page' => $per_page,
+				'total' => $total,
+				'total_pages' => (int) ceil( $total / $per_page ),
+				'count' => count( $items ),
+				'orders' => $items,
+				'read_only' => true,
+				'generated_at' => gmdate( 'c' ),
+			) );
+		} catch ( Throwable $error ) {
+			return new WP_Error( 'bdmpos_core_orders_failed', 'Unable to load WooCommerce orders.', array( 'status' => 500 ) );
+		}
+	}
+
+	private function serialize_order( WC_Order $order ) {
+		$data = $order->get_data();
+		foreach ( array( 'date_created', 'date_modified', 'date_completed', 'date_paid' ) as $date_key ) {
+			$date = $order->{'get_' . $date_key}();
+			$data[ $date_key ] = $date ? $date->date( 'c' ) : null;
+		}
+		$data['line_items'] = array();
+		foreach ( $order->get_items( 'line_item' ) as $item ) {
+			$data['line_items'][] = $item->get_data();
+		}
+		foreach ( array( 'shipping', 'fee', 'coupon', 'tax' ) as $item_type ) {
+			$key = 'shipping' === $item_type ? 'shipping_lines' : ( 'fee' === $item_type ? 'fee_lines' : ( 'coupon' === $item_type ? 'coupon_lines' : 'tax_lines' ) );
+			$data[ $key ] = array();
+			foreach ( $order->get_items( $item_type ) as $item ) { $data[ $key ][] = $item->get_data(); }
+		}
+		$data['refunds'] = array();
+		foreach ( $order->get_refunds() as $refund ) { $data['refunds'][] = $refund->get_data(); }
+		$data['meta_data'] = array();
+		foreach ( $order->get_meta_data() as $meta ) { $data['meta_data'][] = $meta->get_data(); }
+		return $data;
 	}
 
 	/**
