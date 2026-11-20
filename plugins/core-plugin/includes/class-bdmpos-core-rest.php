@@ -283,15 +283,20 @@ final class BDMPOS_Core_REST {
 		$data['date_created']  = $customer->get_date_created() ? $customer->get_date_created()->date( 'c' ) : null;
 		$data['date_modified'] = $customer->get_date_modified() ? $customer->get_date_modified()->date( 'c' ) : null;
 		$data['meta_data'] = array();
-		$data['points_balance'] = 0;
+		$data['points_balance'] = null;
 
 		foreach ( $customer->get_meta_data() as $meta ) {
 			$meta_data = $meta->get_data();
+			$key = isset( $meta_data['key'] ) ? (string) $meta_data['key'] : '';
+			$value = isset( $meta_data['value'] ) ? $meta_data['value'] : null;
 			$data['meta_data'][] = array(
 				'id'    => isset( $meta_data['id'] ) ? (int) $meta_data['id'] : 0,
-				'key'   => isset( $meta_data['key'] ) ? $meta_data['key'] : '',
-				'value' => isset( $meta_data['value'] ) ? $meta_data['value'] : null,
+				'key'   => $key,
+				'value' => $value,
 			);
+			if ( null === $data['points_balance'] && in_array( $key, array( 'wc_points_balance', '_wc_points_balance', 'points_balance', '_points_balance' ), true ) ) {
+				$data['points_balance'] = max( 0, (int) $value );
+			}
 		}
 		if ( class_exists( 'WC_Points_Rewards_Manager' ) ) {
 			$data['points_balance'] = max( 0, (int) WC_Points_Rewards_Manager::get_users_points( $customer->get_id() ) );
