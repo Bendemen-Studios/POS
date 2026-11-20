@@ -14,6 +14,8 @@ It is intentionally a **thin bridge**, not a second business-logic system:
 | GET | `/wp-json/bdmpos/v1/health` | Authenticated connectivity and version check |
 | GET | `/wp-json/bdmpos/v1/catalog?page=1&per_page=100` | Paginated products, including product category IDs and variation IDs |
 | GET | `/wp-json/bdmpos/v1/categories` | Complete WooCommerce product-category tree |
+| GET | `/wp-json/bdmpos/v1/customers?page=1&per_page=100` | Paginated, read-only customer directory; optional `search` |
+| GET | `/wp-json/bdmpos/v1/customers/{id}/points` | Read-only WooCommerce Points & Rewards balance |
 
 The catalog endpoint returns product records with assigned category IDs, the selected primary category, image and attribute data, variation IDs, and full variation details (`variations_data`). Category records include their parent IDs so the POS can build the complete hierarchy. Results are paginated (maximum 100 products per page). The POS still applies branch-specific exclusions and category rules; those rules do not alter WooCommerce data.
 
@@ -56,3 +58,8 @@ If the secret is absent, the plugin fails closed with HTTP 503. Invalid secrets 
 3. Add stock, customer, points, order and pickup endpoints with permission and idempotency checks.
 4. Switch POS API routes one module at a time.
 5. Remove legacy WooCommerce REST API usage only after production verification.
+
+
+## Explicit scope boundaries
+
+BDM POS Core exposes customer and points **reads only**. It does not create or update customers, create orders, change order statuses, or mutate stock. Existing POS Orders and checkout flows remain responsible for order processing and any order-linked points earning/redemption. Stock operations are intentionally outside this Core migration.
