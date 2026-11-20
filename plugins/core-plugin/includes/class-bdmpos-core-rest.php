@@ -67,6 +67,44 @@ final class BDMPOS_Core_REST {
 
 		register_rest_route(
 			self::REST_NAMESPACE,
+			'/customers',
+			array(
+				'methods'             => WP_REST_Server::READABLE,
+				'callback'            => array( $this, 'customers' ),
+				'permission_callback' => array( $this, 'authenticate' ),
+				'args'                => array(
+					'page' => array(
+						'default'           => 1,
+						'sanitize_callback' => 'absint',
+						'validate_callback' => static function ( $value ) { return (int) $value >= 1; },
+					),
+					'per_page' => array(
+						'default'           => 100,
+						'sanitize_callback' => 'absint',
+						'validate_callback' => static function ( $value ) { return (int) $value >= 1 && (int) $value <= self::MAX_PAGE_SIZE; },
+					),
+					'search' => array(
+						'sanitize_callback' => 'sanitize_text_field',
+					),
+				),
+			)
+		);
+
+		register_rest_route(
+			self::REST_NAMESPACE,
+			'/customers/(?P<id>\\d+)/points',
+			array(
+				'methods'             => WP_REST_Server::READABLE,
+				'callback'            => array( $this, 'customer_points' ),
+				'permission_callback' => array( $this, 'authenticate' ),
+				'args'                => array(
+					'id' => array( 'sanitize_callback' => 'absint', 'validate_callback' => static function ( $value ) { return (int) $value > 0; } ),
+				),
+			)
+		);
+
+		register_rest_route(
+			self::REST_NAMESPACE,
 			'/categories',
 			array(
 				'methods'             => WP_REST_Server::READABLE,
@@ -168,6 +206,107 @@ final class BDMPOS_Core_REST {
 				)
 			);
 		}
+	}
+
+	/**
+	 * Read-only customer directory. Customer creation and order-linked changes
+	 * remain in the existing POS/Orders workflows.
+	 */
+	public function customers( WP_REST_Request $request ) {
+		$page     = max( 1, (int) $request->get_param( 'page' ) );
+		$per_page = min( self::MAX_PAGE_SIZE, max( 1, (int) $request->get_param( 'per_page' ) ) );
+		$args     = array(
+			'limit'   => $per_page,
+			'page'    => $page,
+			'orderby' => 'ID',
+			'order'   => 'DESC',
+			'return'  => 'objects',
+		);
+		$search = trim( (string) $request->get_param( 'search' ) );
+		if ( '' !== $search ) {
+			$args['search'] = '*' . $search . '*';
+		}
+
+		try {
+			$query = new WC_Customer_Query( $args );
+			$customers = $query->get_customers();
+			$total = (int) $query->get_total();
+			$items = array();
+			foreach ( $customers as $customer ) {
+				if ( $customer instanceof WC_Customer ) {
+					$items[] = $this->serialize_customer( $customer );
+				}
+			}
+			return rest_ensure_response(
+				array(
+					'success'       => true,
+					'page'          => $page,
+					'per_page'      => $per_page,
+					'total'         => $total,
+					'total_pages'   => (int) ceil( $total / $per_page ),
+					'count'         => count( $items ),
+					'customers'     => $items,
+					'generated_at'  => gmdate( 'c' ),
+				)
+			);
+		} catch ( Throwable $error ) {
+			return new WP_Error(
+				'bdmpos_core_customers_failed',
+				'Unable to load WooCommerce customers.',
+				array( 'status' => 500 )
+			);
+		}
+	}
+
+	/** Read-only customer points balance; no points can be earned or redeemed here. */
+	public function customer_points( WP_REST_Request $request ) {
+		$customer_id = absint( $request->get_param( 'id' ) );
+		$customer = $customer_id ? wc_get_customer( $customer_id ) : false;
+		if ( ! $customer ) {
+			return new WP_Error( 'bdmpos_core_customer_not_found', 'Customer not found.', array( 'status' => 404 ) );
+		}
+		if ( ! class_exists( 'WC_Points_Rewards_Manager' ) ) {
+			return new WP_Error( 'bdmpos_core_points_unavailable', 'WooCommerce Points & Rewards is not active.', array( 'status' => 503 ) );
+		}
+		return rest_ensure_response(
+			array(
+				'success'        => true,
+				'customer_id'    => $customer_id,
+				'points_balance' => max( 0, (int) WC_Points_Rewards_Manager::get_users_points( $customer_id ) ),
+				'read_only'      => true,
+			)
+		);
+	}
+
+	private function serialize_customer( WC_Customer $customer ) {
+		$data = array(
+			'id'                  => $customer->get_id(),
+			'email'               => $customer->get_email(),
+			'first_name'          => $customer->get_first_name(),
+			'last_name'           => $customer->get_last_name(),
+			'username'            => $customer->get_username(),
+			'role'                => $customer->get_role(),
+			'billing'             => $customer->get_billing(),
+			'shipping'            => $customer->get_shipping(),
+			'is_paying_customer'  => $customer->get_is_paying_customer(),
+			'avatar_url'          => $customer->get_avatar_url(),
+			'date_created'        => $customer->get_date_created() ? $customer->get_date_created()->date( 'c' ) : null,
+			'date_modified'       => $customer->get_date_modified() ? $customer->get_date_modified()->date( 'c' ) : null,
+			'meta_data'           => array(),
+			'points_balance'      => 0,
+		);
+		foreach ( $customer->get_meta_data() as $meta ) {
+			$meta_data = $meta->get_data();
+			$data['meta_data'][] = array(
+				'id'    => isset( $meta_data['id'] ) ? (int) $meta_data['id'] : 0,
+				'key'   => isset( $meta_data['key'] ) ? $meta_data['key'] : '',
+				'value' => isset( $meta_data['value'] ) ? $meta_data['value'] : null,
+			);
+		}
+		if ( class_exists( 'WC_Points_Rewards_Manager' ) ) {
+			$data['points_balance'] = max( 0, (int) WC_Points_Rewards_Manager::get_users_points( $customer->get_id() ) );
+		}
+		return $data;
 	}
 
 	public function categories() {
