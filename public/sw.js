@@ -35,6 +35,9 @@ async function getAuthorizedCacheKey(request) {
   if (url.pathname === '/api/woocommerce/products') {
     // Product data and exclusions are branch-specific. Never share one cache
     // entry between stores, and never cache an unscoped admin/global request.
+    // Admin exclusion-management requests contain the unfiltered source
+    // catalog. Never place that privileged response in the shared POS cache.
+    if (url.searchParams.get('include_excluded') === '1') return null;
     const storeId = url.searchParams.get('store_id');
     if (!storeId) return null;
     url.search = '';
