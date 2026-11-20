@@ -357,13 +357,31 @@ export default function POSHome() {
     const parentId = String(category.parent || '0');
     return parentId === '0' || !categoryById.has(parentId);
   });
-  const categoriesList = topLevelCategories
+  const categoriesFromTree = topLevelCategories
     .map(category => {
       const treeIds = new Set(getCategoryTreeIds(category.id));
       const count = activeProducts.filter(product => getAssignedCategoryIds(product).some(id => treeIds.has(id))).length;
       return { id: String(category.id), name: category.name || 'Categorie', count };
     })
-    .filter(category => category.count > 0)
+    .filter(category => category.count > 0);
+
+  // Safety fallback: if the category endpoint/cache is missing or its IDs do
+  // not match the product payload, never leave the POS with only "Alles".
+  // Reconstruct the categories from assigned product categories until the
+  // full category tree is available again.
+  const categoriesFromProducts = new Map();
+  activeProducts.forEach(product => {
+    (Array.isArray(product.categories) ? product.categories : []).forEach(category => {
+      if (category && category.id != null) {
+        const id = String(category.id);
+        if (!categoriesFromProducts.has(id)) {
+          categoriesFromProducts.set(id, { id, name: category.name || 'Categorie', count: 0 });
+        }
+        categoriesFromProducts.get(id).count += 1;
+      }
+    });
+  });
+  const categoriesList = (categoriesFromTree.length ? categoriesFromTree : [...categoriesFromProducts.values()])
     .sort((a, b) =>
       (Number(catalogCategoryRules[String(b.id)]?.priority) || 0) - (Number(catalogCategoryRules[String(a.id)]?.priority) || 0) ||
       a.name.localeCompare(b.name) || a.id.localeCompare(b.id)
