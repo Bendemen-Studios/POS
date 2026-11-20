@@ -35,7 +35,7 @@ export default function PickupDashboard() {
 
   useEffect(() => {
     if (typeof window !== 'undefined' && orders.length > 0) {
-      localStorage.setItem('pos_cached_pickup_orders', JSON.stringify(orders));
+      localStorage.setItem('pos_cached_pickup_orders_' + String(selectedStore?.id || selectedStore?.store_id || 1), JSON.stringify(orders));
     }
   }, [orders]);
 
