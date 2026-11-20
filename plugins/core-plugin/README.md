@@ -22,15 +22,15 @@ BDM POS Core is the authenticated server-to-server integration layer between Ben
 
 The `/woocommerce` gateway forwards authenticated server-side requests to WooCommerce's native `/wp-json/wc/v3/` API. It supports `GET`, `POST`, `PUT`, `PATCH` and `DELETE` for WooCommerce REST resources, including products, variations, categories, customers, orders, refunds, coupons and other `wc/v3` resources. WooCommerce's own REST controllers validate each operation.
 
-The gateway runs requests as a WordPress administrator service account with both `manage_options` and `manage_woocommerce`. Configure at least one active administrator account on the WordPress site. Requests are accepted only when the dedicated Core secret is valid. The secret must exist only on the POS server and in `wp-config.php`; it is never sent to browser code.
+The gateway runs requests as a WordPress administrator service account with both `manage_options` and `manage_woocommerce`. Configure at least one active administrator account on the WordPress site. Requests are accepted only when the dedicated Core secret is valid. Enter the Core API secret in WooCommerce → BDM POS Core (or define it in `wp-config.php`); it is never sent to browser code.
 
 Core does not create a second order alongside the POS. Each existing POS order-creation flow makes its single order-creation request through the gateway. Offline order synchronization retains the existing POS idempotency claim and does not fall back to a direct WooCommerce request after a Core failure, avoiding an accidental second create after an uncertain response.
 
 ## Automatic synchronization
 
-Core listens to WooCommerce product, variation, stock, category, customer profile and points, order status and refund changes. It queues signed webhook events for the POS backend using WooCommerce Action Scheduler (with WP-Cron fallback). Failed deliveries are retried with increasing delays, up to six attempts. The POS receiver stores event IDs in MySQL, safely accepts duplicate deliveries, and invalidates its product catalog cache when product, variation, stock or category data changes. No dashboard or additional user interface is added.
+Core listens to WooCommerce product, variation, stock, category, customer profile and points, order status and refund changes. It queues signed webhook events for the POS backend using WooCommerce Action Scheduler (with WP-Cron fallback). Failed deliveries are retried with increasing delays, up to six attempts. The POS receiver stores event IDs in MySQL, safely accepts duplicate deliveries, and invalidates its product catalog cache when product, variation, stock or category data changes. The WordPress admin includes a settings page under WooCommerce → BDM POS Core.
 
-Configure these values in WordPress `wp-config.php`:
+Configure the webhook URL and secret in WooCommerce → BDM POS Core. They can alternatively be defined in WordPress `wp-config.php` as fallback values:
 
 ```php
 define( 'BDMPOS_CORE_WEBHOOK_URL', 'https://YOUR-POS-DOMAIN/api/webhooks/bdmpos-core' );
