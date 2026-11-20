@@ -1,6 +1,7 @@
 import WooCommerceRestApi from "@woocommerce/woocommerce-rest-api";
 import { updateCustomerPoints } from "../../../lib/customerPoints";
 import { requireSession, requireStoreAccess } from '../../../lib/session';
+import { callBdmposWooApi } from '../../../lib/bdmpos-core';
 
 const WooCommerce = WooCommerceRestApi.default || WooCommerceRestApi;
 const api = new WooCommerce({
@@ -58,7 +59,9 @@ export default async function handler(req, res) {
       ]
     };
 
-    const response = await api.post("orders", orderData);
+    const response = process.env.BDMPOS_CORE_URL && process.env.BDMPOS_CORE_SECRET
+      ? await callBdmposWooApi({ method: "POST", path: "/orders", data: orderData })
+      : await api.post("orders", orderData);
     const createdOrder = response.data;
 
     if (Number(customerId) > 0) {
