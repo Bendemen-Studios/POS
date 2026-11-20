@@ -85,42 +85,35 @@ export default async function handler(req, res) {
     const maxPages = 1000;
     const products = [];
 
-    for (let page = 1; page <= maxPages; page += 1) {
-      const endpoint = `${url}/wp-json/wc/v3/products?per_page=${batchSize}&page=${page}&status=publish%2Cprivate&orderby=menu_order&order=asc`;
-      let rawProducts;
-
-      try {
-        rawProducts = await fetchJson(endpoint, {}, 20000);
-      } catch (fetchErr) {
-        console.warn(`[PRODUCTS API]: Batch ${page} via fetch mislukt: ${fetchErr.message}. Probeert SDK fallback...`);
+    // Fetch each allowed status separately: WooCommerce versions and plugins
+    // do not consistently support comma-separated status filters.
+    for (const productStatus of ['publish', 'private']) {
+      for (let page = 1; page <= maxPages; page += 1) {
+        const endpoint = `${url}/wp-json/wc/v3/products?per_page=${batchSize}&page=${page}&status=${productStatus}&orderby=menu_order&order=asc`;
+        let rawProducts;
         try {
-          const api = new WooCommerceRestApi({
-            url,
-            consumerKey,
-            consumerSecret,
-            version: 'wc/v3',
-            axiosConfig: { timeout: 25000, headers: customHeaders }
-          });
-          const response = await api.get('products', {
-            per_page: batchSize,
-            page,
-            status: 'publish,private',
-            orderby: 'menu_order',
-            order: 'asc'
-          });
-          rawProducts = response.data || [];
-        } catch (sdkErr) {
-          console.error(`[PRODUCTS API]: Batch ${page} definitief mislukt:`, sdkErr.message);
-          throw sdkErr;
+          rawProducts = await fetchJson(endpoint, {}, 20000);
+        } catch (fetchErr) {
+          console.warn(`[PRODUCTS API]: ${productStatus} batch ${page} via fetch mislukt: ${fetchErr.message}. Probeert SDK fallback...`);
+          try {
+            const api = new WooCommerceRestApi({ url, consumerKey, consumerSecret, version: 'wc/v3', axiosConfig: { timeout: 25000, headers: customHeaders } });
+            const response = await api.get('products', { per_page: batchSize, page, status: productStatus, orderby: 'menu_order', order: 'asc' });
+            rawProducts = response.data || [];
+          } catch (sdkErr) {
+            console.error(`[PRODUCTS API]: ${productStatus} batch ${page} definitief mislukt:`, sdkErr.message);
+            throw sdkErr;
+          }
         }
+        if (!Array.isArray(rawProducts) || rawProducts.length === 0) break;
+        products.push(...rawProducts);
+        console.log(`[PRODUCTS API]: ${productStatus} batch ${page} geladen (${rawProducts.length}), totaal ${products.length}`);
+        if (rawProducts.length < batchSize) break;
+        await sleep(50);
       }
-
-      if (!Array.isArray(rawProducts) || rawProducts.length === 0) break;
-      products.push(...rawProducts);
-      console.log(`[PRODUCTS API]: batch ${page} geladen (${rawProducts.length}), totaal ${products.length}`);
-      if (rawProducts.length < batchSize) break;
-      await sleep(50);
     }
+    const uniqueProducts = [...new Map(products.map(product => [Number(product.id), product])).values()];
+    products.length = 0;
+    products.push(...uniqueProducts);
 
     products.sort((a, b) => {
       const orderA = Number.isFinite(Number(a.menu_order)) ? Number(a.menu_order) : 0;
