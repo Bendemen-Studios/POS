@@ -1,4 +1,5 @@
 import { requireSession } from '../../../lib/session';
+import { getStoreCatalogExclusions, isCatalogProductVisible } from '../../../lib/catalog-exclusions';
 
 const fetchWithTimeout = async (url, options, timeoutMs = 7000) => {
   const controller = new AbortController();
@@ -33,11 +34,26 @@ export default async function handler(req, res) {
   const headers = { Authorization: 'Basic ' + Buffer.from(`${key}:${secret}`).toString('base64'), 'User-Agent': 'BDM-POS-Client/1.0' };
 
   try {
-    const products = await Promise.all(ids.map(async id => {
-      const product = await fetchWithTimeout(`${url}/wp-json/wc/v3/products/${id}`, { headers });
+    const assignedStoreIds = String(session.store_id || '').split(',').map(id => id.trim()).filter(Boolean);
+    const isAdmin = ['admin', 'super_admin', 'administrator'].includes(String(session.role || '').toLowerCase());
+    const storeId = isAdmin && req.query.store_id ? String(req.query.store_id) : (assignedStoreIds[0] || null);
+    if (isAdmin && req.query.store_id) {
+      const { default: db } = await import('../../../lib/db');
+      const [storeRows] = await db.query('SELECT id FROM stores WHERE id = ? LIMIT 1', [storeId]);
+      if (!storeRows[0]) return res.status(400).json({ success: false, error: 'Ongeldig filiaal.' });
+    }
+    const exclusions = await getStoreCatalogExclusions(storeId);
+    let catalogCategories = [];
+    try {
+      catalogCategories = await fetchWithTimeout(url + '/wp-json/wc/v3/products/categories?per_page=100&hide_empty=false', { headers });
+      if (!Array.isArray(catalogCategories)) catalogCategories = [];
+    } catch (_) {}
+    const fetchedProducts = await Promise.all(ids.map(async id => {
+      const product = await fetchWithTimeout(url + '/wp-json/wc/v3/products/' + id, { headers });
+      if (!isCatalogProductVisible(product, exclusions, catalogCategories)) return null;
       let variations = [];
       if (product.type === 'variable') {
-        variations = await fetchWithTimeout(`${url}/wp-json/wc/v3/products/${id}/variations?per_page=100`, { headers });
+        variations = await fetchWithTimeout(url + '/wp-json/wc/v3/products/' + id + '/variations?per_page=100', { headers });
         if (!Array.isArray(variations)) variations = [];
       }
       return {
@@ -53,6 +69,7 @@ export default async function handler(req, res) {
         }))
       };
     }));
+    const products = fetchedProducts.filter(Boolean);
     res.setHeader('Cache-Control', 'private, no-store');
     return res.status(200).json({ success: true, products, synced_at: new Date().toISOString() });
   } catch (error) {
