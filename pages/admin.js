@@ -43,6 +43,10 @@ export default function AdminDashboard() {
   const [excludedProducts, setExcludedProducts] = useState([]);
   const [excludedCategories, setExcludedCategories] = useState([]);
   const [categoryRules, setCategoryRules] = useState({});
+  const [selectedCatalogStoreId, setSelectedCatalogStoreId] = useState(() => {
+    if (typeof window !== 'undefined') return localStorage.getItem('admin_catalog_store_id') || '';
+    return '';
+  });
   const [exclusionSearch, setExclusionSearch] = useState('');
   const [exclusionsSaving, setExclusionsSaving] = useState(false);
 
@@ -98,6 +102,16 @@ export default function AdminDashboard() {
       fetchSumUpReaders();
     }
   }, [activeTab]);
+
+  useEffect(() => {
+    if (!selectedCatalogStoreId && stores.length > 0) {
+      const firstStoreId = String(stores[0].id || stores[0].store_id || '');
+      if (firstStoreId) {
+        setSelectedCatalogStoreId(firstStoreId);
+        if (typeof window !== 'undefined') localStorage.setItem('admin_catalog_store_id', firstStoreId);
+      }
+    }
+  }, [stores, selectedCatalogStoreId]);
 
   useEffect(() => {
     if (typeof window !== 'undefined' && products.length > 0) {
@@ -156,9 +170,10 @@ export default function AdminDashboard() {
     fetchAllData();
   }, [router]);
 
-  const fetchCatalogExclusions = async () => {
+  const fetchCatalogExclusions = async (storeId = selectedCatalogStoreId) => {
+    if (!storeId) return;
     try {
-      const res = await fetch('/api/admin/product-exclusions');
+      const res = await fetch('/api/admin/product-exclusions?store_id=' + encodeURIComponent(storeId));
       const data = await res.json();
       if (data.success) {
         setExcludedProducts(data.excludedProducts || []);
@@ -176,12 +191,12 @@ export default function AdminDashboard() {
       const res = await fetch('/api/admin/product-exclusions', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ excludedProducts, excludedCategories, categoryRules })
+        body: JSON.stringify({ storeId: selectedCatalogStoreId, excludedProducts, excludedCategories, categoryRules })
       });
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.error || 'Opslaan mislukt');
       // Immediately rebuild the catalog with the new exclusion rules.
-      const syncRes = await fetch(`/api/woocommerce/products?include_excluded=1&fresh=1&_sync=${Date.now()}`, { cache: 'no-store' });
+      const syncRes = await fetch(`/api/woocommerce/products?include_excluded=1&fresh=1&store_id=${encodeURIComponent(selectedCatalogStoreId)}&_sync=${Date.now()}`, { cache: 'no-store' });
       const syncData = await syncRes.json();
       if (!syncRes.ok || !syncData.success || syncData.stale) throw new Error(syncData.error || 'Uitsluitingen opgeslagen, maar catalogus verversen is mislukt.');
       const visibleProducts = Array.isArray(syncData.products) ? syncData.products : [];
@@ -292,7 +307,7 @@ export default function AdminDashboard() {
 
   const fetchProductsSilently = async () => {
     try {
-      const res = await fetch(`/api/woocommerce/products?include_excluded=1&_sync=${Date.now()}`, { cache: 'no-store' });
+      const res = await fetch(`/api/woocommerce/products?include_excluded=1&store_id=${encodeURIComponent(selectedCatalogStoreId)}&_sync=${Date.now()}`, { cache: 'no-store' });
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.error || 'Product-sync mislukt');
       const visibleProducts = Array.isArray(data.products) ? data.products : [];
@@ -311,10 +326,14 @@ export default function AdminDashboard() {
     }
   };
 
+  useEffect(() => {
+    if (selectedCatalogStoreId) fetchProductsSilently();
+  }, [selectedCatalogStoreId]);
+
   const handleManualSyncProducts = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/woocommerce/products?include_excluded=1&fresh=1&_sync=${Date.now()}`, { cache: 'no-store' });
+      const res = await fetch(`/api/woocommerce/products?include_excluded=1&fresh=1&store_id=${encodeURIComponent(selectedCatalogStoreId)}&_sync=${Date.now()}`, { cache: 'no-store' });
       const data = await res.json();
       if (!res.ok || !data.success || data.stale) throw new Error(data.error || 'Actuele WooCommerce-catalogus kon niet worden opgehaald.');
       const visibleProducts = Array.isArray(data.products) ? data.products : [];
@@ -605,7 +624,7 @@ export default function AdminDashboard() {
         <button onClick={() => setActiveTab('sumup')} className={`px-3 sm:px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'sumup' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'}`}>💳 SumUp</button>
         <button onClick={() => setActiveTab('orders')} className={`px-3 sm:px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'orders' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'}`}>📦 Bestellingen</button>
         <button onClick={() => setActiveTab('inventory')} className={`px-3 sm:px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'inventory' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'}`}>📦 Voorraad & Variaties</button>
-        <button onClick={() => { setActiveTab('exclusions'); fetchCatalogExclusions(); }} className={`px-3 sm:px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'exclusions' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'}`}>🚫 Productuitsluitingen</button>
+        <button onClick={() => { setActiveTab('exclusions'); if (selectedCatalogStoreId) fetchCatalogExclusions(selectedCatalogStoreId); }} className={`px-3 sm:px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'exclusions' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'}`}>🚫 Productuitsluitingen</button>
       </div>
 
       <div className="flex-1 p-3 sm:p-6 max-w-7xl mx-auto w-full">
@@ -619,7 +638,27 @@ export default function AdminDashboard() {
             {activeTab === 'exclusions' && (
               <div className="space-y-5">
                 <div className="bg-white rounded-lg shadow p-4 sm:p-6 space-y-3">
-                  <div><h2 className="font-bold text-base">Producten en categorieën uitsluiten</h2><p className="text-xs text-gray-500">Aangevinkte onderdelen worden niet getoond in de POS-catalogus. Dit verandert niets aan WooCommerce of de webshop.</p></div>
+                  <div><h2 className="font-bold text-base">Producten en categorieën uitsluiten per filiaal</h2><p className="text-xs text-gray-500">Uitsluitingen gelden alleen voor het geselecteerde filiaal. De webshop blijft ongewijzigd.</p></div>
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                    <label className="text-xs font-bold text-gray-700">Filiaal</label>
+                    <select value={selectedCatalogStoreId} onChange={e => {
+                      const id = e.target.value;
+                      setSelectedCatalogStoreId(id);
+                      localStorage.setItem('admin_catalog_store_id', id);
+                      setExclusionSearch('');
+                      fetchCatalogExclusions(id);
+                      fetch(`/api/woocommerce/products?include_excluded=1&store_id=${encodeURIComponent(id)}&_sync=${Date.now()}`, { cache: 'no-store' }).then(r => r.json()).then(data => {
+                        if (data.success) {
+                          setProducts(data.products || []);
+                          setAllCatalogProducts(data.allProducts || data.products || []);
+                          setCatalogCategories(data.catalogCategories || []);
+                        }
+                      }).catch(err => console.error('Filiaalcatalogus ophalen mislukt:', err));
+                    }} className="border rounded p-2 text-xs min-w-[220px]">
+                      <option value="">Selecteer filiaal...</option>
+                      {stores.map(store => <option key={store.id || store.store_id} value={store.id || store.store_id}>{store.store_name || store.name}</option>)}
+                    </select>
+                  </div>
                   <input value={exclusionSearch} onChange={e => setExclusionSearch(e.target.value)} placeholder="Zoek product of categorie..." className="w-full border rounded p-2.5 text-xs" />
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
                     <section className="border rounded p-3 space-y-2">
@@ -910,7 +949,17 @@ export default function AdminDashboard() {
             {activeTab === 'inventory' && (
               <div className="bg-white rounded-lg shadow p-4 sm:p-6">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
-                  <h3 className="text-sm sm:text-md font-bold">📦 Producten & Variaties Voorraad ({products.length})</h3>
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                    <h3 className="text-sm sm:text-md font-bold">📦 Producten & Variaties Voorraad ({products.length})</h3>
+                    <select value={selectedCatalogStoreId} onChange={e => {
+                      const id = e.target.value;
+                      setSelectedCatalogStoreId(id);
+                      localStorage.setItem('admin_catalog_store_id', id);
+                    }} className="border rounded p-2 text-xs">
+                      <option value="">Selecteer filiaal...</option>
+                      {stores.map(store => <option key={store.id || store.store_id} value={store.id || store.store_id}>{store.store_name || store.name}</option>)}
+                    </select>
+                  </div>
                   <button onClick={handleManualSyncProducts} disabled={loading} className="bg-black text-white px-3 py-2 rounded text-xs font-bold w-full sm:w-auto">🔄 Sync</button>
                 </div>
 

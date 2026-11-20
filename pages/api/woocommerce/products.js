@@ -1,17 +1,20 @@
 import WooCommerceRestApi from '@woocommerce/woocommerce-rest-api';
 import { requireSession } from '../../../lib/session';
 import db from '../../../lib/db';
+import { getStoreCatalogExclusions, isCatalogProductVisible } from '../../../lib/catalog-exclusions';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const SERVER_CACHE_TTL = 5 * 60 * 1000;
 
 // VPS-side warm cache. Next/PM2 processes keep this in memory so the POS
 // does not have to wait for WooCommerce on every request.
-const getCache = () => {
-  if (!globalThis.__bdmPosProductsCache) {
-    globalThis.__bdmPosProductsCache = { data: null, updatedAt: 0, loading: null };
+const getCache = (storeId) => {
+  if (!globalThis.__bdmPosProductsCaches) globalThis.__bdmPosProductsCaches = new Map();
+  const key = String(storeId || 'global');
+  if (!globalThis.__bdmPosProductsCaches.has(key)) {
+    globalThis.__bdmPosProductsCaches.set(key, { data: null, updatedAt: 0, loading: null });
   }
-  return globalThis.__bdmPosProductsCache;
+  return globalThis.__bdmPosProductsCaches.get(key);
 };
 
 export default async function handler(req, res) {
@@ -23,7 +26,15 @@ export default async function handler(req, res) {
   const session = await requireSession(req, res);
   if (!session) return;
 
-  const includeExcluded = req.query?.include_excluded === '1' && ['admin', 'super_admin', 'administrator'].includes(String(session.role || '').toLowerCase());
+  const role = String(session.role || '').toLowerCase();
+  const isAdmin = ['admin', 'super_admin', 'administrator'].includes(role);
+  const assignedStoreIds = String(session.store_id || '').split(',').map(id => id.trim()).filter(Boolean);
+  const requestedStoreId = isAdmin && req.query?.store_id ? String(req.query.store_id) : (assignedStoreIds[0] || null);
+  if (isAdmin && req.query?.store_id) {
+    const [storeRows] = await db.query('SELECT id FROM stores WHERE id = ? LIMIT 1', [requestedStoreId]);
+    if (!storeRows[0]) return res.status(400).json({ success: false, error: 'Ongeldig filiaal voor catalogusfilter.' });
+  }
+  const includeExcluded = req.query?.include_excluded === '1' && isAdmin;
   const formatResponse = (data) => {
     if (!includeExcluded) {
       const { allProducts, ...publicData } = data;
@@ -35,7 +46,7 @@ export default async function handler(req, res) {
     return { ...data, products: data.products, allProducts, count: data.products.length };
   };
 
-  const cache = getCache();
+  const cache = getCache(requestedStoreId);
   const forceRefresh = req.query?.refresh === '1' || req.query?.preload === '1' || req.query?._sync != null;
   const cacheAge = Date.now() - cache.updatedAt;
 
@@ -226,49 +237,10 @@ export default async function handler(req, res) {
 
     // Apply centrally stored admin exclusions to the POS catalog only.
     // WooCommerce products and categories remain untouched on the webshop.
-    let excludedProductIds = [];
-    let excludedCategoryIds = [];
-    let categoryRules = {};
-    try {
-      await db.query(`CREATE TABLE IF NOT EXISTS pos_catalog_exclusions (
-        id TINYINT NOT NULL PRIMARY KEY, excluded_products LONGTEXT NOT NULL,
-        excluded_categories LONGTEXT NOT NULL, category_rules LONGTEXT NULL,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-      )`);
-      try { await db.query('ALTER TABLE pos_catalog_exclusions ADD COLUMN category_rules LONGTEXT NULL'); } catch (_) {}
-      const [exclusionRows] = await db.query('SELECT excluded_products, excluded_categories, category_rules FROM pos_catalog_exclusions WHERE id = 1');
-      if (exclusionRows[0]) {
-        excludedProductIds = JSON.parse(exclusionRows[0].excluded_products || '[]').map(Number);
-        excludedCategoryIds = JSON.parse(exclusionRows[0].excluded_categories || '[]').map(String);
-        try { categoryRules = JSON.parse(exclusionRows[0].category_rules || '{}') || {}; } catch (_) {}
-      }
-    } catch (exclusionError) { console.error('[PRODUCTS API] Uitsluitingen konden niet worden geladen:', exclusionError.message); }
-    const excludedProductSet = new Set(excludedProductIds);
-    const legacyExcludedSet = new Set(excludedCategoryIds);
-    const categoryById = new Map(catalogCategories.map(category => [String(category.id), category]));
-    const visibleProducts = normalizedProducts.filter(product => {
-      if (excludedProductSet.has(Number(product.id))) return false;
-      // A rule on a parent category is inherited by products assigned to its subcategories.
-      const relevantIds = new Set();
-      (product.categories || []).forEach(category => {
-        let current = categoryById.get(String(category.id));
-        let guard = 0;
-        while (current && guard < 30) {
-          relevantIds.add(String(current.id));
-          current = categoryById.get(String(current.parent || 0));
-          guard += 1;
-        }
-        relevantIds.add(String(category.id));
-      });
-      const matchingRules = [...relevantIds].map(id => {
-        const rule = categoryRules[id];
-        if (rule && typeof rule === 'object') return { id, excluded: rule.excluded === true, priority: Math.max(0, Math.min(999, Number(rule.priority) || 0)) };
-        return { id, excluded: legacyExcludedSet.has(id), priority: 0 };
-      }).filter(rule => rule.excluded || Number(categoryRules[rule.id]?.priority) > 0 || legacyExcludedSet.has(rule.id));
-      if (!matchingRules.length) return true;
-      matchingRules.sort((a, b) => b.priority - a.priority || Number(b.excluded) - Number(a.excluded) || Number(a.id) - Number(b.id));
-      return !matchingRules[0].excluded;
-    });
+    const exclusions = await getStoreCatalogExclusions(requestedStoreId);
+    const visibleProducts = normalizedProducts.filter(product =>
+      isCatalogProductVisible(product, exclusions, catalogCategories)
+    );
 
     return {
       success: true,
@@ -276,6 +248,7 @@ export default async function handler(req, res) {
       products: visibleProducts,
       allProducts: normalizedProducts,
       catalogCategories,
+      store_id: requestedStoreId,
       cached_at: new Date().toISOString()
     };
   })();
