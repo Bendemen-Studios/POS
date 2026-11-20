@@ -2,7 +2,7 @@ import WooCommerceRestApi from '@woocommerce/woocommerce-rest-api';
 import axios from 'axios';
 import { getWooHttpsAgent } from '../../../lib/woocommerce-transport';
 import { requireSession } from '../../../lib/session';
-import { fetchBdmposOrders, completeBdmposOrder } from '../../../lib/bdmpos-core';
+import { fetchBdmposOrders, completeBdmposOrder, callBdmposWooApi } from '../../../lib/bdmpos-core';
 
 export default async function handler(req, res) {
   const { method } = req;
@@ -111,6 +111,15 @@ export default async function handler(req, res) {
     const { id, status } = req.body;
     if (!id || !status) {
       return res.status(400).json({ success: false, error: 'Order ID en status zijn verplicht.' });
+    }
+    if (process.env.BDMPOS_CORE_URL && process.env.BDMPOS_CORE_SECRET && String(status || '').toLowerCase() !== 'completed') {
+      try {
+        const result = await callBdmposWooApi({ method: 'PUT', path: `/orders/${encodeURIComponent(String(id))}`, data: { status } });
+        return res.status(200).json({ success: true, order: result.data, source: 'bdmpos-core' });
+      } catch (error) {
+        console.error('[ORDERS API]: BDM POS Core update failed:', error.message);
+        return res.status(503).json({ success: false, error: error.message || 'Bestelling bijwerken via BDM POS Core mislukt.' });
+      }
     }
     if (String(status || '').toLowerCase() === 'completed' && process.env.BDMPOS_CORE_URL && process.env.BDMPOS_CORE_SECRET) {
       try {
