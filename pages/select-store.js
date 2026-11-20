@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/router';
 
 const SERVER_TIMEOUT_MS = 4000;
@@ -9,6 +9,7 @@ export default function SelectStore() {
   const [stores, setStores] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const effectCallbacks = useRef({});
 
   useEffect(() => {
     const userStr = localStorage.getItem('pos_user');
@@ -21,7 +22,7 @@ export default function SelectStore() {
       setCurrentUser(parsedUser);
       // Render cached stores immediately when available, then refresh from the
       // authenticated endpoint in the background. First login fetches normally.
-      fetchUserStores(parsedUser);
+      effectCallbacks.current.fetchUserStores?.(parsedUser);
     } catch (e) {
       window.location.replace('/login');
     }
@@ -115,6 +116,8 @@ export default function SelectStore() {
       }
     }
   };
+
+  effectCallbacks.current.fetchUserStores = fetchUserStores;
 
   const selectStore = (store) => {
     let parsedMethods;
