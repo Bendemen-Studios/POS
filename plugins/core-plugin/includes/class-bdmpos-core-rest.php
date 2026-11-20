@@ -248,6 +248,22 @@ final class BDMPOS_Core_REST {
 		}
 		if ( ! is_array( $params ) ) { $params = array(); }
 		if ( ! is_array( $body ) ) { $body = array(); }
+		$request_id = sanitize_text_field( (string) $request->get_param( 'request_id' ) );
+		$idempotency_option = '';
+		if ( '' !== $request_id && in_array( $method, array( 'POST', 'PUT', 'PATCH', 'DELETE' ), true ) ) {
+			$idempotency_option = 'bdmpos_core_idem_' . hash( 'sha256', $method . '|' . $path . '|' . $request_id );
+			$stored = get_option( $idempotency_option, false );
+			if ( is_array( $stored ) && isset( $stored['status'], $stored['data'] ) && 'complete' === $stored['status'] ) {
+				$replay = rest_ensure_response( $stored['data'] );
+				$replay->set_status( (int) $stored['http_status'] );
+				foreach ( (array) $stored['headers'] as $header_name => $header_value ) { $replay->header( $header_name, $header_value ); }
+				$replay->header( 'X-BDM-POS-Idempotent-Replay', 'true' );
+				return $replay;
+			}
+			if ( is_array( $stored ) && isset( $stored['status'] ) && 'processing' === $stored['status'] ) {
+				return new WP_Error( 'bdmpos_core_request_processing', 'This request ID is already being processed or had an uncertain result. Do not retry with a new request ID.', array( 'status' => 409 ) );
+			}
+		}
 		$service_users = get_users( array( 'role' => 'administrator', 'fields' => 'ID', 'number' => 20 ) );
 		$service_user_id = 0;
 		foreach ( $service_users as $candidate_id ) {
@@ -258,6 +274,17 @@ final class BDMPOS_Core_REST {
 		}
 		if ( ! $service_user_id ) {
 			return new WP_Error( 'bdmpos_core_service_user_missing', 'Create or enable a WordPress administrator account with WooCommerce management permissions for Core operations.', array( 'status' => 503 ) );
+		}
+		if ( '' !== $idempotency_option && ! add_option( $idempotency_option, array( 'status' => 'processing', 'created_at' => time() ), '', false ) ) {
+			$stored = get_option( $idempotency_option, false );
+			if ( is_array( $stored ) && isset( $stored['status'] ) && 'complete' === $stored['status'] ) {
+				$replay = rest_ensure_response( $stored['data'] );
+				$replay->set_status( (int) $stored['http_status'] );
+				foreach ( (array) $stored['headers'] as $header_name => $header_value ) { $replay->header( $header_name, $header_value ); }
+				$replay->header( 'X-BDM-POS-Idempotent-Replay', 'true' );
+				return $replay;
+			}
+			return new WP_Error( 'bdmpos_core_request_processing', 'This request ID is already being processed or had an uncertain result. Do not retry with a new request ID.', array( 'status' => 409 ) );
 		}
 		$previous_user_id = get_current_user_id();
 		try {
@@ -278,10 +305,15 @@ final class BDMPOS_Core_REST {
 			$headers = $response instanceof WP_REST_Response ? $response->get_headers() : array();
 			$wrapped = rest_ensure_response( array( 'success' => $status >= 200 && $status < 300, 'data' => $data ) );
 			$wrapped->set_status( $status );
+			$replay_headers = array();
 			foreach ( $headers as $header_name => $header_value ) {
 				if ( in_array( strtolower( $header_name ), array( 'x-wp-total', 'x-wp-totalpages', 'link' ), true ) ) {
 					$wrapped->header( $header_name, $header_value );
+					$replay_headers[ $header_name ] = $header_value;
 				}
+			}
+			if ( '' !== $idempotency_option && $status < 500 ) {
+				update_option( $idempotency_option, array( 'status' => 'complete', 'http_status' => $status, 'data' => $data, 'headers' => $replay_headers, 'completed_at' => time() ), false );
 			}
 			return $wrapped;
 		} catch ( Throwable $error ) {
