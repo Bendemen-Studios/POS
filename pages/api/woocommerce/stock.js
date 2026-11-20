@@ -37,6 +37,12 @@ export default async function handler(req, res) {
     let excludedProductIds = new Set();
     let excludedCategoryIds = new Set();
     try {
+      await db.query(`CREATE TABLE IF NOT EXISTS pos_catalog_exclusions (
+        id TINYINT NOT NULL PRIMARY KEY,
+        excluded_products LONGTEXT NOT NULL,
+        excluded_categories LONGTEXT NOT NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      )`);
       const [rows] = await db.query('SELECT excluded_products, excluded_categories FROM pos_catalog_exclusions WHERE id = 1');
       if (rows[0]) {
         excludedProductIds = new Set(JSON.parse(rows[0].excluded_products || '[]').map(Number));
