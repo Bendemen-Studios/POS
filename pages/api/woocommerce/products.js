@@ -250,13 +250,13 @@ export default async function handler(req, res) {
     res.setHeader('X-POS-Product-Cache', 'MISS');
     return res.status(200).json(formatResponse(data));
   } catch (error) {
-    // If WooCommerce is temporarily down, serve the last VPS cache rather than failing the POS.
-    if (cache.data) {
+    // Manual syncs must never report success when only stale VPS cache is available.
+    if (cache.data && req.query?.fresh !== '1') {
       res.setHeader('X-POS-Product-Cache', 'STALE');
       return res.status(200).json({ ...formatResponse(cache.data), stale: true });
     }
     console.error('Fout bij ophalen WooCommerce producten:', error);
-    return res.status(500).json({ success: false, error: error.message || 'Fout bij ophalen producten' });
+    return res.status(503).json({ success: false, stale: Boolean(cache.data), error: error.message || 'Fout bij ophalen producten' });
   } finally {
     cache.loading = null;
   }
