@@ -4,7 +4,8 @@ import axios from 'axios';
 export default function PickupDashboard() {
   const [orders, setOrders] = useState(() => {
     if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('pos_cached_pickup_orders');
+      const store = JSON.parse(localStorage.getItem('selectedStore') || localStorage.getItem('pos_selected_store') || '{}');
+      const saved = localStorage.getItem('pos_cached_pickup_orders_' + String(store.id || store.store_id || 1));
       return saved ? JSON.parse(saved) : [];
     }
     return [];
@@ -39,13 +40,18 @@ export default function PickupDashboard() {
   }, [orders]);
 
   const fetchPickupOrders = async () => {
-    const cached = JSON.parse(localStorage.getItem('pos_cached_pickup_orders') || '[]');
+    const storeId = String(selectedStore?.id || selectedStore?.store_id || 1);
+    const pickupId = selectedStore?.pickup_id ? String(selectedStore.pickup_id) : '';
+    const cacheKey = 'pos_cached_pickup_orders_' + storeId;
+    const cached = JSON.parse(localStorage.getItem(cacheKey) || '[]');
     if (Array.isArray(cached) && cached.length) setOrders(prev => prev.length ? prev : cached);
     try {
-      const res = await axios.get('/api/woocommerce/pickup-order', { timeout: 15000 });
+      const params = new URLSearchParams({ store_id: storeId });
+      if (pickupId) params.set('pickup_id', pickupId);
+      const res = await axios.get('/api/woocommerce/pickup-order?' + params.toString(), { timeout: 35000 });
       if (res.data && res.data.success && Array.isArray(res.data.orders)) {
         setOrders(res.data.orders);
-        localStorage.setItem('pos_cached_pickup_orders', JSON.stringify(res.data.orders));
+        localStorage.setItem(cacheKey, JSON.stringify(res.data.orders));
         setLastSyncError('');
       }
     } catch (err) {
@@ -98,7 +104,7 @@ export default function PickupDashboard() {
 
     const updatedOrders = orders.filter(o => o.id !== orderId);
     setOrders(updatedOrders);
-    localStorage.setItem('pos_cached_pickup_orders', JSON.stringify(updatedOrders));
+    localStorage.setItem('pos_cached_pickup_orders_' + String(selectedStore?.id || selectedStore?.store_id || 1), JSON.stringify(updatedOrders));
 
     try {
       await axios.put('/api/woocommerce/pickup-order', { order_id: orderId, status: 'completed' });
