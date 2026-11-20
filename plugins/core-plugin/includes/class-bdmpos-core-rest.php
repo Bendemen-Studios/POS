@@ -203,7 +203,8 @@ final class BDMPOS_Core_REST {
 	 * POS server as X-BDM-POS-Secret. Never expose it in browser JavaScript.
 	 */
 	public function authenticate( WP_REST_Request $request ) {
-		if ( ! defined( 'BDMPOS_CORE_SECRET' ) || ! is_string( BDMPOS_CORE_SECRET ) || '' === BDMPOS_CORE_SECRET ) {
+		$core_secret = class_exists( 'BDMPOS_Core_Settings' ) ? BDMPOS_Core_Settings::get( 'core_secret' ) : ( defined( 'BDMPOS_CORE_SECRET' ) ? (string) BDMPOS_CORE_SECRET : '' );
+		if ( '' === $core_secret ) {
 			return new WP_Error(
 				'bdmpos_core_not_configured',
 				'BDM POS Core server authentication is not configured.',
@@ -212,7 +213,7 @@ final class BDMPOS_Core_REST {
 		}
 
 		$provided = (string) $request->get_header( 'x_bdm_pos_secret' );
-		if ( '' === $provided || ! hash_equals( (string) BDMPOS_CORE_SECRET, $provided ) ) {
+		if ( '' === $provided || ! hash_equals( $core_secret, $provided ) ) {
 			return new WP_Error(
 				'bdmpos_core_forbidden',
 				'Invalid BDM POS Core credentials.',
