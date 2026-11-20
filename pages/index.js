@@ -264,16 +264,19 @@ export default function POSHome() {
     // for another branch. Only this branch's own cache is safe to display.
     const cached = readLocalArray(cacheKey, []);
     if (cached.length || localStorage.getItem(cacheKey)) setProducts(cached);
+    let cachedCategories = [];
     try {
-      const cachedCategories = JSON.parse(localStorage.getItem('pos_catalog_categories_' + storeId) || '[]');
-      setCatalogCategories(Array.isArray(cachedCategories) ? cachedCategories : []);
+      cachedCategories = JSON.parse(localStorage.getItem('pos_catalog_categories_' + storeId) || '[]');
+      if (!Array.isArray(cachedCategories)) cachedCategories = [];
+      setCatalogCategories(cachedCategories);
     } catch (_) { setCatalogCategories([]); }
-    // Reuse a recently synchronized branch catalog after reload. The saved
-    // branch is still checked against the server's authorized store list.
+    // Reuse a recently synchronized branch catalog after reload only when
+    // its category tree is also cached. Older product-only caches must refresh
+    // once so the top-level category buttons can be reconstructed.
     const cacheTimeKey = 'pos_cached_products_updated_at_' + storeId;
     const cachedAt = Number(localStorage.getItem(cacheTimeKey) || 0);
     const cacheIsFresh = cached.length > 0 && cachedAt > 0 && Date.now() - cachedAt < 2 * 60 * 1000;
-    if (!requireFresh && cacheIsFresh) return true;
+    if (!requireFresh && cacheIsFresh && cachedCategories.length > 0) return true;
     try {
       const params = new URLSearchParams({ store_id: storeId });
       // Normal page loads may use the warm server-side WooCommerce cache.
