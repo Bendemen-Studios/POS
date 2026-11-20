@@ -47,7 +47,7 @@ jobs:
       - name: Upload BDM POS Core plugin ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: bdmpos-core-0.7.0
+          name: bdmpos-core-0.8.0
           path: bdmpos-core-0.8.0.zip
           if-no-files-found: error
           retention-days: 30
