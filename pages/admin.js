@@ -209,9 +209,8 @@ export default function AdminDashboard() {
       localStorage.setItem('admin_all_catalog_products', JSON.stringify(sourceProducts));
       localStorage.setItem('admin_catalog_categories', JSON.stringify(syncData.catalogCategories || []));
       localStorage.setItem('pos_cached_products_' + selectedCatalogStoreId, JSON.stringify(visibleProducts));
-      localStorage.setItem('pos_cached_products_' + selectedCatalogStoreId, JSON.stringify(visibleProducts));
-      localStorage.setItem('pos_cached_products', JSON.stringify(visibleProducts));
-      localStorage.setItem('pos_cached_products_updated_at', String(Date.now()));
+      localStorage.setItem('pos_cached_products_updated_at_' + selectedCatalogStoreId, String(Date.now()));
+      localStorage.setItem('pos_category_rules_' + selectedCatalogStoreId, JSON.stringify(syncData.categoryRules || {}));
       window.dispatchEvent(new CustomEvent('pos:inventory-synced', { detail: { products: visibleProducts, storeId: selectedCatalogStoreId, exclusionsUpdated: true } }));
       window.dispatchEvent(new CustomEvent('pos:ajax-refresh', { detail: { exclusionsUpdated: true } }));
       alert('Uitsluitingen opgeslagen en direct toegepast op voorraad en POS.');
@@ -251,6 +250,7 @@ export default function AdminDashboard() {
     const timer = setInterval(refreshInventory, 300000);
     const onInventorySync = (event) => {
       const synced = event?.detail?.products;
+      if (String(event?.detail?.storeId || '') !== String(selectedCatalogStoreId || '')) return;
       if (Array.isArray(synced)) {
         setProducts(synced);
         localStorage.setItem('admin_products', JSON.stringify(synced));
@@ -321,9 +321,10 @@ export default function AdminDashboard() {
       localStorage.setItem('admin_products', JSON.stringify(visibleProducts));
       localStorage.setItem('admin_all_catalog_products', JSON.stringify(sourceProducts));
       localStorage.setItem('admin_catalog_categories', JSON.stringify(data.catalogCategories || []));
-      localStorage.setItem('pos_cached_products', JSON.stringify(visibleProducts));
-      localStorage.setItem('pos_cached_products_updated_at', String(Date.now()));
-      window.dispatchEvent(new CustomEvent('pos:inventory-synced', { detail: { products: visibleProducts } }));
+      localStorage.setItem('pos_cached_products_' + selectedCatalogStoreId, JSON.stringify(visibleProducts));
+      localStorage.setItem('pos_cached_products_updated_at_' + selectedCatalogStoreId, String(Date.now()));
+      localStorage.setItem('pos_category_rules_' + selectedCatalogStoreId, JSON.stringify(data.categoryRules || {}));
+      window.dispatchEvent(new CustomEvent('pos:inventory-synced', { detail: { products: visibleProducts, storeId: selectedCatalogStoreId } }));
     } catch (err) {
       console.error('Fout bij ophalen producten:', err);
     }
@@ -351,8 +352,9 @@ export default function AdminDashboard() {
       localStorage.setItem('admin_products', JSON.stringify(visibleProducts));
       localStorage.setItem('admin_all_catalog_products', JSON.stringify(sourceProducts));
       localStorage.setItem('admin_catalog_categories', JSON.stringify(data.catalogCategories || []));
-      localStorage.setItem('pos_cached_products', JSON.stringify(visibleProducts));
-      localStorage.setItem('pos_cached_products_updated_at', String(Date.now()));
+      localStorage.setItem('pos_cached_products_' + selectedCatalogStoreId, JSON.stringify(visibleProducts));
+      localStorage.setItem('pos_cached_products_updated_at_' + selectedCatalogStoreId, String(Date.now()));
+      localStorage.setItem('pos_category_rules_' + selectedCatalogStoreId, JSON.stringify(data.categoryRules || {}));
       window.dispatchEvent(new CustomEvent('pos:inventory-synced', { detail: { products: visibleProducts, storeId: selectedCatalogStoreId, manual: true } }));
       window.dispatchEvent(new CustomEvent('pos:ajax-refresh', { detail: { manualProductSync: true, storeId: selectedCatalogStoreId } }));
       alert('Producten gesynchroniseerd. Voorraad en POS tonen nu alleen niet-uitgesloten artikelen.');
@@ -981,8 +983,8 @@ export default function AdminDashboard() {
                         localStorage.setItem('admin_all_catalog_products', JSON.stringify(sourceProducts));
                         localStorage.setItem('admin_catalog_categories', JSON.stringify(data.catalogCategories || []));
                         localStorage.setItem('pos_cached_products_' + id, JSON.stringify(visibleProducts));
-                        localStorage.setItem('pos_cached_products', JSON.stringify(visibleProducts));
-                        localStorage.setItem('pos_cached_products_updated_at', String(Date.now()));
+                        localStorage.setItem('pos_cached_products_updated_at_' + id, String(Date.now()));
+                        localStorage.setItem('pos_category_rules_' + id, JSON.stringify(data.categoryRules || {}));
                         window.dispatchEvent(new CustomEvent('pos:inventory-synced', { detail: { products: visibleProducts, storeId: id } }));
                       } catch (error) {
                         console.error('Voorraad voor geselecteerd filiaal verversen mislukt:', error);
