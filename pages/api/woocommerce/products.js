@@ -29,9 +29,14 @@ export default async function handler(req, res) {
   const role = String(session.role || '').toLowerCase();
   const isAdmin = ['admin', 'super_admin', 'administrator'].includes(role);
   const assignedStoreIds = String(session.store_id || '').split(',').map(id => id.trim()).filter(Boolean);
-  const requestedStoreId = req.query?.store_id && (isAdmin || assignedStoreIds.includes(String(req.query.store_id)))
-    ? String(req.query.store_id)
-    : (assignedStoreIds[0] || null);
+  const requestedQueryStoreId = req.query?.store_id ? String(req.query.store_id) : null;
+  if (requestedQueryStoreId && !isAdmin && !assignedStoreIds.includes(requestedQueryStoreId)) {
+    return res.status(403).json({ success: false, error: 'Geen toegang tot dit filiaal.' });
+  }
+  const requestedStoreId = requestedQueryStoreId || (isAdmin ? null : (assignedStoreIds[0] || null));
+  if (!isAdmin && !requestedStoreId) {
+    return res.status(403).json({ success: false, error: 'Er is geen filiaal aan dit account gekoppeld.' });
+  }
   if (isAdmin && req.query?.store_id) {
     const [storeRows] = await db.query('SELECT id FROM stores WHERE id = ? LIMIT 1', [requestedStoreId]);
     if (!storeRows[0]) return res.status(400).json({ success: false, error: 'Ongeldig filiaal voor catalogusfilter.' });
