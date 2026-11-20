@@ -169,6 +169,20 @@ export default async function handler(req, res) {
       console.log(`[PRODUCTS API]: variatiebatch verwerkt (${Math.min(start + variationBatchSize, variableProducts.length)}/${variableProducts.length})`);
     }
 
+    let catalogCategories = [];
+    try {
+      for (let page = 1; page <= maxPages; page += 1) {
+        const pageCategories = await fetchJson(`${url}/wp-json/wc/v3/products/categories?per_page=${batchSize}&page=${page}&hide_empty=false&orderby=parent&order=asc`, {}, 20000);
+        if (!Array.isArray(pageCategories) || pageCategories.length === 0) break;
+        catalogCategories.push(...pageCategories.map(category => ({ id: Number(category.id), name: category.name, slug: category.slug || '', parent: Number(category.parent || 0) })));
+        if (pageCategories.length < batchSize) break;
+      }
+      catalogCategories = [...new Map(catalogCategories.map(category => [category.id, category])).values()];
+    } catch (categoryError) {
+      console.error('[PRODUCTS API] Categorieboom ophalen mislukt:', categoryError.message);
+      catalogCategories = [...new Map(products.flatMap(product => product.categories || []).map(category => [Number(category.id), { id: Number(category.id), name: category.name, slug: category.slug || '', parent: 0 }])).values()];
+    }
+
     const normalizedProducts = products.map((product) => {
       const rawVariations = variationMap.get(product.id) || [];
       const variationsData = rawVariations.map((v) => ({
@@ -200,6 +214,7 @@ export default async function handler(req, res) {
         categories: Array.isArray(product.categories)
           ? product.categories.map((c) => ({ id: c.id, name: c.name, slug: c.slug }))
           : [],
+        primary_category_id: Number((product.meta_data || []).find(meta => ['_yoast_wpseo_primary_product_cat', 'rank_math_primary_product_cat', '_rank_math_primary_product_cat'].includes(meta.key))?.value || product.primary_category_id || product.categories?.[0]?.id || 0),
         images: Array.isArray(product.images)
           ? product.images.map((img) => ({ id: img.id, src: img.src, alt: img.alt }))
           : [],
@@ -213,33 +228,42 @@ export default async function handler(req, res) {
     // WooCommerce products and categories remain untouched on the webshop.
     let excludedProductIds = [];
     let excludedCategoryIds = [];
+    let categoryRules = {};
     try {
       await db.query(`CREATE TABLE IF NOT EXISTS pos_catalog_exclusions (
-        id TINYINT NOT NULL PRIMARY KEY,
-        excluded_products LONGTEXT NOT NULL,
-        excluded_categories LONGTEXT NOT NULL,
+        id TINYINT NOT NULL PRIMARY KEY, excluded_products LONGTEXT NOT NULL,
+        excluded_categories LONGTEXT NOT NULL, category_rules LONGTEXT NULL,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
       )`);
-      const [exclusionRows] = await db.query('SELECT excluded_products, excluded_categories FROM pos_catalog_exclusions WHERE id = 1');
+      try { await db.query('ALTER TABLE pos_catalog_exclusions ADD COLUMN category_rules LONGTEXT NULL'); } catch (_) {}
+      const [exclusionRows] = await db.query('SELECT excluded_products, excluded_categories, category_rules FROM pos_catalog_exclusions WHERE id = 1');
       if (exclusionRows[0]) {
         excludedProductIds = JSON.parse(exclusionRows[0].excluded_products || '[]').map(Number);
         excludedCategoryIds = JSON.parse(exclusionRows[0].excluded_categories || '[]').map(String);
+        try { categoryRules = JSON.parse(exclusionRows[0].category_rules || '{}') || {}; } catch (_) {}
       }
-    } catch (exclusionError) {
-      console.error('[PRODUCTS API] Uitsluitingen konden niet worden geladen:', exclusionError.message);
-    }
+    } catch (exclusionError) { console.error('[PRODUCTS API] Uitsluitingen konden niet worden geladen:', exclusionError.message); }
     const excludedProductSet = new Set(excludedProductIds);
-    const excludedCategorySet = new Set(excludedCategoryIds);
-    const visibleProducts = normalizedProducts.filter(product =>
-      !excludedProductSet.has(Number(product.id)) &&
-      !(product.categories || []).some(category => excludedCategorySet.has(String(category.id)))
-    );
+    const legacyExcludedSet = new Set(excludedCategoryIds);
+    const visibleProducts = normalizedProducts.filter(product => {
+      if (excludedProductSet.has(Number(product.id))) return false;
+      const assigned = (product.categories || []).map(category => String(category.id));
+      const matchingRules = assigned.map(id => {
+        const rule = categoryRules[id];
+        if (rule && typeof rule === 'object') return { id, excluded: rule.excluded === true, priority: Math.max(0, Math.min(999, Number(rule.priority) || 0)) };
+        return { id, excluded: legacyExcludedSet.has(id), priority: 0 };
+      }).filter(rule => rule.excluded || Number(categoryRules[rule.id]?.priority) > 0 || legacyExcludedSet.has(rule.id));
+      if (!matchingRules.length) return true;
+      matchingRules.sort((a, b) => b.priority - a.priority || Number(b.excluded) - Number(a.excluded) || Number(a.id) - Number(b.id));
+      return !matchingRules[0].excluded;
+    });
 
     return {
       success: true,
       count: visibleProducts.length,
       products: visibleProducts,
       allProducts: normalizedProducts,
+      catalogCategories,
       cached_at: new Date().toISOString()
     };
   })();
