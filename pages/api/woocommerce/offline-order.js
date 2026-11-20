@@ -128,7 +128,7 @@ export default async function handler(req, res) {
 
     try {
       if (process.env.BDMPOS_CORE_URL && process.env.BDMPOS_CORE_SECRET) {
-        const result = await callBdmposWooApi({ method: 'POST', path: '/orders', data: orderData });
+        const result = await callBdmposWooApi({ method: 'POST', path: '/orders', data: orderData, requestId: clientOrderId });
         responseOrder = result.data;
       } else {
         const WooCommerce = new WooCommerceRestApi({ url: wcUrl, consumerKey, consumerSecret, version: 'wc/v3' });
