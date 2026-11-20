@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
 import React from 'react';
 
 export default function AdminDashboard() {
   const router = useRouter();
+  const effectCallbacks = useRef({});
   const [currentUser, setCurrentUser] = useState(null);
 
   const [activeTab, setActiveTab] = useState(() => {
@@ -167,7 +168,7 @@ export default function AdminDashboard() {
       return;
     }
 
-    fetchAllData();
+    effectCallbacks.current.fetchAllData?.();
   }, [router]);
 
   const fetchCatalogExclusions = async (storeId = selectedCatalogStoreId) => {
@@ -240,7 +241,7 @@ export default function AdminDashboard() {
     const refreshInventory = async () => {
       if (stopped || typeof navigator !== 'undefined' && navigator.onLine === false) return;
       try {
-        await fetchProductsSilently();
+        await effectCallbacks.current.fetchProductsSilently?.();
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('pos:ajax-refresh'));
         }
@@ -329,8 +330,12 @@ export default function AdminDashboard() {
   };
 
   useEffect(() => {
-    if (selectedCatalogStoreId) fetchProductsSilently();
+    if (selectedCatalogStoreId) effectCallbacks.current.fetchProductsSilently?.();
   }, [selectedCatalogStoreId]);
+
+  // Keep effect callbacks current without recreating polling/listener effects on every render.
+  effectCallbacks.current.fetchAllData = fetchAllData;
+  effectCallbacks.current.fetchProductsSilently = fetchProductsSilently;
 
   const handleManualSyncProducts = async () => {
     setLoading(true);
