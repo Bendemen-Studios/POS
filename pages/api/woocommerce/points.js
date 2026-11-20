@@ -1,6 +1,6 @@
 import { getCustomerPoints, calculateEarnedPoints } from "../../../lib/customerPoints";
 import { requireSession } from '../../../lib/session';
-import { fetchBdmposCustomerPoints } from '../../../lib/bdmpos-core';
+import { fetchBdmposCustomerPoints, mutateBdmposCustomerPoints } from '../../../lib/bdmpos-core';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST' && req.method !== 'GET') {
@@ -20,6 +20,34 @@ export default async function handler(req, res) {
     if (req.method === 'POST' && action === 'calculate_earned') {
       const pointsEarned = calculateEarnedPoints(req.body?.orderTotal);
       return res.status(200).json({ success: true, pointsEarned, pointsPerEuro: 1 });
+    }
+
+    if (req.method === 'POST' && ['add', 'remove'].includes(action)) {
+      if (!process.env.BDMPOS_CORE_URL || !process.env.BDMPOS_CORE_SECRET) {
+        return res.status(503).json({ success: false, message: 'BDM POS Core is vereist voor handmatige puntenmutaties.' });
+      }
+      const points = Math.max(0, Number.parseInt(req.body?.points, 10) || 0);
+      const note = String(req.body?.note || '').trim();
+      const requestId = String(req.body?.requestId || '').trim();
+      if (points < 1 || !note || !requestId) {
+        return res.status(400).json({ success: false, message: 'Klant, aantal punten, reden en requestId zijn verplicht.' });
+      }
+      const adjustment = await mutateBdmposCustomerPoints({
+        customerId,
+        action,
+        points,
+        note,
+        requestId
+      });
+      res.setHeader('Cache-Control', 'private, no-store, max-age=0, must-revalidate');
+      return res.status(200).json({
+        success: true,
+        action,
+        pointsChanged: adjustment.points_changed,
+        pointsBalance: adjustment.points_balance,
+        idempotent: Boolean(adjustment.idempotent),
+        requestId: adjustment.request_id
+      });
     }
 
     if (!customerId) {
