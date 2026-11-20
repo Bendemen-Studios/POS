@@ -172,7 +172,31 @@ export default function POSHome() {
   }, []);
 
   const checkOfflineQueue = () => setPendingOfflineCount(readLocalArray('pos_offline_orders').length);
-  useEffect(() => { const refreshLocalState = () => { setPendingOfflineCount(readLocalArray('pos_offline_orders').length); const cached = readLocalArray('pos_cached_products'); setProducts(cached); const stored = localStorage.getItem('pos_selected_store') || localStorage.getItem('selectedStore'); if (stored) { try { setSelectedStore(JSON.parse(stored)); } catch (_) {} } }; window.addEventListener('storage', refreshLocalState); window.addEventListener('pos:ajax-refresh', refreshLocalState); window.addEventListener('pos:inventory-synced', refreshLocalState); return () => { window.removeEventListener('storage', refreshLocalState); window.removeEventListener('pos:ajax-refresh', refreshLocalState); window.removeEventListener('pos:inventory-synced', refreshLocalState); }; }, []);
+  useEffect(() => {
+    const refreshLocalState = event => {
+      setPendingOfflineCount(readLocalArray('pos_offline_orders').length);
+      const stored = localStorage.getItem('pos_selected_store') || localStorage.getItem('selectedStore');
+      let storeId = String(selectedStore?.id || selectedStore?.store_id || 1);
+      if (stored) {
+        try {
+          const savedStore = JSON.parse(stored);
+          storeId = String(savedStore.id || savedStore.store_id || 1);
+          setSelectedStore(savedStore);
+        } catch (_) {}
+      }
+      if (event?.detail?.storeId && String(event.detail.storeId) !== storeId) return;
+      const cached = readLocalArray('pos_cached_products_' + storeId, []);
+      if (cached.length || localStorage.getItem('pos_cached_products_' + storeId)) setProducts(cached);
+    };
+    window.addEventListener('storage', refreshLocalState);
+    window.addEventListener('pos:ajax-refresh', refreshLocalState);
+    window.addEventListener('pos:inventory-synced', refreshLocalState);
+    return () => {
+      window.removeEventListener('storage', refreshLocalState);
+      window.removeEventListener('pos:ajax-refresh', refreshLocalState);
+      window.removeEventListener('pos:inventory-synced', refreshLocalState);
+    };
+  }, [selectedStore?.id, selectedStore?.store_id]);
   const fetchStores = async () => { try { const res = await fetchWithServerCheck('/api/admin/store'); const data = await res.json(); if (!data.success) return; const parsedStores = (Array.isArray(data.stores) ? data.stores : data.store ? [data.store] : []).map(s => ({ ...s, payment_methods: parsePaymentMethods(s.payment_methods) })); setAllStores(parsedStores); localStorage.setItem('admin_cached_stores', JSON.stringify(parsedStores)); const storeStr = localStorage.getItem('selectedStore') || localStorage.getItem('pos_selected_store'); if (storeStr) { try { const savedStoreObj = JSON.parse(storeStr); const matchedCurrent = parsedStores.find(st => String(st.id || st.store_id) === String(savedStoreObj.id || savedStoreObj.store_id)); if (matchedCurrent) handleSelectStore(matchedCurrent, false); else if (parsedStores.length) handleSelectStore(parsedStores[0], false); } catch (_) { if (parsedStores.length) handleSelectStore(parsedStores[0], false); } } else if (parsedStores.length) handleSelectStore(parsedStores[0], false); } catch (err) { console.error('Fout bij ophalen winkels:', err); } };
   const handleSyncData = async () => { if (isSyncing) return; setIsSyncing(true); try { const results = await Promise.allSettled([fetchProducts(true), fetchCustomers(), fetchUsersAsCustomers(), fetchPickupOrders(), fetchStores()]); const productResult = results[0]; if (productResult.status === 'rejected') throw productResult.reason; await triggerOfflineSync(false); alert('Synchronisatie voltooid. Producten zijn opnieuw opgehaald.'); } catch (err) { console.error('[MANUAL SYNC] mislukt:', err); alert(`Synchronisatie niet volledig gelukt: ${err.message || 'De actuele productlijst kon niet worden opgehaald.'}`); } finally { setIsSyncing(false); } };
   const fetchQuickStock = async (orderItems = []) => {
