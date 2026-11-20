@@ -30,7 +30,9 @@ export default async function handler(req, res) {
       return publicData;
     }
     const allProducts = Array.isArray(data.allProducts) ? data.allProducts : data.products;
-    return { ...data, products: allProducts, count: allProducts.length };
+    // Keep the normal POS-visible list in "products". Admin-only callers also
+    // receive the unfiltered source list separately for managing exclusions.
+    return { ...data, products: data.products, allProducts, count: data.products.length };
   };
 
   const cache = getCache();
