@@ -28,7 +28,7 @@ Core does not create a second order alongside the POS. Each existing POS order-c
 
 ## Automatic synchronization
 
-Core listens to WooCommerce product, variation, stock, category, customer and order changes. It queues signed webhook events for the POS backend using WooCommerce Action Scheduler (with WP-Cron fallback). Failed deliveries are retried with increasing delays, up to six attempts. The POS receiver stores event IDs in MySQL, safely accepts duplicate deliveries, and invalidates its product catalog cache when product, variation, stock or category data changes. No dashboard or additional user interface is added.
+Core listens to WooCommerce product, variation, stock, category, customer profile and points, order status and refund changes. It queues signed webhook events for the POS backend using WooCommerce Action Scheduler (with WP-Cron fallback). Failed deliveries are retried with increasing delays, up to six attempts. The POS receiver stores event IDs in MySQL, safely accepts duplicate deliveries, and invalidates its product catalog cache when product, variation, stock or category data changes. No dashboard or additional user interface is added.
 
 Configure these values in WordPress `wp-config.php`:
 
@@ -41,7 +41,7 @@ Set the same secret as `BDMPOS_CORE_WEBHOOK_SECRET` in the POS server environmen
 
 ## Duplicate request protection
 
-Mutating requests through the full `/woocommerce` gateway can include a stable `request_id` (the POS helper sends it as `requestId`). Core stores the completed response and replays it for repeated requests with the same method, resource path and request ID. Concurrent or uncertain in-flight requests return HTTP 409 instead of creating a second resource. POS order endpoints pass the `Idempotency-Key` header or their existing client order ID; offline order sync keeps its MySQL idempotency lock as an additional layer. A caller should always reuse the same key when retrying the same write.
+Mutating requests through the full `/woocommerce` gateway can include a stable `request_id` (the POS helper sends it as `requestId`). Core stores the completed response and replays it for repeated requests with the same method, resource path and request ID. Concurrent or uncertain in-flight requests return HTTP 409 instead of creating a second resource. Standard and manual order endpoints forward an `Idempotency-Key` when the caller supplies one; offline order sync always forwards its stable client order ID and keeps its MySQL idempotency lock as an additional layer. A caller should always reuse the same key when retrying the same write.
 
 ## Existing POS behavior
 
