@@ -504,7 +504,8 @@ final class BDMPOS_Core_REST {
 		try {
 			$current_points = max( 0, (int) WC_Points_Rewards_Manager::get_users_points( $customer_id ) );
 			if ( 'remove' === $action && $points > $current_points ) {
-				throw new Exception( sprintf( 'Customer has %d points; cannot remove %d points.', $current_points, $points ) );
+				delete_user_meta( $customer_id, $meta_key );
+				return new WP_Error( 'bdmpos_core_insufficient_points', sprintf( 'Customer has %d points; cannot remove %d points.', $current_points, $points ), array( 'status' => 400 ) );
 			}
 			$event_type = 'bdm-pos-manual-' . $action;
 			$event_data = array(
