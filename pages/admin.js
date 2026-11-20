@@ -73,7 +73,13 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(false);
 
   const [excludedProducts, setExcludedProducts] = useState([]);
-  const [excludedCategories, setExcludedCategories] = useState([]);\n  const [catalogCategories, setCatalogCategories] = useState(() => {\n    if (typeof window !== 'undefined') { try { return JSON.parse(localStorage.getItem('admin_catalog_categories') || '[]'); } catch (_) {} }\n    return [];\n  });
+  const [excludedCategories, setExcludedCategories] = useState([]);
+  const [catalogCategories, setCatalogCategories] = useState(() => {
+    if (typeof window !== 'undefined') {
+      try { return JSON.parse(localStorage.getItem('admin_catalog_categories') || '[]'); } catch (_) {}
+    }
+    return [];
+  });
   const [exclusionSearch, setExclusionSearch] = useState('');
   const [exclusionsSaving, setExclusionsSaving] = useState(false);
 
