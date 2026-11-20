@@ -69,21 +69,25 @@ export function useOfflineSync() {
 
     syncingRef.current = true;
     setIsSyncingOrders(true);
-    const remaining = [];
+    const syncedOrderKeys = new Set();
     let syncedCount = 0;
 
     try {
       for (const order of pendingOrders) {
         try {
           const { response, data } = await sendOfflineOrder(order);
-          if (response.ok && data?.success) syncedCount += 1;
-          else remaining.push(order);
+          if (response.ok && data?.success) {
+            syncedOrderKeys.add(getIdempotencyKey(order));
+            syncedCount += 1;
+          }
         } catch (error) {
           console.warn(`Offline order ${order.clientOrderId || 'unknown'} blijft in de wachtrij:`, error);
-          remaining.push(order);
         }
       }
 
+      // Re-read the queue after network requests finish. New orders may have
+      // been added while syncing; remove only orders confirmed as uploaded.
+      const remaining = readQueue().filter(order => !syncedOrderKeys.has(getIdempotencyKey(order)));
       writeQueue(remaining);
       setUnsyncedCount(remaining.length);
       if (syncedCount > 0) {
