@@ -1,4 +1,4 @@
-const CACHE_NAME = 'bendemen-pos-v27';
+const CACHE_NAME = 'bendemen-pos-v28';
 const OFFLINE_URL = '/login';
 const OFFLINE_FALLBACK_URL = '/offline.html';
 const NAVIGATION_TIMEOUT = 500;
@@ -33,7 +33,12 @@ async function getAuthorizedCacheKey(request) {
   // Product catalogue data is shared across POS users; all other cached API
   // responses are isolated by the signed session to avoid cross-account leaks.
   if (url.pathname === '/api/woocommerce/products') {
+    // Product data and exclusions are branch-specific. Never share one cache
+    // entry between stores, and never cache an unscoped admin/global request.
+    const storeId = url.searchParams.get('store_id');
+    if (!storeId) return null;
     url.search = '';
+    url.searchParams.set('store_id', storeId);
     return new Request(url.toString(), { method: 'GET' });
   }
 
@@ -78,15 +83,29 @@ async function onlineFirstApi(request, timeout = API_TIMEOUT) {
 }
 
 async function handleProductRequest(request) {
+  const url = new URL(request.url);
+  const forceFresh = ['refresh', 'fresh', '_sync', 'preload'].some(key => url.searchParams.has(key));
+  const cacheKey = await getAuthorizedCacheKey(request);
   const cache = await caches.open(CACHE_NAME);
-  const cached = await cache.match('/api/woocommerce/products') || await cache.match(request);
+
+  // Explicit syncs must always reach the server; never answer them with an
+  // older service-worker response.
+  if (forceFresh) {
+    const fresh = await refreshApiCache(request, PRODUCT_API_TIMEOUT);
+    if (fresh && fresh.ok) return fresh;
+    if (fresh && (fresh.status === 401 || fresh.status === 403)) return fresh;
+    return new Response(JSON.stringify({ success:false, offline:true, error:'Actuele productcatalogus niet bereikbaar; oude catalogus niet als actueel tonen.' }), { status:503, headers:{'Content-Type':'application/json','Cache-Control':'no-store'} });
+  }
+
+  const cached = cacheKey ? await cache.match(cacheKey) : null;
   if (cached) {
-    refreshApiCache(request, PRODUCT_API_TIMEOUT).then(fresh => { if (fresh && fresh.ok) cache.put('/api/woocommerce/products', fresh.clone()).catch(() => {}); }).catch(() => {});
+    refreshApiCache(request, PRODUCT_API_TIMEOUT).catch(() => {});
     return cached;
   }
   const fresh = await refreshApiCache(request, PRODUCT_API_TIMEOUT);
   if (fresh && fresh.ok) return fresh;
-  return new Response(JSON.stringify({ success:false, offline:true, error:'Server niet bereikbaar en geen lokale productcache beschikbaar.' }), { status:503, headers:{'Content-Type':'application/json','Cache-Control':'no-store'} });
+  if (fresh && (fresh.status === 401 || fresh.status === 403)) return fresh;
+  return new Response(JSON.stringify({ success:false, offline:true, error:'Server niet bereikbaar en geen lokale productcache beschikbaar voor dit filiaal.' }), { status:503, headers:{'Content-Type':'application/json','Cache-Control':'no-store'} });
 }
 
 async function handleStaleApiRequest(request) {
