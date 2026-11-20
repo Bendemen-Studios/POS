@@ -346,26 +346,12 @@ export default function POSHome() {
     return result;
   };
   const getAssignedCategoryIds = product => {
-    const assigned = Array.isArray(product.categories)
-      ? product.categories.filter(category => category && (category.id ?? category) != null)
-      : [];
-    const primaryId = Number(product.primary_category_id || product.primary_category?.id || 0);
-    if (!assigned.length) return primaryId ? [String(primaryId)] : [];
-
-    // A product is shown under its highest-priority assigned category only.
-    // This prevents excluded secondary categories (for example Ophaal Geschikt)
-    // from reintroducing products that belong to a higher-priority category.
-    const winner = [...assigned].sort((a, b) => {
-      const idA = String(a.id ?? a);
-      const idB = String(b.id ?? b);
-      const priorityA = Number(catalogCategoryRules[idA]?.priority) || 0;
-      const priorityB = Number(catalogCategoryRules[idB]?.priority) || 0;
-      return priorityB - priorityA ||
-        (Number(idB) === primaryId ? 1 : 0) - (Number(idA) === primaryId ? 1 : 0) ||
-        idA.localeCompare(idB);
-    })[0];
-    const winnerId = String(winner.id ?? winner);
-    return winnerId ? [winnerId] : [];
+    const ids = (Array.isArray(product.categories) ? product.categories : [])
+      .map(category => String(category?.id ?? category))
+      .filter(id => id && id !== 'undefined' && id !== 'null');
+    const primaryId = product.primary_category_id || product.primary_category?.id;
+    if (primaryId) ids.push(String(primaryId));
+    return [...new Set(ids)];
   };
   const topLevelCategories = catalogCategories.filter(category => {
     const parentId = String(category.parent || '0');
@@ -374,7 +360,10 @@ export default function POSHome() {
   const categoriesFromTree = topLevelCategories
     .map(category => {
       const treeIds = new Set(getCategoryTreeIds(category.id));
-      const count = activeProducts.filter(product => getAssignedCategoryIds(product).some(id => treeIds.has(id))).length;
+      const categoryRule = catalogCategoryRules[String(category.id)];
+      const count = categoryRule?.excluded === true
+        ? 0
+        : activeProducts.filter(product => getAssignedCategoryIds(product).some(id => treeIds.has(id))).length;
       return { id: String(category.id), name: category.name || 'Categorie', count };
     })
     .filter(category => category.count > 0);
