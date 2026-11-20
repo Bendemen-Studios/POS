@@ -109,6 +109,9 @@ export default async function handler(req, res) {
   // PUT: Orderstatus bijwerken
   if (method === 'PUT') {
     const { id, status } = req.body;
+    if (!id || !status) {
+      return res.status(400).json({ success: false, error: 'Order ID en status zijn verplicht.' });
+    }
     if (String(status || '').toLowerCase() === 'completed' && process.env.BDMPOS_CORE_URL && process.env.BDMPOS_CORE_SECRET) {
       try {
         const result = await completeBdmposOrder(id, 'Order afgerond via Bendemen POS.');
@@ -118,10 +121,6 @@ export default async function handler(req, res) {
         return res.status(503).json({ success: false, error: error.message || 'Bestelling afronden via BDM POS Core mislukt.' });
       }
     }
-    if (!id || !status) {
-      return res.status(400).json({ success: false, error: 'Order ID en status zijn verplicht.' });
-    }
-
     try {
       let updatedOrder;
 
