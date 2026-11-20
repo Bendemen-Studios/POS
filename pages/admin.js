@@ -52,6 +52,18 @@ export default function AdminDashboard() {
     }
     return [];
   });
+  const [allCatalogProducts, setAllCatalogProducts] = useState(() => {
+    if (typeof window !== 'undefined') {
+      try { return JSON.parse(localStorage.getItem('admin_all_catalog_products') || '[]'); } catch (_) {}
+    }
+    return [];
+  });
+  const [catalogCategories, setCatalogCategories] = useState(() => {
+    if (typeof window !== 'undefined') {
+      try { return JSON.parse(localStorage.getItem('admin_catalog_categories') || '[]'); } catch (_) {}
+    }
+    return [];
+  });
 
   const [sumUpReaders, setSumUpReaders] = useState([]);
   const [pairingCode, setPairingCode] = useState('');
@@ -164,7 +176,23 @@ export default function AdminDashboard() {
       });
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.error || 'Opslaan mislukt');
-      alert('Product- en categorie-uitsluitingen opgeslagen. Voer daarna een productsync uit.');
+      // Immediately rebuild the catalog with the new exclusion rules.
+      const syncRes = await fetch(`/api/woocommerce/products?include_excluded=1&fresh=1&_sync=${Date.now()}`, { cache: 'no-store' });
+      const syncData = await syncRes.json();
+      if (!syncRes.ok || !syncData.success || syncData.stale) throw new Error(syncData.error || 'Uitsluitingen opgeslagen, maar catalogus verversen is mislukt.');
+      const visibleProducts = Array.isArray(syncData.products) ? syncData.products : [];
+      const sourceProducts = Array.isArray(syncData.allProducts) ? syncData.allProducts : visibleProducts;
+      setProducts(visibleProducts);
+      setAllCatalogProducts(sourceProducts);
+      setCatalogCategories(syncData.catalogCategories || []);
+      localStorage.setItem('admin_products', JSON.stringify(visibleProducts));
+      localStorage.setItem('admin_all_catalog_products', JSON.stringify(sourceProducts));
+      localStorage.setItem('admin_catalog_categories', JSON.stringify(syncData.catalogCategories || []));
+      localStorage.setItem('pos_cached_products', JSON.stringify(visibleProducts));
+      localStorage.setItem('pos_cached_products_updated_at', String(Date.now()));
+      window.dispatchEvent(new CustomEvent('pos:inventory-synced', { detail: { products: visibleProducts, exclusionsUpdated: true } }));
+      window.dispatchEvent(new CustomEvent('pos:ajax-refresh', { detail: { exclusionsUpdated: true } }));
+      alert('Uitsluitingen opgeslagen en direct toegepast op voorraad en POS.');
     } catch (err) { alert(err.message || 'Opslaan mislukt'); }
     finally { setExclusionsSaving(false); }
   };
@@ -262,12 +290,18 @@ export default function AdminDashboard() {
     try {
       const res = await fetch(`/api/woocommerce/products?include_excluded=1&_sync=${Date.now()}`, { cache: 'no-store' });
       const data = await res.json();
-      if (data.success) {
-        setProducts(data.products || []);
-        localStorage.setItem('admin_products', JSON.stringify(data.products || []));
-        localStorage.setItem('pos_cached_products', JSON.stringify(data.products || []));
-        localStorage.setItem('pos_cached_products_updated_at', String(Date.now()));
-      }
+      if (!res.ok || !data.success) throw new Error(data.error || 'Product-sync mislukt');
+      const visibleProducts = Array.isArray(data.products) ? data.products : [];
+      const sourceProducts = Array.isArray(data.allProducts) ? data.allProducts : visibleProducts;
+      setProducts(visibleProducts);
+      setAllCatalogProducts(sourceProducts);
+      setCatalogCategories(data.catalogCategories || []);
+      localStorage.setItem('admin_products', JSON.stringify(visibleProducts));
+      localStorage.setItem('admin_all_catalog_products', JSON.stringify(sourceProducts));
+      localStorage.setItem('admin_catalog_categories', JSON.stringify(data.catalogCategories || []));
+      localStorage.setItem('pos_cached_products', JSON.stringify(visibleProducts));
+      localStorage.setItem('pos_cached_products_updated_at', String(Date.now()));
+      window.dispatchEvent(new CustomEvent('pos:inventory-synced', { detail: { products: visibleProducts } }));
     } catch (err) {
       console.error('Fout bij ophalen producten:', err);
     }
@@ -276,15 +310,22 @@ export default function AdminDashboard() {
   const handleManualSyncProducts = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/woocommerce/products?include_excluded=1&_sync=${Date.now()}`, { cache: 'no-store' });
+      const res = await fetch(`/api/woocommerce/products?include_excluded=1&fresh=1&_sync=${Date.now()}`, { cache: 'no-store' });
       const data = await res.json();
-      if (data.success) {
-        setProducts(data.products || []);
-        localStorage.setItem('admin_products', JSON.stringify(data.products || []));
-        alert('Producten succesvol gesynchroniseerd met WooCommerce!');
-      } else {
-        alert('Fout bij synchroniseren van producten.');
-      }
+      if (!res.ok || !data.success || data.stale) throw new Error(data.error || 'Actuele WooCommerce-catalogus kon niet worden opgehaald.');
+      const visibleProducts = Array.isArray(data.products) ? data.products : [];
+      const sourceProducts = Array.isArray(data.allProducts) ? data.allProducts : visibleProducts;
+      setProducts(visibleProducts);
+      setAllCatalogProducts(sourceProducts);
+      setCatalogCategories(data.catalogCategories || []);
+      localStorage.setItem('admin_products', JSON.stringify(visibleProducts));
+      localStorage.setItem('admin_all_catalog_products', JSON.stringify(sourceProducts));
+      localStorage.setItem('admin_catalog_categories', JSON.stringify(data.catalogCategories || []));
+      localStorage.setItem('pos_cached_products', JSON.stringify(visibleProducts));
+      localStorage.setItem('pos_cached_products_updated_at', String(Date.now()));
+      window.dispatchEvent(new CustomEvent('pos:inventory-synced', { detail: { products: visibleProducts, manual: true } }));
+      window.dispatchEvent(new CustomEvent('pos:ajax-refresh', { detail: { manualProductSync: true } }));
+      alert('Producten gesynchroniseerd. Voorraad en POS tonen nu alleen niet-uitgesloten artikelen.');
     } catch (err) {
       alert('Kan geen verbinding maken met WooCommerce.');
     } finally {
@@ -578,17 +619,17 @@ export default function AdminDashboard() {
                   <input value={exclusionSearch} onChange={e => setExclusionSearch(e.target.value)} placeholder="Zoek product of categorie..." className="w-full border rounded p-2.5 text-xs" />
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
                     <section className="border rounded p-3 space-y-2">
-                      <h3 className="font-bold text-sm">Categorieën ({new Set(products.flatMap(p => (p.categories || []).map(c => c.id))).size})</h3>
+                      <h3 className="font-bold text-sm">Categorieën ({catalogCategories.length})</h3>
                       <div className="max-h-[55vh] overflow-y-auto space-y-1">
-                        {[...new Map(products.flatMap(p => p.categories || []).map(c => [String(c.id), c])).values()].filter(c => c.name.toLowerCase().includes(exclusionSearch.toLowerCase())).sort((a,b)=>a.name.localeCompare(b.name)).map(c => (
+                        {catalogCategories.filter(c => c.name.toLowerCase().includes(exclusionSearch.toLowerCase())).sort((a,b)=>a.name.localeCompare(b.name)).map(c => (
                           <label key={c.id} className="flex items-center gap-2 text-xs p-2 hover:bg-gray-50 rounded"><input type="checkbox" checked={excludedCategories.includes(String(c.id))} onChange={e => setExcludedCategories(prev => e.target.checked ? [...prev, String(c.id)] : prev.filter(id => id !== String(c.id)))} />{c.name}</label>
                         ))}
                       </div>
                     </section>
                     <section className="border rounded p-3 space-y-2">
-                      <h3 className="font-bold text-sm">Producten ({products.length})</h3>
+                      <h3 className="font-bold text-sm">Producten ({allCatalogProducts.length})</h3>
                       <div className="max-h-[55vh] overflow-y-auto space-y-1">
-                        {products.filter(p => (p.name || '').toLowerCase().includes(exclusionSearch.toLowerCase())).sort((a,b)=>a.name.localeCompare(b.name)).map(p => (
+                        {allCatalogProducts.filter(p => (p.name || '').toLowerCase().includes(exclusionSearch.toLowerCase())).sort((a,b)=>a.name.localeCompare(b.name)).map(p => (
                           <label key={p.id} className="flex items-center gap-2 text-xs p-2 hover:bg-gray-50 rounded"><input type="checkbox" checked={excludedProducts.includes(Number(p.id))} onChange={e => setExcludedProducts(prev => e.target.checked ? [...prev, Number(p.id)] : prev.filter(id => id !== Number(p.id)))} /><span className="truncate">{p.name}</span><span className="ml-auto text-gray-400">#{p.id}</span></label>
                         ))}
                       </div>
