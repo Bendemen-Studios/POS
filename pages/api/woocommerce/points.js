@@ -1,5 +1,6 @@
 import { getCustomerPoints, calculateEarnedPoints } from "../../../lib/customerPoints";
 import { requireSession } from '../../../lib/session';
+import { fetchBdmposCustomerPoints } from '../../../lib/bdmpos-core';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST' && req.method !== 'GET') {
@@ -28,7 +29,9 @@ export default async function handler(req, res) {
       });
     }
 
-    const currentPoints = await getCustomerPoints(customerId);
+    const currentPoints = process.env.BDMPOS_CORE_URL && process.env.BDMPOS_CORE_SECRET
+      ? await fetchBdmposCustomerPoints(customerId)
+      : await getCustomerPoints(customerId);
 
     res.setHeader('Cache-Control', 'private, no-store, max-age=0, must-revalidate');
 
