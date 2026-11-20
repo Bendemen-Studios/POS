@@ -31,6 +31,16 @@ final class BDMPOS_Core_REST {
 	public function register_routes() {
 		register_rest_route(
 			self::REST_NAMESPACE,
+			'/woocommerce',
+			array(
+				'methods'             => WP_REST_Server::CREATABLE,
+				'callback'            => array( $this, 'proxy_woocommerce' ),
+				'permission_callback' => array( $this, 'authenticate' ),
+			)
+		);
+
+		register_rest_route(
+			self::REST_NAMESPACE,
 			'/health',
 			array(
 				'methods'             => WP_REST_Server::READABLE,
@@ -209,6 +219,66 @@ final class BDMPOS_Core_REST {
 		}
 
 		return true;
+	}
+
+	/**
+	 * Authenticated server-side gateway to the complete WooCommerce wc/v3 REST API.
+	 * Only the POS server can call this endpoint; WooCommerce's own REST
+	 * controllers still validate the resource operation using a shop manager
+	 * or administrator service account.
+	 */
+	public function proxy_woocommerce( WP_REST_Request $request ) {
+		$method = strtoupper( sanitize_text_field( (string) $request->get_param( 'method' ) ) );
+		$path = (string) $request->get_param( 'path' );
+		$params = $request->get_param( 'params' );
+		$body = $request->get_param( 'body' );
+		$allowed_methods = array( 'GET', 'POST', 'PUT', 'PATCH', 'DELETE' );
+		if ( ! in_array( $method, $allowed_methods, true ) || ! is_string( $path ) || ! preg_match( '#^/[a-zA-Z0-9_/-]+$#', $path ) || false !== strpos( $path, '..' ) ) {
+			return new WP_Error( 'bdmpos_core_invalid_proxy_request', 'A valid WooCommerce wc/v3 path and HTTP method are required.', array( 'status' => 400 ) );
+		}
+		if ( ! is_array( $params ) ) { $params = array(); }
+		if ( ! is_array( $body ) ) { $body = array(); }
+		$service_users = get_users( array( 'role__in' => array( 'administrator', 'shop_manager' ), 'fields' => 'ID', 'number' => 20 ) );
+		$service_user_id = 0;
+		foreach ( $service_users as $candidate_id ) {
+			if ( user_can( (int) $candidate_id, 'manage_woocommerce' ) ) {
+				$service_user_id = (int) $candidate_id;
+				break;
+			}
+		}
+		if ( ! $service_user_id ) {
+			return new WP_Error( 'bdmpos_core_service_user_missing', 'Create or enable a WooCommerce administrator/shop manager account for Core operations.', array( 'status' => 503 ) );
+		}
+		$previous_user_id = get_current_user_id();
+		try {
+			wp_set_current_user( $service_user_id );
+			$internal = new WP_REST_Request( $method, '/wc/v3' . $path );
+			$internal->set_query_params( $params );
+			if ( in_array( $method, array( 'POST', 'PUT', 'PATCH' ), true ) ) {
+				$internal->set_body_params( $body );
+				$internal->set_json_params( $body );
+				$internal->set_header( 'content-type', 'application/json' );
+			}
+			$response = rest_do_request( $internal );
+			if ( is_wp_error( $response ) ) {
+				return $response;
+			}
+			$status = $response instanceof WP_REST_Response ? $response->get_status() : 200;
+			$data = $response instanceof WP_REST_Response ? $response->get_data() : $response;
+			$headers = $response instanceof WP_REST_Response ? $response->get_headers() : array();
+			$wrapped = rest_ensure_response( array( 'success' => $status >= 200 && $status < 300, 'data' => $data ) );
+			$wrapped->set_status( $status );
+			foreach ( $headers as $header_name => $header_value ) {
+				if ( in_array( strtolower( $header_name ), array( 'x-wp-total', 'x-wp-totalpages', 'link' ), true ) ) {
+					$wrapped->header( $header_name, $header_value );
+				}
+			}
+			return $wrapped;
+		} catch ( Throwable $error ) {
+			return new WP_Error( 'bdmpos_core_proxy_failed', 'WooCommerce operation failed.', array( 'status' => 500, 'reason' => $error->getMessage() ) );
+		} finally {
+			wp_set_current_user( $previous_user_id );
+		}
 	}
 
 	public function health() {
