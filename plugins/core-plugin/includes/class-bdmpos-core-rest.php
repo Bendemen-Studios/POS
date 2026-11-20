@@ -177,6 +177,16 @@ final class BDMPOS_Core_REST {
 
 		register_rest_route(
 			self::REST_NAMESPACE,
+			'/sync/status',
+			array(
+				'methods'             => WP_REST_Server::READABLE,
+				'callback'            => array( BDMPOS_Core_Sync::instance(), 'status' ),
+				'permission_callback' => array( $this, 'authenticate' ),
+			)
+		);
+
+		register_rest_route(
+			self::REST_NAMESPACE,
 			'/categories',
 			array(
 				'methods'             => WP_REST_Server::READABLE,
