@@ -271,8 +271,10 @@ export default function POSHome() {
     const cacheIsFresh = cached.length > 0 && cachedAt > 0 && Date.now() - cachedAt < 2 * 60 * 1000;
     if (!requireFresh && cacheIsFresh) return true;
     try {
-      const params = new URLSearchParams({ _sync: String(Date.now()), store_id: storeId });
-      if (requireFresh) params.set('fresh', '1');
+      const params = new URLSearchParams({ store_id: storeId });
+      // Normal page loads may use the warm server-side WooCommerce cache.
+      // Only an explicit manual sync should force a fresh upstream request.
+      if (requireFresh) params.set('refresh', '1');
       const res = await fetchWithServerCheck('/api/woocommerce/products?' + params.toString(), {}, requireFresh ? 90000 : 30000);
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success || !Array.isArray(data.products) || data.stale) throw new Error(data.error || 'Product-sync mislukt.');
