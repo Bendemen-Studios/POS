@@ -83,7 +83,7 @@ final class BDMPOS_Core_REST {
 			self::REST_NAMESPACE,
 			'/orders',
 			array(
-				' methods' => WP_REST_Server::READABLE,
+				'methods' => WP_REST_Server::READABLE,
 				'callback' => array( $this, 'orders' ),
 				'permission_callback' => array( $this, 'authenticate' ),
 				'args' => array(
