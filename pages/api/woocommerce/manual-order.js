@@ -1,5 +1,6 @@
 import WooCommerceRestApi from '@woocommerce/woocommerce-rest-api';
 import { requireSession, requireStoreAccess } from '../../../lib/session';
+import { callBdmposWooApi } from '../../../lib/bdmpos-core';
 
 const WooCommerce = new WooCommerceRestApi({
   url: process.env.WOO_SITE_URL || process.env.WOOCOMMERCE_URL || 'https://www.bendemen.com',
@@ -93,7 +94,9 @@ export default async function handler(req, res) {
       );
     }
 
-    const response = await WooCommerce.post('orders', orderData);
+    const response = process.env.BDMPOS_CORE_URL && process.env.BDMPOS_CORE_SECRET
+      ? await callBdmposWooApi({ method: 'POST', path: '/orders', data: orderData })
+      : await WooCommerce.post('orders', orderData);
 
     res.status(200).json({ success: true, order: response.data });
   } catch (error) {
