@@ -136,6 +136,23 @@ final class BDMPOS_Core_REST {
 
 		register_rest_route(
 			self::REST_NAMESPACE,
+			'/customers/(?P<id>\\d+)/points',
+			array(
+				'methods'             => WP_REST_Server::CREATABLE,
+				'callback'            => array( $this, 'mutate_customer_points' ),
+				'permission_callback' => array( $this, 'authenticate' ),
+				'args'                => array(
+					'id'         => array( 'sanitize_callback' => 'absint', 'validate_callback' => static function ( $value ) { return (int) $value > 0; } ),
+					'action'     => array( 'required' => true, 'sanitize_callback' => 'sanitize_key' ),
+					'points'     => array( 'required' => true, 'sanitize_callback' => 'absint' ),
+					'note'       => array( 'required' => true, 'sanitize_callback' => 'sanitize_text_field' ),
+					'request_id' => array( 'required' => true, 'sanitize_callback' => 'sanitize_text_field' ),
+				),
+			)
+		);
+
+		register_rest_route(
+			self::REST_NAMESPACE,
 			'/categories',
 			array(
 				'methods'             => WP_REST_Server::READABLE,
@@ -349,6 +366,28 @@ final class BDMPOS_Core_REST {
 		}
 	}
 
+	/**
+	 * Complete an existing order after POS fulfillment or customer pickup.
+	 * WooCommerce's normal status hooks run, including configured points hooks.
+	 */
+	public function complete_order( WP_REST_Request $request ) {
+		$order_id = absint( $request->get_param( 'id' ) );
+		$order = $order_id ? wc_get_order( $order_id ) : false;
+		if ( ! $order ) {
+			return new WP_Error( 'bdmpos_core_order_not_found', 'Order not found.', array( 'status' => 404 ) );
+		}
+		if ( $order->has_status( 'completed' ) ) {
+			return rest_ensure_response( array( 'success' => true, 'order' => $this->serialize_order( $order ), 'already_completed' => true ) );
+		}
+		$note = sanitize_text_field( (string) $request->get_param( 'note' ) );
+		$order->update_status( 'completed', $note ? $note : 'Completed via Bendemen POS Core.', true );
+		$updated = wc_get_order( $order_id );
+		if ( ! $updated || ! $updated->has_status( 'completed' ) ) {
+			return new WP_Error( 'bdmpos_core_order_completion_failed', 'WooCommerce did not complete the order.', array( 'status' => 500 ) );
+		}
+		return rest_ensure_response( array( 'success' => true, 'order' => $this->serialize_order( $updated ), 'already_completed' => false ) );
+	}
+
 	private function serialize_order( WC_Order $order ) {
 		$data = $order->get_data();
 		foreach ( array( 'date_created', 'date_modified', 'date_completed', 'date_paid' ) as $date_key ) {
@@ -418,6 +457,64 @@ final class BDMPOS_Core_REST {
 				'Unable to load WooCommerce customers.',
 				array( 'status' => 500 )
 			);
+		}
+	}
+
+	/**
+	 * Controlled customer points adjustment with a required audit note and
+	 * idempotency key. The WooCommerce Points & Rewards ledger records each change.
+	 */
+	public function mutate_customer_points( WP_REST_Request $request ) {
+		$customer_id = absint( $request->get_param( 'id' ) );
+		$action = sanitize_key( $request->get_param( 'action' ) );
+		$points = absint( $request->get_param( 'points' ) );
+		$note = sanitize_text_field( (string) $request->get_param( 'note' ) );
+		$request_id = sanitize_text_field( (string) $request->get_param( 'request_id' ) );
+		if ( ! in_array( $action, array( 'add', 'remove' ), true ) || $points < 1 || $points > 1000000 || '' === $note || '' === $request_id ) {
+			return new WP_Error( 'bdmpos_core_invalid_points_adjustment', 'Action, points, note and request_id are required. Points must be between 1 and 1000000.', array( 'status' => 400 ) );
+		}
+		if ( ! class_exists( 'WC_Points_Rewards_Manager' ) ) {
+			return new WP_Error( 'bdmpos_core_points_unavailable', 'WooCommerce Points & Rewards is not active.', array( 'status' => 503 ) );
+		}
+		if ( ! get_userdata( $customer_id ) ) {
+			return new WP_Error( 'bdmpos_core_customer_not_found', 'Customer not found.', array( 'status' => 404 ) );
+		}
+		$meta_key = '_bdmpos_core_points_' . hash( 'sha256', $request_id );
+		$existing = get_user_meta( $customer_id, $meta_key, true );
+		if ( is_array( $existing ) && isset( $existing['status'] ) && 'complete' === $existing['status'] ) {
+			return rest_ensure_response( array_merge( $existing['response'], array( 'idempotent' => true ) ) );
+		}
+		if ( ! add_user_meta( $customer_id, $meta_key, array( 'status' => 'processing' ), true ) ) {
+			return new WP_Error( 'bdmpos_core_points_processing', 'This points adjustment is already being processed.', array( 'status' => 409 ) );
+		}
+		try {
+			$event_type = 'bdm-pos-manual-' . $action;
+			$event_data = array(
+				'source' => 'bdmpos-core',
+				'note' => $note,
+				'request_id' => $request_id,
+				'adjustment' => $action,
+			);
+			$result = 'add' === $action
+				? WC_Points_Rewards_Manager::increase_points( $customer_id, $points, $event_type, $event_data )
+				: WC_Points_Rewards_Manager::decrease_points( $customer_id, $points, $event_type, $event_data );
+			if ( ! $result ) {
+				throw new Exception( 'WooCommerce Points & Rewards rejected the points adjustment.' );
+			}
+			$response = array(
+				'success' => true,
+				'customer_id' => $customer_id,
+				'action' => $action,
+				'points_changed' => $points,
+				'points_balance' => max( 0, (int) WC_Points_Rewards_Manager::get_users_points( $customer_id ) ),
+				'request_id' => $request_id,
+				'note' => $note,
+			);
+			update_user_meta( $customer_id, $meta_key, array( 'status' => 'complete', 'response' => $response ) );
+			return rest_ensure_response( $response );
+		} catch ( Throwable $error ) {
+			delete_user_meta( $customer_id, $meta_key );
+			return new WP_Error( 'bdmpos_core_points_adjustment_failed', $error->getMessage(), array( 'status' => 500 ) );
 		}
 	}
 
