@@ -86,7 +86,7 @@ export default async function handler(req, res) {
     const products = [];
 
     for (let page = 1; page <= maxPages; page += 1) {
-      const endpoint = `${url}/wp-json/wc/v3/products?per_page=${batchSize}&page=${page}&status=publish&orderby=menu_order&order=asc`;
+      const endpoint = `${url}/wp-json/wc/v3/products?per_page=${batchSize}&page=${page}&status=publish%2Cprivate&orderby=menu_order&order=asc`;
       let rawProducts;
 
       try {
@@ -104,7 +104,7 @@ export default async function handler(req, res) {
           const response = await api.get('products', {
             per_page: batchSize,
             page,
-            status: 'publish',
+            status: 'publish,private',
             orderby: 'menu_order',
             order: 'asc'
           });
@@ -182,6 +182,7 @@ export default async function handler(req, res) {
       return {
         id: product.id,
         name: product.name,
+        status: product.status || 'publish',
         slug: product.slug,
         menu_order: product.menu_order ?? 0,
         price: product.price || product.regular_price || 0,
