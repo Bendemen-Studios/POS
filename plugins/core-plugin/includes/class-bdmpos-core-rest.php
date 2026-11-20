@@ -313,7 +313,7 @@ final class BDMPOS_Core_REST {
 				}
 			}
 			if ( '' !== $idempotency_option && $status < 500 ) {
-				update_option( $idempotency_option, array( 'status' => 'complete', 'http_status' => $status, 'data' => $data, 'headers' => $replay_headers, 'completed_at' => time() ), false );
+				update_option( $idempotency_option, array( 'status' => 'complete', 'http_status' => $status, 'data' => array( 'success' => $status >= 200 && $status < 300, 'data' => $data ), 'headers' => $replay_headers, 'completed_at' => time() ), false );
 			}
 			return $wrapped;
 		} catch ( Throwable $error ) {
