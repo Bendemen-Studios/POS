@@ -262,17 +262,67 @@ final class BDMPOS_Core_REST {
 			'stock_quantity' => $product->get_stock_quantity(),
 			'in_stock'       => $product->is_in_stock(),
 			'type'           => $product->get_type(),
-			'categories'     => $categories,
-			'images'         => $images,
-			'attributes'     => $this->serialize_attributes( $product ),
-			'variations'     => array(),
+			'categories'         => $categories,
+			'primary_category_id' => $this->get_primary_category_id( $product, $category_ids ),
+			'images'              => $images,
+			'attributes'          => $this->serialize_attributes( $product ),
+			'variations'          => array(),
+			'variations_data'     => array(),
 		);
 
 		if ( $product->is_type( 'variable' ) ) {
-			$data['variations'] = array_map( 'absint', $product->get_children() );
+			$data['variations']      = array_map( 'absint', $product->get_children() );
+			$data['variations_data'] = $this->serialize_variations( $product );
 		}
 
 		return $data;
+	}
+
+	/** Return the SEO-selected primary category, falling back to the first assigned category. */
+	private function get_primary_category_id( WC_Product $product, array $category_ids ) {
+		$primary_id = absint( get_post_meta( $product->get_id(), '_yoast_wpseo_primary_product_cat', true ) );
+		if ( ! $primary_id ) {
+			$primary_id = absint( get_post_meta( $product->get_id(), 'rank_math_primary_product_cat', true ) );
+		}
+		if ( ! $primary_id ) {
+			$primary_id = absint( get_post_meta( $product->get_id(), '_rank_math_primary_product_cat', true ) );
+		}
+		if ( $primary_id && in_array( $primary_id, array_map( 'absint', $category_ids ), true ) ) {
+			return $primary_id;
+		}
+		return ! empty( $category_ids ) ? absint( reset( $category_ids ) ) : 0;
+	}
+
+	/** Serialize variation details so POS no longer needs separate wc/v3 variation calls. */
+	private function serialize_variations( WC_Product $product ) {
+		$variations = array();
+		foreach ( $product->get_children() as $variation_id ) {
+			$variation = wc_get_product( $variation_id );
+			if ( ! $variation instanceof WC_Product_Variation ) {
+				continue;
+			}
+
+			$attributes = array();
+			foreach ( $variation->get_attributes() as $name => $option ) {
+				$attributes[] = array(
+					'name'   => wc_attribute_label( str_replace( 'attribute_', '', $name ) ),
+					'option' => (string) $option,
+				);
+			}
+
+			$variations[] = array(
+				'id'             => $variation->get_id(),
+				'variation_id'   => $variation->get_id(),
+				'menu_order'     => $variation->get_menu_order(),
+				'price'          => $variation->get_price(),
+				'regular_price'  => $variation->get_regular_price(),
+				'sale_price'     => $variation->get_sale_price(),
+				'stock_quantity' => $variation->get_stock_quantity(),
+				'in_stock'       => $variation->is_in_stock(),
+				'attributes'     => $attributes,
+			);
+		}
+		return $variations;
 	}
 
 	private function serialize_attributes( WC_Product $product ) {
