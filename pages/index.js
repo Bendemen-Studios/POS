@@ -218,13 +218,14 @@ export default function POSHome() {
           return { ...product, stock_quantity: fresh.stock_quantity, in_stock: fresh.in_stock, variations_data: variationsData };
         });
         try {
+          localStorage.setItem('pos_cached_products_' + String(selectedStore?.id || selectedStore?.store_id || 1), JSON.stringify(updated));
           localStorage.setItem('pos_cached_products', JSON.stringify(updated));
           localStorage.setItem('admin_products', JSON.stringify(updated));
           localStorage.setItem('pos_cached_products_updated_at', String(Date.now()));
         } catch (_) {}
         return updated;
       });
-      window.dispatchEvent(new CustomEvent('pos:inventory-synced', { detail: { quick: true, products: data.products } }));
+      window.dispatchEvent(new CustomEvent('pos:inventory-synced', { detail: { quick: true, products: data.products, storeId: String(selectedStore?.id || selectedStore?.store_id || 1) } }));
     } catch (err) {
       console.warn('[QUICK STOCK SYNC] voorraad blijft uit cache tot volgende sync:', err);
     }
