@@ -5,9 +5,6 @@ import '../styles/globals.css';
 
 const SUMUP_GATEWAY = 'https://pos-sumup.vercel.app';
 const SUMUP_FINAL_STATUSES = new Set(['SUCCESSFUL', 'FAILED', 'CANCELLED', 'REFUNDED']);
-const PRODUCT_SYNC_TIMEOUT = 20000;
-const PRODUCT_SYNC_INTERVAL = 60000;
-const PRODUCT_CACHE_VERSION = 'v3-variations';
 
 function jsonResponse(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -64,46 +61,6 @@ async function pollSumUpTransaction(clientTransactionId, originalFetch) {
   return { success: false, pending: true, clientTransactionId, status: lastStatus, error: 'De SumUp-betaling is nog niet definitief bevestigd. Probeer niet opnieuw te betalen; controleer eerst de Solo en de transactiegeschiedenis.' };
 }
 
-async function syncProductsToCacheAndNotify() {
-  if (typeof window === 'undefined') return false;
-  if (!localStorage.getItem('pos_user')) return false;
-
-  try {
-    // Never delete the local product cache during startup. Offline startup must
-    // be instant even when a newer cache schema/version is deployed. The fresh
-    // server response replaces the cache in the background when available.
-    if (!localStorage.getItem('pos_cached_products_version')) {
-      localStorage.setItem('pos_cached_products_version', PRODUCT_CACHE_VERSION);
-    }
-
-    const controller = new AbortController();
-    const timer = window.setTimeout(() => controller.abort(), PRODUCT_SYNC_TIMEOUT);
-    const response = await fetch('/api/woocommerce/products?_sync=' + Date.now(), {
-      method: 'GET',
-      cache: 'no-store',
-      signal: controller.signal,
-      headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' },
-    });
-    window.clearTimeout(timer);
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok || !data?.success || !Array.isArray(data.products)) return false;
-
-    const serializedProducts = JSON.stringify(data.products);
-    const previousProducts = localStorage.getItem('pos_cached_products');
-    localStorage.setItem('pos_cached_products', serializedProducts);
-    localStorage.setItem('pos_cached_products_updated_at', String(Date.now()));
-    localStorage.setItem('pos_cached_products_version', PRODUCT_CACHE_VERSION);
-
-    const changed = previousProducts !== serializedProducts;
-    if (changed) {
-      window.dispatchEvent(new CustomEvent('pos:products-updated'));
-    }
-    return changed;
-  } catch (error) {
-    console.warn('[PRODUCT SYNC] tijdelijke syncfout:', error.message);
-    return false;
-  }
-}
 
 function installPosSessionFetch() {
   if (typeof window === 'undefined' || window.__bendemenPosSessionFetch) return () => {};
@@ -356,7 +313,6 @@ export default function App({ Component, pageProps }) {
   const [offlineSyncMessage, setOfflineSyncMessage] = useState(null);
   const [serverOnline, setServerOnline] = useState(false);
   const [adminOfflinePopupDismissed, setAdminOfflinePopupDismissed] = useState(true);
-  const [productSyncVersion, setProductSyncVersion] = useState(0);
 
   useEffect(() => {
     installSumUpGatewayFetch();
@@ -387,32 +343,7 @@ export default function App({ Component, pageProps }) {
     };
   }, []);
 
-  useEffect(() => {
-    if (router.pathname !== '/' || typeof window === 'undefined') return undefined;
-    if (!localStorage.getItem('pos_user')) return undefined;
 
-    let stopped = false;
-    const sync = async () => {
-      const changed = await syncProductsToCacheAndNotify();
-      if (changed && !stopped) setProductSyncVersion((version) => version + 1);
-    };
-
-    // Directe synchronisatie bij openen/login, daarna iedere minuut.
-    // Bij terugkeer online/focus/zichtbaarheid direct opnieuw synchroniseren.
-    sync();
-    const interval = window.setInterval(sync, PRODUCT_SYNC_INTERVAL);
-    const wake = () => { if (!document.hidden) sync(); };
-    window.addEventListener('online', wake);
-    window.addEventListener('focus', wake);
-    document.addEventListener('visibilitychange', wake);
-    return () => {
-      stopped = true;
-      window.clearInterval(interval);
-      window.removeEventListener('online', wake);
-      window.removeEventListener('focus', wake);
-      document.removeEventListener('visibilitychange', wake);
-    };
-  }, [router.pathname]);
 
   const adminOffline = router.pathname === '/admin' && !serverOnline;
   const showAdminOfflinePopup = adminOffline && !adminOfflinePopupDismissed;
@@ -433,7 +364,7 @@ export default function App({ Component, pageProps }) {
           {offlineSyncMessage}
         </div>
       )}
-      <Component key={router.pathname === '/' ? productSyncVersion : undefined} {...pageProps} />
+      <Component {...pageProps} />
       {showAdminOfflinePopup && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 100000, background: 'rgba(17,24,39,.20)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, pointerEvents: 'none' }}>
           <div role="dialog" aria-modal="false" style={{ position: 'relative', maxWidth: 440, width: '100%', background: '#fff', borderRadius: 14, padding: 28, paddingTop: 24, boxShadow: '0 18px 60px rgba(0,0,0,.3)', textAlign: 'center', pointerEvents: 'auto' }}>
