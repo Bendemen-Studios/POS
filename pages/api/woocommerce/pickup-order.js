@@ -1,4 +1,5 @@
 import WooCommerceRestApi from '@woocommerce/woocommerce-rest-api';
+import { getWooHttpsAgent } from '../../../lib/woocommerce-transport';
 import { requireSession } from '../../../lib/session';
 import db from '../../../lib/db';
 
@@ -14,7 +15,7 @@ function getWooCommerceApi() {
     consumerKey,
     consumerSecret,
     version: 'wc/v3',
-    axiosConfig: { timeout: 20000 },
+    axiosConfig: { timeout: 30000, httpsAgent: getWooHttpsAgent() },
   });
 }
 
@@ -38,10 +39,15 @@ function isPickupOrder(order) {
 }
 
 function matchesPickupId(order, pickupId) {
-  if (!pickupId || !Array.isArray(order.meta_data)) return false;
-  return order.meta_data.some((meta) => {
+  if (!pickupId) return false;
+  const expected = String(pickupId);
+  const metadata = [
+    ...(Array.isArray(order.meta_data) ? order.meta_data : []),
+    ...(Array.isArray(order.shipping_lines) ? order.shipping_lines.flatMap(line => Array.isArray(line.meta_data) ? line.meta_data : []) : []),
+  ];
+  return metadata.some(meta => {
     const key = String(meta.key || '').toLowerCase();
-    return key.includes('pickup') && String(meta.value ?? '') === String(pickupId);
+    return (key.includes('pickup') || key.includes('afhaal') || key === 'location') && String(meta.value ?? '') === expected;
   });
 }
 
@@ -66,9 +72,9 @@ async function getOrdersForStatus(api, status) {
   const responses = [];
   // Bound concurrent requests to avoid flooding WooCommerce when the order
   // history spans many pages.
-  for (let startPage = 2; startPage <= totalPages; startPage += 5) {
+  for (let startPage = 2; startPage <= totalPages; startPage += 3) {
     const pageBatch = Array.from(
-      { length: Math.min(5, totalPages - startPage + 1) },
+      { length: Math.min(3, totalPages - startPage + 1) },
       (_, index) => startPage + index
     );
     const batchResponses = await Promise.all(pageBatch.map(page => api.get('orders', {
@@ -96,6 +102,12 @@ export default async function handler(req, res) {
     String(session.username || '').toLowerCase() === 'bendemen';
   let assignedStoreIds = [];
   let assignedPickupIds = [];
+  let requestedStorePickupIds = [];
+  const requestedStoreId = req.query?.store_id ? String(req.query.store_id) : '';
+  if (isAdmin && requestedStoreId) {
+    const [requestedStores] = await db.query('SELECT id, pickup_id FROM stores WHERE CAST(id AS CHAR) = ?', [requestedStoreId]);
+    requestedStorePickupIds = Array.isArray(requestedStores) ? requestedStores.map(store => String(store.pickup_id || '')).filter(Boolean) : [];
+  }
 
   if (!isAdmin) {
     assignedStoreIds = String(session.store_id || '').split(',').map(id => id.trim()).filter(Boolean);
@@ -123,15 +135,17 @@ export default async function handler(req, res) {
 
   if (method === 'GET') {
     try {
-      const { pickup_id } = req.query;
+      const pickup_id = req.query?.pickup_id ? String(req.query.pickup_id) : null;
+      res.setHeader('Cache-Control', 'private, no-store, max-age=0, must-revalidate');
 
-      const [pendingOrders, processingOrders] = await Promise.all([
+      const [pendingOrders, processingOrders, onHoldOrders] = await Promise.all([
         getOrdersForStatus(api, 'pending'),
         getOrdersForStatus(api, 'processing'),
+        getOrdersForStatus(api, 'on-hold'),
       ]);
 
       const byId = new Map();
-      [...pendingOrders, ...processingOrders].forEach((order) => {
+      [...pendingOrders, ...processingOrders, ...onHoldOrders].forEach((order) => {
         if (order?.id) byId.set(String(order.id), order);
       });
 
@@ -140,6 +154,10 @@ export default async function handler(req, res) {
           const pickup = isPickupOrder(order);
           if (!pickup) return false;
           if (pickup_id) return matchesPickupId(order, pickup_id);
+          if (isAdmin && requestedStoreId) {
+            const storeMeta = Array.isArray(order.meta_data) ? order.meta_data.find(meta => String(meta.key || '') === '_pos_store_id') : null;
+            return String(storeMeta?.value || '') === requestedStoreId || requestedStorePickupIds.some(id => matchesPickupId(order, id));
+          }
           if (isAdmin) return true;
 
           const storeMeta = Array.isArray(order.meta_data)
@@ -169,12 +187,12 @@ export default async function handler(req, res) {
 
   if (method === 'PUT') {
     try {
-      const { order_id, status } = req.body || {};
-      if (!order_id) return sendApiError(res, 400, 'Order ID is verplicht.');
-
+      const { order_id } = req.body || {};
+      if (!order_id || !/^\d+$/.test(String(order_id))) return sendApiError(res, 400, 'Een geldig order-ID is verplicht.');
+      const existingResponse = await api.get(`orders/${encodeURIComponent(String(order_id))}`);
+      const existingOrder = existingResponse.data;
+      if (!existingOrder?.id || !isPickupOrder(existingOrder)) return sendApiError(res, 404, 'Deze bestelling is geen geldige afhaalbestelling.');
       if (!isAdmin) {
-        const existingResponse = await api.get(`orders/${encodeURIComponent(String(order_id))}`);
-        const existingOrder = existingResponse.data;
         const storeMeta = Array.isArray(existingOrder?.meta_data)
           ? existingOrder.meta_data.find(meta => String(meta.key || '') === '_pos_store_id')
           : null;
@@ -183,9 +201,7 @@ export default async function handler(req, res) {
         if (!allowed) return sendApiError(res, 403, 'Deze afhaalbestelling hoort niet bij jouw filiaal.');
       }
 
-      const response = await api.put(`orders/${encodeURIComponent(String(order_id))}`, {
-        status: status || 'completed',
-      });
+      const response = await api.put(`orders/${encodeURIComponent(String(order_id))}`, { status: 'completed' });
 
       return res.status(200).json({
         success: true,
