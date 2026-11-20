@@ -252,7 +252,16 @@ export default function POSHome() {
     const storedSelection = (() => { try { return JSON.parse(localStorage.getItem('selectedStore') || localStorage.getItem('pos_selected_store') || 'null'); } catch (_) { return null; } })();
     const storeId = String(requestedStoreId || selectedStore?.id || selectedStore?.store_id || storedSelection?.id || storedSelection?.store_id || 1);
     const cacheKey = 'pos_cached_products_' + storeId;
-    const cached = readLocalArray(cacheKey, []);
+    // Migrate the pre-branch cache once for installations upgrading from the
+    // older POS. This avoids an empty catalog while the first branch sync runs.
+    let cached = readLocalArray(cacheKey, []);
+    if (!cached.length) {
+      const legacyCached = readLocalArray('pos_cached_products', []);
+      if (legacyCached.length) {
+        cached = legacyCached;
+        try { localStorage.setItem(cacheKey, JSON.stringify(legacyCached)); } catch (_) {}
+      }
+    }
     if (cached.length) setProducts(cached);
     try {
       const params = new URLSearchParams({ _sync: String(Date.now()), store_id: storeId });
