@@ -71,13 +71,21 @@ async function findExistingWooOrder(url, authHeader, clientOrderId) {
 
 async function verifyWooOrder(url, authHeader, wooOrderId) {
   try {
+    if (process.env.BDMPOS_CORE_URL && process.env.BDMPOS_CORE_SECRET) {
+      const result = await callBdmposWooApi({
+        method: 'GET',
+        path: '/orders/' + encodeURIComponent(String(wooOrderId))
+      });
+      const order = result.data;
+      return { exists: !!order?.id, unavailable: false, order };
+    }
     const response = await fetchWithTimeout(
-      `${url}/wp-json/wc/v3/orders/${encodeURIComponent(String(wooOrderId))}`,
+      url + '/wp-json/wc/v3/orders/' + encodeURIComponent(String(wooOrderId)),
       {
         method: 'GET',
         headers: {
           Authorization: authHeader,
-          'User-Agent': 'BDM-POS-Client/1.0 (Mozilla/5.0; Node.js)',
+          'User-Agent': 'BDM-POS-Server/1.0',
           Connection: 'close',
         },
       },
@@ -87,10 +95,12 @@ async function verifyWooOrder(url, authHeader, wooOrderId) {
     if (!response.ok) return { exists: false, unavailable: true };
     const order = await response.json().catch(() => null);
     return { exists: !!order?.id, unavailable: false, order };
-  } catch (_) {
+  } catch (error) {
+    if (error?.response?.status === 404) return { exists: false, unavailable: false };
     return { exists: false, unavailable: true };
   }
 }
+
 async function fetchJsonWithTimeout(url, options, timeoutMs = 15000) {
   const response = await fetchWithTimeout(url, options, timeoutMs);
   const text = await response.text();
