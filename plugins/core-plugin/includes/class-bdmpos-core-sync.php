@@ -95,11 +95,21 @@ final class BDMPOS_Core_Sync {
 			'details'       => $extra,
 		);
 
-		if ( function_exists( 'as_enqueue_async_action' ) ) {
-			as_enqueue_async_action( self::HOOK, array( $payload, 0 ), self::GROUP, false );
-		} else {
-			wp_schedule_single_event( time() + 5, self::HOOK, array( $payload, 0 ) );
+		// The Core worker owns delivery. Keep events in a small durable WP option
+		// queue so webhook delivery does not depend on Action Scheduler.
+		$queue = get_option( 'bdmpos_core_webhook_queue', array() );
+		if ( ! is_array( $queue ) ) {
+			$queue = array();
 		}
+		$queue[] = array(
+			'payload' => $payload,
+			'attempt' => 0,
+			'next_at' => time() + 1,
+		);
+		if ( count( $queue ) > 1000 ) {
+			$queue = array_slice( $queue, -1000 );
+		}
+		update_option( 'bdmpos_core_webhook_queue', $queue, false );
 	}
 
 	public function deliver( $payload, $attempt = 0 ) {
@@ -148,11 +158,52 @@ final class BDMPOS_Core_Sync {
 
 		$delays = array( 60, 300, 900, 3600, 21600 );
 		$delay = $delays[ min( (int) $attempt, count( $delays ) - 1 ) ];
-		if ( function_exists( 'as_schedule_single_action' ) ) {
-			as_schedule_single_action( time() + $delay, self::HOOK, array( $payload, (int) $attempt + 1 ), self::GROUP, false );
-		} else {
-			wp_schedule_single_event( time() + $delay, self::HOOK, array( $payload, (int) $attempt + 1 ) );
+		$queue = get_option( 'bdmpos_core_webhook_queue', array() );
+		if ( ! is_array( $queue ) ) {
+			$queue = array();
 		}
+		$queue[] = array(
+			'payload' => $payload,
+			'attempt' => (int) $attempt + 1,
+			'next_at' => time() + $delay,
+		);
+		update_option( 'bdmpos_core_webhook_queue', $queue, false );
+	}
+
+	/**
+	 * Deliver due WooCommerce events from the Core worker's durable queue.
+	 * The worker lock prevents overlapping batches; each event is removed before
+	 * delivery and requeued by deliver() when a retry is required.
+	 */
+	public function process_queue( $limit = 10 ) {
+		if ( ! $this->configured() ) {
+			return array( 'processed' => 0, 'remaining' => 0, 'configured' => false );
+		}
+		$queue = get_option( 'bdmpos_core_webhook_queue', array() );
+		if ( ! is_array( $queue ) || empty( $queue ) ) {
+			return array( 'processed' => 0, 'remaining' => 0, 'configured' => true );
+		}
+		$now = time();
+		$due = array();
+		$pending = array();
+		foreach ( $queue as $item ) {
+			if ( count( $due ) < max( 1, (int) $limit ) && is_array( $item ) && isset( $item['payload'] ) && (int) ( $item['next_at'] ?? 0 ) <= $now ) {
+				$due[] = $item;
+			} else {
+				$pending[] = $item;
+			}
+		}
+		update_option( 'bdmpos_core_webhook_queue', $pending, false );
+		$processed = 0;
+		foreach ( $due as $item ) {
+			$this->deliver( $item['payload'], (int) ( $item['attempt'] ?? 0 ) );
+			$processed++;
+		}
+		return array(
+			'processed' => $processed,
+			'remaining' => count( get_option( 'bdmpos_core_webhook_queue', array() ) ),
+			'configured' => true,
+		);
 	}
 
 	public function status() {
@@ -160,7 +211,8 @@ final class BDMPOS_Core_Sync {
 		return rest_ensure_response( array(
 			'success' => true,
 			'webhooks_configured' => $this->configured(),
-			'queue' => function_exists( 'as_enqueue_async_action' ) ? 'action-scheduler' : 'wp-cron-fallback',
+			'queue' => 'bdmpos-core-worker',
+			'queued_events' => count( (array) get_option( 'bdmpos_core_webhook_queue', array() ) ),
 			'last_attempt' => is_array( $last_attempt ) ? $last_attempt : array(),
 			'last_success_at' => get_option( 'bdmpos_core_sync_last_success', null ),
 			'checked_at' => gmdate( 'c' ),
