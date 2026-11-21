@@ -214,6 +214,10 @@ final class BDMPOS_Core_Worker {
 				}
 			}
 
+			// Process WooCommerce change notifications in this same worker.
+			// This replaces Action Scheduler as the required delivery mechanism.
+			$webhook_stats = BDMPOS_Core_Sync::instance()->process_queue( 10 );
+
 			$last = array(
 				'at'        => gmdate( 'c' ),
 				'success'   => 0 === $stats['ack_errors'],
@@ -227,6 +231,7 @@ final class BDMPOS_Core_Worker {
 						$stats['ack_errors']
 					),
 				'processed' => $stats,
+				'webhooks' => $webhook_stats,
 				'duration_ms' => (int) round( ( microtime( true ) - $started ) * 1000 ),
 			);
 		} catch ( Throwable $error ) {
