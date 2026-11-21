@@ -105,12 +105,15 @@ final class BDMPOS_Core_Worker {
 				$internal->set_header( 'x_bdm_pos_secret', BDMPOS_Core_Settings::get( 'core_secret' ) );
 				$response = rest_do_request( $internal );
 				if ( is_wp_error( $response ) ) {
-					return array( 'http_status' => 500, 'data' => array( 'message' => $response->get_error_message() ) );
+					return new WP_Error( 'bdmpos_core_request_failed', $response->get_error_message() );
 				}
-				return array(
-					'http_status' => $response instanceof WP_REST_Response ? $response->get_status() : 200,
-					'data'        => $response instanceof WP_REST_Response ? $response->get_data() : $response,
-				);
+				$status = $response instanceof WP_REST_Response ? (int) $response->get_status() : 200;
+				$data   = $response instanceof WP_REST_Response ? $response->get_data() : $response;
+				if ( $status < 200 || $status >= 300 ) {
+					$message = is_array( $data ) && ! empty( $data['message'] ) ? sanitize_text_field( $data['message'] ) : 'Interne Core-aanvraag gaf HTTP ' . $status . ' terug.';
+					return new WP_Error( 'bdmpos_core_http_error', $message, array( 'http_status' => $status ) );
+				}
+				return array( 'http_status' => $status, 'data' => $data );
 
 			case 'stock.set':
 				$product_id = isset( $payload['product_id'] ) ? absint( $payload['product_id'] ) : 0;
@@ -131,42 +134,110 @@ final class BDMPOS_Core_Worker {
 		if ( ! $this->configured() || get_transient( self::LOCK ) ) {
 			return;
 		}
-		set_transient( self::LOCK, 1, 50 );
-		$last = array( 'at' => gmdate( 'c' ), 'success' => false, 'message' => 'Nog niet uitgevoerd.' );
+
+		// The POS lease is two minutes. Keep the WordPress lock longer than a normal
+		// run so a slow batch cannot be started twice by overlapping WP-Cron calls.
+		set_transient( self::LOCK, 110, 110 );
+		$started = microtime( true );
+		$stats   = array(
+			'pulled'          => 0,
+			'completed'       => 0,
+			'failed'          => 0,
+			'ack_errors'      => 0,
+			'last_command_id' => '',
+		);
+		$last = array(
+			'at'        => gmdate( 'c' ),
+			'success'   => false,
+			'message'   => 'Worker gestart.',
+			'processed' => $stats,
+		);
+
 		try {
-			$url  = add_query_arg( 'action', 'pull', BDMPOS_Core_Settings::get( 'pos_command_url' ) );
-			$pull = $this->request( 'GET', $url );
+			$base_url = BDMPOS_Core_Settings::get( 'pos_command_url' );
+			$pull_url = add_query_arg( 'action', 'pull', $base_url );
+			$pull     = $this->request( 'GET', $pull_url );
 			if ( is_wp_error( $pull ) ) {
-				throw new Exception( $pull->get_error_message() );
+				throw new Exception( 'POS pull mislukt: ' . $pull->get_error_message() );
 			}
-			$code = (int) wp_remote_retrieve_response_code( $pull );
-			if ( 200 !== $code ) {
-				throw new Exception( 'POS pull gaf HTTP ' . $code . ' terug.' );
+
+			$pull_code = (int) wp_remote_retrieve_response_code( $pull );
+			if ( 200 !== $pull_code ) {
+				throw new Exception( 'POS pull gaf HTTP ' . $pull_code . ' terug.' );
 			}
+
 			$data = json_decode( wp_remote_retrieve_body( $pull ), true );
-			if ( ! is_array( $data ) || ! isset( $data['commands'] ) || ! is_array( $data['commands'] ) ) {
+			if ( ! is_array( $data ) || empty( $data['success'] ) || ! isset( $data['commands'] ) || ! is_array( $data['commands'] ) ) {
 				throw new Exception( 'Ongeldig antwoord van de POS-opdrachtenwachtrij.' );
 			}
+
+			$stats['pulled'] = count( $data['commands'] );
 			foreach ( $data['commands'] as $command ) {
-				$result  = $this->execute( $command );
-				$success = ! is_wp_error( $result );
-				$ack     = array(
-					'command_id' => isset( $command['command_id'] ) ? sanitize_text_field( $command['command_id'] ) : '',
-					'success'    => $success,
-					'result'     => $success ? $result : null,
-					'error'      => $success ? '' : $result->get_error_message(),
-				);
-				if ( '' === $ack['command_id'] ) {
+				$command_id = isset( $command['command_id'] ) ? sanitize_text_field( $command['command_id'] ) : '';
+				if ( '' === $command_id ) {
+					$stats['failed']++;
 					continue;
 				}
-				$ack_response = $this->request( 'POST', add_query_arg( 'action', 'ack', BDMPOS_Core_Settings::get( 'pos_command_url' ) ), $ack );
-				if ( is_wp_error( $ack_response ) || (int) wp_remote_retrieve_response_code( $ack_response ) < 200 || (int) wp_remote_retrieve_response_code( $ack_response ) >= 300 ) {
-					throw new Exception( 'POS kon het opdrachtresultaat niet bevestigen.' );
+				$stats['last_command_id'] = $command_id;
+
+				try {
+					$result = $this->execute( $command );
+				} catch ( Throwable $execution_error ) {
+					$result = new WP_Error( 'bdmpos_execution_exception', sanitize_text_field( $execution_error->getMessage() ) );
+				}
+
+				$command_success = ! is_wp_error( $result );
+				$ack = array(
+					'command_id' => $command_id,
+					'success'    => $command_success,
+					'result'     => $command_success ? $result : null,
+					'error'      => $command_success ? '' : $result->get_error_message(),
+				);
+
+				$ack_url      = add_query_arg( 'action', 'ack', $base_url );
+				$ack_response = $this->request( 'POST', $ack_url, $ack );
+				if ( is_wp_error( $ack_response ) ) {
+					$stats['ack_errors']++;
+					continue;
+				}
+
+				$ack_code = (int) wp_remote_retrieve_response_code( $ack_response );
+				$ack_data = json_decode( wp_remote_retrieve_body( $ack_response ), true );
+				if ( $ack_code < 200 || $ack_code >= 300 || ! is_array( $ack_data ) || empty( $ack_data['success'] ) ) {
+					$stats['ack_errors']++;
+					continue;
+				}
+
+				if ( $command_success ) {
+					$stats['completed']++;
+				} else {
+					$stats['failed']++;
 				}
 			}
-			$last = array( 'at' => gmdate( 'c' ), 'success' => true, 'message' => 'Opdrachten opgehaald en verwerkt.' );
+
+			$last = array(
+				'at'        => gmdate( 'c' ),
+				'success'   => 0 === $stats['ack_errors'],
+				'message'   => 0 === $stats['pulled']
+					? 'Worker actief; geen opdrachten in de wachtrij.'
+					: sprintf(
+						'Batch verwerkt: %1$d opgehaald, %2$d voltooid, %3$d mislukt, %4$d bevestigingsfouten.',
+						$stats['pulled'],
+						$stats['completed'],
+						$stats['failed'],
+						$stats['ack_errors']
+					),
+				'processed' => $stats,
+				'duration_ms' => (int) round( ( microtime( true ) - $started ) * 1000 ),
+			);
 		} catch ( Throwable $error ) {
-			$last = array( 'at' => gmdate( 'c' ), 'success' => false, 'message' => sanitize_text_field( $error->getMessage() ) );
+			$last = array(
+				'at'          => gmdate( 'c' ),
+				'success'     => false,
+				'message'     => sanitize_text_field( $error->getMessage() ),
+				'processed'   => $stats,
+				'duration_ms' => (int) round( ( microtime( true ) - $started ) * 1000 ),
+			);
 		} finally {
 			update_option( 'bdmpos_core_worker_last_run', $last, false );
 			delete_transient( self::LOCK );
