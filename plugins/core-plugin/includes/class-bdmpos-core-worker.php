@@ -152,12 +152,7 @@ final class BDMPOS_Core_Worker {
 			'processed' => $stats,
 		);
 
-		$webhook_stats = array( 'processed' => 0, 'remaining' => 0, 'configured' => false );
 		try {
-			// Deliver WooCommerce change notifications first. A temporary POS
-			// command-queue outage must not block catalog webhook delivery.
-			$webhook_stats = BDMPOS_Core_Sync::instance()->process_queue( 10 );
-
 			$base_url = BDMPOS_Core_Settings::get( 'pos_command_url' );
 			$pull_url = add_query_arg( 'action', 'pull', $base_url );
 			$pull     = $this->request( 'GET', $pull_url );
@@ -232,7 +227,6 @@ final class BDMPOS_Core_Worker {
 						$stats['ack_errors']
 					),
 				'processed' => $stats,
-				'webhooks' => $webhook_stats,
 				'duration_ms' => (int) round( ( microtime( true ) - $started ) * 1000 ),
 			);
 		} catch ( Throwable $error ) {
@@ -241,7 +235,6 @@ final class BDMPOS_Core_Worker {
 				'success'     => false,
 				'message'     => sanitize_text_field( $error->getMessage() ),
 				'processed'   => $stats,
-				'webhooks'    => $webhook_stats,
 				'duration_ms' => (int) round( ( microtime( true ) - $started ) * 1000 ),
 			);
 		} finally {
