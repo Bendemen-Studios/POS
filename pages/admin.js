@@ -228,35 +228,47 @@ export default function AdminDashboard() {
       }
       if (!res.ok || !data.success) throw new Error(data.error || 'Opslaan mislukt');
 
-      // De uitsluitingsregels zijn nu opgeslagen. Catalogusverversing is een
-      // afzonderlijke stap en mag de geslaagde opslag niet als mislukt tonen.
-      const syncRes = await fetch(`/api/woocommerce/products?include_excluded=1&fresh=1&store_id=${encodeURIComponent(selectedCatalogStoreId)}&_sync=${Date.now()}`, { cache: 'no-store' });
-      const syncText = await syncRes.text();
-      let syncData;
-      try {
-        syncData = JSON.parse(syncText);
-      } catch (_) {
-        alert('Uitsluitingen zijn opgeslagen. De voorraad kon alleen niet automatisch worden vernieuwd (server gaf HTTP ' + syncRes.status + ' terug). Vernieuw de voorraad later opnieuw.');
-        return;
-      }
-      if (!syncRes.ok || !syncData.success || syncData.stale) {
-        alert('Uitsluitingen zijn opgeslagen, maar de voorraad kon niet automatisch worden vernieuwd: ' + (syncData.error || 'onbekende fout') + '.');
-        return;
-      }
-      const visibleProducts = Array.isArray(syncData.products) ? syncData.products : [];
-      const sourceProducts = Array.isArray(syncData.allProducts) ? syncData.allProducts : visibleProducts;
+      // Apply the saved rules to the currently cached catalog. Do not call the
+      // live Core catalog here: the durable exclusion save must succeed even
+      // while the reverse worker is delayed or unavailable.
+      const sourceProducts = Array.isArray(allCatalogProducts) && allCatalogProducts.length ? allCatalogProducts : products;
+      const parentById = new Map((catalogCategories || []).map(category => [String(category.id), String(category.parent || '0')]));
+      const excludedIds = new Set((excludedProducts || []).map(Number));
+      const visibleProducts = sourceProducts.filter(product => {
+        if (excludedIds.has(Number(product.id))) return false;
+        const assigned = new Set((Array.isArray(product.categories) ? product.categories : [])
+          .map(category => String(category?.id ?? category)).filter(Boolean));
+        if (!assigned.size && product.primary_category_id) assigned.add(String(product.primary_category_id));
+        for (const categoryId of assigned) {
+          if (categoryRules?.[categoryId]?.excluded === true && (parentById.get(categoryId) || '0') !== '0') return false;
+          let parentId = parentById.get(categoryId) || '0';
+          const visited = new Set([categoryId]);
+          while (parentId && parentId !== '0' && !visited.has(parentId)) {
+            if (categoryRules?.[parentId]?.excluded === true) return false;
+            visited.add(parentId);
+            parentId = parentById.get(parentId) || '0';
+          }
+        }
+        let winner = null;
+        for (const categoryId of assigned) {
+          const rule = categoryRules?.[categoryId];
+          if (!rule || typeof rule !== 'object' || typeof rule.excluded !== 'boolean') continue;
+          const candidate = { excluded: rule.excluded, priority: Number(rule.priority) || 0 };
+          if (!winner || candidate.priority > winner.priority ||
+              (candidate.priority === winner.priority && candidate.excluded && !winner.excluded)) winner = candidate;
+        }
+        return winner ? !winner.excluded : true;
+      });
       setProducts(visibleProducts);
-      setAllCatalogProducts(sourceProducts);
-      setCatalogCategories(syncData.catalogCategories || []);
       localStorage.setItem('admin_products', JSON.stringify(visibleProducts));
       localStorage.setItem('admin_all_catalog_products', JSON.stringify(sourceProducts));
-      localStorage.setItem('admin_catalog_categories', JSON.stringify(syncData.catalogCategories || []));
+      localStorage.setItem('admin_catalog_categories', JSON.stringify(catalogCategories || []));
       localStorage.setItem('pos_cached_products_' + selectedCatalogStoreId, JSON.stringify(visibleProducts));
       localStorage.setItem('pos_cached_products_updated_at_' + selectedCatalogStoreId, String(Date.now()));
-      localStorage.setItem('pos_category_rules_' + selectedCatalogStoreId, JSON.stringify(syncData.categoryRules || {}));
+      localStorage.setItem('pos_category_rules_' + selectedCatalogStoreId, JSON.stringify(categoryRules || {}));
       window.dispatchEvent(new CustomEvent('pos:inventory-synced', { detail: { products: visibleProducts, storeId: selectedCatalogStoreId, exclusionsUpdated: true } }));
       window.dispatchEvent(new CustomEvent('pos:ajax-refresh', { detail: { exclusionsUpdated: true } }));
-      alert('Uitsluitingen opgeslagen en direct toegepast op voorraad en POS.');
+      alert('Uitsluitingen opgeslagen en toegepast op de huidige catalogus.');
     } catch (err) { alert(err.message || 'Opslaan mislukt'); }
     finally { setExclusionsSaving(false); }
   };
