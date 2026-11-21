@@ -72,8 +72,8 @@ export default async function handler(req, res) {
       const commandAction = String(req.body?.action || '');
       const payload = req.body?.payload;
       if (!/^[a-zA-Z0-9._:-]{8,128}$/.test(commandId) ||
-          !['order.complete', 'stock.set'].includes(commandAction) ||
-          !payload || typeof payload !== 'object' || Array.isArray(payload)) {
+          !['order.complete', 'stock.set', 'core.request'].includes(commandAction) ||
+          !payload || typeof payload !== 'object' || Array.isArray(payload) ||\n          (commandAction === 'core.request' && (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(String(payload.method || 'GET').toUpperCase()) || !/^\\/bdmpos\\/v1\\/[a-zA-Z0-9_/-]+$/.test(String(payload.route || '')) || String(payload.route || '').includes('..')))) {
         return res.status(400).json({ success: false, error: 'Invalid command. Order creation is intentionally disabled until checkout migration is separately tested.' });
       }
       await db.query(
