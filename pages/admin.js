@@ -73,6 +73,8 @@ export default function AdminDashboard() {
     }
     return [];
   });
+  const [ordersLoading, setOrdersLoading] = useState(false);
+  const [ordersError, setOrdersError] = useState('');
 
   const [loading, setLoading] = useState(false);
 
@@ -288,7 +290,6 @@ export default function AdminDashboard() {
     await Promise.all([
       fetchUsers(),
       fetchStores(),
-      fetchOrders(),
       fetchSumUpReaders(),
       fetchCatalogExclusions()
     ]);
@@ -432,17 +433,39 @@ export default function AdminDashboard() {
   };
 
   const fetchOrders = async () => {
+    setOrdersLoading(true);
+    setOrdersError('');
     try {
-      const res = await fetch('/api/woocommerce/orders');
-      const data = await res.json();
-      if (data.success && data.orders) {
-        setOrders(data.orders);
-        localStorage.setItem('admin_cached_orders', JSON.stringify(data.orders));
+      const res = await fetch('/api/woocommerce/orders?_refresh=' + Date.now(), { cache: 'no-store' });
+      const responseText = await res.text();
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch (_) {
+        throw new Error('Bestellingen-API gaf geen JSON terug (HTTP ' + res.status + ').');
       }
+      if (!res.ok || !data.success || !Array.isArray(data.orders)) {
+        throw new Error(data.error || 'Bestellingen konden niet worden opgehaald (HTTP ' + res.status + ').');
+      }
+      setOrders(data.orders);
+      localStorage.setItem('admin_cached_orders', JSON.stringify(data.orders));
+      return data.orders;
     } catch (err) {
       console.error('Fout bij ophalen bestellingen:', err);
+      setOrdersError(err.message || 'Fout bij ophalen bestellingen.');
+      return null;
+    } finally {
+      setOrdersLoading(false);
     }
   };
+
+  // Refresh when the orders tab is opened and keep it current while visible.
+  useEffect(() => {
+    if (activeTab !== 'orders') return;
+    fetchOrders();
+    const refreshTimer = setInterval(fetchOrders, 60000);
+    return () => clearInterval(refreshTimer);
+  }, [activeTab]);
 
   const handleUpdateOrderStatus = async (id, newStatus) => {
     try {
@@ -1020,7 +1043,15 @@ export default function AdminDashboard() {
 
             {activeTab === 'orders' && (
               <div className="bg-white rounded-lg shadow p-4 sm:p-6">
-                <h3 className="text-sm sm:text-md font-bold mb-4">📦 Live Bestellingen</h3>
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
+                  <div>
+                    <h3 className="text-sm sm:text-md font-bold">📦 Live Bestellingen ({orders.length})</h3>
+                    <p className="text-xs text-gray-500">Automatische verversing elke minuut.</p>
+                  </div>
+                  <button onClick={fetchOrders} disabled={ordersLoading} className="bg-black disabled:opacity-50 text-white px-3 py-2 rounded text-xs font-bold">{ordersLoading ? 'LADEN...' : '↻ BESTELLINGEN VERVERSEN'}</button>
+                </div>
+                {ordersError && <p className="mb-3 rounded border border-red-200 bg-red-50 p-3 text-xs text-red-700">{ordersError}</p>}
+                {ordersLoading && orders.length === 0 && <p className="py-6 text-center text-xs text-gray-500">Bestellingen ophalen...</p>}
                 <div className="overflow-x-auto -mx-4 sm:mx-0">
                   <table className="w-full text-left text-xs divide-y mb-4 min-w-[500px]">
                     <thead><tr className="bg-gray-50"><th className="p-3">Order</th><th className="p-3">Klant</th><th className="p-3">Status</th><th className="p-3">Totaal</th></tr></thead>
@@ -1040,6 +1071,9 @@ export default function AdminDashboard() {
                           <td className="p-3 font-bold text-red-600">€{parseFloat(o.total || 0).toFixed(2)}</td>
                         </tr>
                       ))}
+                      {!ordersLoading && !ordersError && currentOrders.length === 0 && (
+                        <tr><td colSpan="4" className="p-6 text-center text-xs text-gray-500">Geen bestellingen gevonden.</td></tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
