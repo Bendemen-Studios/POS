@@ -34,8 +34,12 @@ final class BDMPOS_Core_Worker {
 	}
 
 	public function schedule() {
-		if ( ! wp_next_scheduled( self::HOOK ) ) {
-			wp_schedule_event( time() + 30, 'bdmpos_every_minute', self::HOOK );
+		if ( 2 !== (int) get_option( 'bdmpos_core_worker_schedule_version', 0 ) ) {
+			wp_clear_scheduled_hook( self::HOOK );
+			wp_schedule_event( time() + 10, 'bdmpos_every_15_seconds', self::HOOK );
+			update_option( 'bdmpos_core_worker_schedule_version', 2, false );
+		} elseif ( ! wp_next_scheduled( self::HOOK ) ) {
+			wp_schedule_event( time() + 10, 'bdmpos_every_15_seconds', self::HOOK );
 		}
 	}
 
