@@ -6,6 +6,7 @@ import { fetchBdmposOrders, completeBdmposOrder, callBdmposWooApi } from '../../
 
 export default async function handler(req, res) {
   const { method } = req;
+  res.setHeader('Cache-Control', 'private, no-store, no-cache, must-revalidate');
 
   const session = await requireSession(req, res, { roles: ['admin', 'super_admin', 'administrator'] });
   if (!session) return;
