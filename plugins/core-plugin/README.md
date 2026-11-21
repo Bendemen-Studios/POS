@@ -29,7 +29,7 @@ Core does not create a second order alongside the POS. Each existing POS order-c
 
 ## Automatic synchronization
 
-Core listens to WooCommerce product, variation, stock, category, customer profile and points, order status and refund changes. It queues signed webhook events for the POS backend using WooCommerce Action Scheduler (with WP-Cron fallback). Failed deliveries are retried with increasing delays, up to six attempts. The POS receiver stores event IDs in MySQL, safely accepts duplicate deliveries, and invalidates its product catalog cache when product, variation, stock or category data changes. The WordPress admin includes a settings page under WooCommerce → BDM POS Core.
+Core listens to WooCommerce product, variation, stock, category, customer profile and points, order status and refund changes. It stores signed webhook events in a durable WordPress queue and the existing BDM POS Core worker delivers up to 10 due events on each 15-second run. Failed deliveries are retried with increasing delays, up to six attempts. This delivery path does not require Action Scheduler. The POS receiver stores event IDs in MySQL, safely accepts duplicate deliveries, and invalidates its product catalog cache when product, variation, stock or category data changes. The WordPress admin includes a settings page under WooCommerce → BDM POS Core.
 
 Configure the webhook URL and secret in WooCommerce → BDM POS Core. They can alternatively be defined in WordPress `wp-config.php` as fallback values:
 
@@ -74,7 +74,7 @@ All endpoints require `X-BDM-POS-Secret`. Missing configuration fails closed wit
 - Use HTTPS only and rotate the secret on both servers together.
 - The Core gateway is intentionally highly privileged. Protect the POS server environment and restrict access to the gateway secret.
 - Webhook events are signed with HMAC-SHA256; the receiver verifies the signature before storing or acting on an event.
-- Webhook delivery retries transient failures automatically. Check `/wp-json/bdmpos/v1/sync/status` when troubleshooting delivery.
+- The Core worker delivers queued webhook events and retries transient failures automatically (up to six attempts). Check `/wp-json/bdmpos/v1/sync/status` for queue depth and the last delivery result.
 - WooCommerce REST controllers continue to apply resource-specific permissions and validation.
 - Do not remove existing WooCommerce integrations until production behavior has been verified.
 
