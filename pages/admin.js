@@ -3,6 +3,31 @@ import { useRouter } from 'next/router';
 import Link from 'next/link';
 import React from 'react';
 
+function CoreDiagnosticsPanel() {
+  const [result, setResult] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const runTest = async () => {
+    setBusy(true); setResult(null);
+    try {
+      const response = await fetch('/api/core/diagnostics', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      setResult(await response.json());
+    } catch (error) { setResult({ success: false, error: error.message || 'Test kon niet worden uitgevoerd.' }); }
+    finally { setBusy(false); }
+  };
+  return <div className="bg-white rounded-lg shadow p-4 sm:p-6 space-y-4">
+    <div><h2 className="font-bold text-lg">BDM POS Core verbindingstest</h2><p className="text-sm text-gray-600">Veilige controle zonder opdrachten uit de wachtrij op te halen of gegevens te wijzigen.</p></div>
+    <button onClick={runTest} disabled={busy} className="bg-red-600 disabled:opacity-50 text-white font-bold px-4 py-2 rounded text-sm">{busy ? 'TESTEN...' : 'START CORE-VERBINDINGSTEST'}</button>
+    {result && <div className="space-y-2">
+      {(result.checks || []).map((row, index) => <div key={index} className="border rounded p-3 flex flex-col gap-1">
+        <span className="font-semibold text-sm">{row.label}</span><span className={row.ok ? 'text-green-700 text-sm font-bold' : 'text-red-700 text-sm font-bold'}>{row.status}</span>
+        {row.detail && <span className="text-xs text-gray-500">{row.detail}</span>}
+      </div>)}
+      {result.error && <p className="text-red-700 text-sm">{result.error}</p>}
+      <p className="text-xs text-gray-500">Getest op: {result.checkedAt || '—'}</p>
+    </div>}
+  </div>;
+}
+
 export default function AdminDashboard() {
   const router = useRouter();
   const effectCallbacks = useRef({});
@@ -632,6 +657,7 @@ export default function AdminDashboard() {
         <button onClick={() => setActiveTab('users')} className={`px-3 sm:px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'users' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'}`}>👥 Medewerkers</button>
         <button onClick={() => setActiveTab('stores')} className={`px-3 sm:px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'stores' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'}`}>📍 Filialen</button>
         <button onClick={() => setActiveTab('sumup')} className={`px-3 sm:px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'sumup' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'}`}>💳 SumUp</button>
+        <button onClick={() => setActiveTab('core')} className={`px-3 sm:px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'core' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'}`}>🔌 Core-test</button>
         <button onClick={() => setActiveTab('orders')} className={`px-3 sm:px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'orders' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'}`}>📦 Bestellingen</button>
         <button onClick={() => setActiveTab('inventory')} className={`px-3 sm:px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'inventory' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'}`}>📦 Voorraad & Variaties</button>
         <button onClick={() => { setActiveTab('exclusions'); if (selectedCatalogStoreId) fetchCatalogExclusions(selectedCatalogStoreId); }} className={`px-3 sm:px-4 py-2 rounded text-xs font-bold transition whitespace-nowrap ${activeTab === 'exclusions' ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-700'}`}>🚫 Productuitsluitingen</button>
@@ -871,6 +897,8 @@ export default function AdminDashboard() {
                 </div>
               </div>
             )}
+
+            {activeTab === 'core' && <CoreDiagnosticsPanel />}
 
             {activeTab === 'sumup' && (
               <div className="space-y-6">
