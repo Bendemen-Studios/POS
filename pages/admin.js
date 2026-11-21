@@ -219,12 +219,30 @@ export default function AdminDashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ storeId: selectedCatalogStoreId, excludedProducts, excludedCategories, categoryRules })
       });
-      const data = await res.json();
+      const responseText = await res.text();
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch (_) {
+        throw new Error(`Opslaan mislukt: server gaf geen JSON terug (HTTP ${res.status}). Controleer de server/API-respons.`);
+      }
       if (!res.ok || !data.success) throw new Error(data.error || 'Opslaan mislukt');
-      // Immediately rebuild the catalog with the new exclusion rules.
+
+      // De uitsluitingsregels zijn nu opgeslagen. Catalogusverversing is een
+      // afzonderlijke stap en mag de geslaagde opslag niet als mislukt tonen.
       const syncRes = await fetch(`/api/woocommerce/products?include_excluded=1&fresh=1&store_id=${encodeURIComponent(selectedCatalogStoreId)}&_sync=${Date.now()}`, { cache: 'no-store' });
-      const syncData = await syncRes.json();
-      if (!syncRes.ok || !syncData.success || syncData.stale) throw new Error(syncData.error || 'Uitsluitingen opgeslagen, maar catalogus verversen is mislukt.');
+      const syncText = await syncRes.text();
+      let syncData;
+      try {
+        syncData = JSON.parse(syncText);
+      } catch (_) {
+        alert('Uitsluitingen zijn opgeslagen. De voorraad kon alleen niet automatisch worden vernieuwd (server gaf HTTP ' + syncRes.status + ' terug). Vernieuw de voorraad later opnieuw.');
+        return;
+      }
+      if (!syncRes.ok || !syncData.success || syncData.stale) {
+        alert('Uitsluitingen zijn opgeslagen, maar de voorraad kon niet automatisch worden vernieuwd: ' + (syncData.error || 'onbekende fout') + '.');
+        return;
+      }
       const visibleProducts = Array.isArray(syncData.products) ? syncData.products : [];
       const sourceProducts = Array.isArray(syncData.allProducts) ? syncData.allProducts : visibleProducts;
       setProducts(visibleProducts);
