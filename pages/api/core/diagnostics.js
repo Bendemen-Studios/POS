@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { executeBdmposCoreViaQueue } from '../../../lib/bdmpos-core-queue';
 import { getWooHttpsAgent } from '../../../lib/woocommerce-transport';
 
 function coreBaseUrl() {
@@ -17,15 +18,11 @@ export default async function handler(req, res) {
   if (!baseUrl || secret.length < 32) {
     return res.status(200).json({ success: false, checks: [{ label: 'POS-configuratie', ok: false, status: 'Niet goed ingesteld', detail: 'BDMPOS_CORE_URL ontbreekt of BDMPOS_CORE_SECRET is korter dan 32 tekens.' }], checkedAt: new Date().toISOString() });
   }
-  const client = axios.create({ timeout: 12000, httpsAgent: getWooHttpsAgent(), validateStatus: () => true, headers: { 'X-BDM-POS-Secret': secret, Accept: 'application/json', 'User-Agent': 'BDM-POS-Core-Diagnostics/1.0' } });
   try {
-    const health = await client.get(baseUrl + '/health');
-    const healthBody = typeof health.data === 'string' ? health.data : (health.data?.message || health.data?.error || health.data?.code || '');
-    const healthServer = health.headers?.server || '';
-    const healthRay = health.headers?.['cf-ray'] || '';
-    checks.push({ label: 'POS → WordPress/Core', ok: health.status === 200, status: health.status === 200 ? 'Verbonden — HTTP 200' : 'HTTP ' + health.status, detail: [health.status === 401 ? 'Core weigert de secret (401).' : '', health.status === 403 ? '403: verzoek geweigerd vóór of door WordPress. Controleer firewall/WAF/beveiligingsplugin.' : '', String(healthBody).slice(0, 240), healthServer ? 'Server: ' + healthServer : '', healthRay ? 'Cloudflare Ray: ' + healthRay : ''].filter(Boolean).join(' ') });
+    const health = await executeBdmposCoreViaQueue({ method: 'GET', route: '/bdmpos/v1/health', timeoutMs: 115000 });
+    checks.push({ label: 'POS → WordPress/Core via worker', ok: health.status === 200 && health.data?.success === true, status: health.status === 200 ? 'Verbonden via reverse bridge' : 'HTTP ' + health.status, detail: health.data?.service ? 'Core ' + health.data.service + ' v' + health.data.version : '' });
   } catch (error) {
-    checks.push({ label: 'POS → WordPress/Core', ok: false, status: 'Niet bereikbaar', detail: error.code || error.message });
+    checks.push({ label: 'POS → WordPress/Core via worker', ok: false, status: 'Niet verwerkt', detail: error.message || 'WordPress-worker heeft de aanvraag niet bevestigd.' });
   }
   const commandUrl = String(process.env.BDMPOS_CORE_COMMAND_URL || '').trim();
   if (!commandUrl) {
