@@ -1,6 +1,6 @@
 import { requireSession } from '../../../lib/session';
 import db from '../../../lib/db';
-import { completeBdmposOrder, callBdmposWooApi } from '../../../lib/bdmpos-core';
+import { callBdmposWooApi } from '../../../lib/bdmpos-core';
 
 function sendApiError(res, status, message) {
   return res.status(status).json({ success: false, error: message });
@@ -167,9 +167,27 @@ export default async function handler(req, res) {
         if (!allowed) return sendApiError(res, 403, 'Deze afhaalbestelling hoort niet bij jouw filiaal.');
       }
 
-      let completedOrder;
-      const result = await completeBdmposOrder(order_id, 'Afhaalbestelling opgehaald en afgerond via Bendemen POS.');
-      completedOrder = result.order;
+      const paymentMethod = String((req.body || {}).payment_method || 'cash');
+      if (!['cash', 'manual_pin', 'sumup'].includes(paymentMethod)) {
+        return sendApiError(res, 400, 'Kies contant, pin of SumUp om deze afhaalbestelling af te rekenen.');
+      }
+      const paymentTitles = {
+        cash: 'Contant (Afhalen)',
+        manual_pin: 'Pin (Afhalen)',
+        sumup: 'SumUp (Afhalen)'
+      };
+      const paid = await callBdmposWooApi({
+        method: 'PUT',
+        path: `/orders/${encodeURIComponent(String(order_id))}`,
+        data: {
+          status: 'completed',
+          set_paid: true,
+          payment_method: paymentMethod,
+          payment_method_title: paymentTitles[paymentMethod]
+        },
+        requestId: `pickup-${order_id}-${paymentMethod}`
+      });
+      const completedOrder = paid.data;
 
       return res.status(200).json({
         success: true,

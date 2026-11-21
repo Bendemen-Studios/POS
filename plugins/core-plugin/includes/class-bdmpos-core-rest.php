@@ -272,7 +272,11 @@ final class BDMPOS_Core_REST {
 				return $replay;
 			}
 			if ( is_array( $stored ) && isset( $stored['status'] ) && 'processing' === $stored['status'] ) {
-				return new WP_Error( 'bdmpos_core_request_processing', 'This request ID is already being processed or had an uncertain result. Do not retry with a new request ID.', array( 'status' => 409 ) );
+				$created = isset( $stored['created_at'] ) ? (int) $stored['created_at'] : 0;
+				if ( $created > 0 && ( time() - $created ) < 90 ) {
+					return new WP_Error( 'bdmpos_core_request_processing', 'This request ID is already being processed or had an uncertain result. Do not retry with a new request ID.', array( 'status' => 409 ) );
+				}
+				delete_option( $idempotency_option );
 			}
 		}
 		$service_users = get_users( array( 'role' => 'administrator', 'fields' => 'ID', 'number' => 20 ) );
@@ -295,7 +299,15 @@ final class BDMPOS_Core_REST {
 				$replay->header( 'X-BDM-POS-Idempotent-Replay', 'true' );
 				return $replay;
 			}
-			return new WP_Error( 'bdmpos_core_request_processing', 'This request ID is already being processed or had an uncertain result. Do not retry with a new request ID.', array( 'status' => 409 ) );
+			$created = is_array( $stored ) && isset( $stored['created_at'] ) ? (int) $stored['created_at'] : 0;
+			if ( $created > 0 && ( time() - $created ) >= 90 ) {
+				delete_option( $idempotency_option );
+				if ( ! add_option( $idempotency_option, array( 'status' => 'processing', 'created_at' => time() ), '', false ) ) {
+					return new WP_Error( 'bdmpos_core_request_processing', 'This request ID is already being processed or had an uncertain result. Do not retry with a new request ID.', array( 'status' => 409 ) );
+				}
+			} else {
+				return new WP_Error( 'bdmpos_core_request_processing', 'This request ID is already being processed or had an uncertain result. Do not retry with a new request ID.', array( 'status' => 409 ) );
+			}
 		}
 		$previous_user_id = get_current_user_id();
 		try {
