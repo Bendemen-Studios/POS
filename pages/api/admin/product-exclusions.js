@@ -42,8 +42,25 @@ export default async function handler(req, res) {
       if (rows[0]) {
         return res.status(200).json({ success: true, storeId, excludedProducts: parse(rows[0].excluded_products, []), excludedCategories: [], categoryRules: parse(rows[0].category_rules, {}), configured: true });
       }
-      // A branch without its own row starts with empty settings. Do not
-      // silently inherit another/global configuration.
+      // Older POS versions stored exclusions in the shared table. Expose
+      // those as defaults until this branch gets its own saved configuration.
+      const [legacyRows] = await db.query('SELECT excluded_products, excluded_categories, category_rules FROM pos_catalog_exclusions WHERE id = 1 LIMIT 1');
+      if (legacyRows[0]) {
+        const legacyRules = normalizeRules(parse(legacyRows[0].category_rules, {}));
+        const legacyCategories = parse(legacyRows[0].excluded_categories, []).map(String);
+        for (const id of legacyCategories) {
+          if (!legacyRules[id]) legacyRules[id] = { excluded: true, priority: 0 };
+        }
+        return res.status(200).json({
+          success: true,
+          storeId,
+          excludedProducts: parse(legacyRows[0].excluded_products, []),
+          excludedCategories: legacyCategories,
+          categoryRules: legacyRules,
+          configured: true,
+          source: 'legacy-global'
+        });
+      }
       return res.status(200).json({ success: true, storeId, excludedProducts: [], excludedCategories: [], categoryRules: {}, configured: false });
     }
     if (req.method === 'PUT') {
@@ -52,6 +69,16 @@ export default async function handler(req, res) {
       await db.query(`INSERT INTO pos_store_catalog_exclusions (store_id, excluded_products, category_rules)
         VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE excluded_products = VALUES(excluded_products), category_rules = VALUES(category_rules)`,
       [storeId, JSON.stringify(products), JSON.stringify(categoryRules)]);
+
+      // The server-side catalog cache contains already-filtered product lists.
+      // Expire only this branch immediately so the next POS sync uses the new rules.
+      const productCaches = globalThis.__bdmPosProductsCaches;
+      const branchCache = productCaches?.get(String(storeId));
+      if (branchCache) {
+        branchCache.data = null;
+        branchCache.updatedAt = 0;
+      }
+
       return res.status(200).json({ success: true, storeId, excludedProducts: products, categoryRules, configured: true });
     }
     res.setHeader('Allow', ['GET', 'PUT']);
