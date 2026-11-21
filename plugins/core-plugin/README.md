@@ -7,7 +7,6 @@ BDM POS Core is the authenticated server-to-server integration layer between Ben
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
 | GET | `/wp-json/bdmpos/v1/health` | Authenticated connectivity and version |
-| GET | `/wp-json/bdmpos/v1/sync/status` | Webhook delivery configuration and last delivery result |
 | POST | `/wp-json/bdmpos/v1/woocommerce` | Authenticated gateway to WooCommerce's full `wc/v3` REST API |
 | GET | `/wp-json/bdmpos/v1/catalog?page=1&per_page=100` | Products, categories, images, attributes and variations |
 | GET | `/wp-json/bdmpos/v1/categories` | Product category tree |
@@ -26,19 +25,6 @@ The `/woocommerce` gateway forwards authenticated server-side requests to WooCom
 The gateway runs requests as a WordPress administrator service account with both `manage_options` and `manage_woocommerce`. Configure at least one active administrator account on the WordPress site. Requests are accepted only when the dedicated Core secret is valid. Enter the Core API secret in WooCommerce → BDM POS Core (or define it in `wp-config.php`); it is never sent to browser code.
 
 Core does not create a second order alongside the POS. Each existing POS order-creation flow makes its single order-creation request through the gateway. Offline order synchronization retains the existing POS idempotency claim and does not fall back to a direct WooCommerce request after a Core failure, avoiding an accidental second create after an uncertain response.
-
-## Automatic synchronization
-
-Core listens to WooCommerce product, variation, stock, category, customer profile and points, order status and refund changes. It stores signed webhook events in a durable WordPress queue and the existing BDM POS Core worker delivers up to 10 due events on each 15-second run. Failed deliveries are retried with increasing delays, up to six attempts. This delivery path does not require Action Scheduler. The POS receiver stores event IDs in MySQL, safely accepts duplicate deliveries, and invalidates its product catalog cache when product, variation, stock or category data changes. The WordPress admin includes a settings page under WooCommerce → BDM POS Core.
-
-Configure the webhook URL and secret in WooCommerce → BDM POS Core. They can alternatively be defined in WordPress `wp-config.php` as fallback values:
-
-```php
-define( 'BDMPOS_CORE_WEBHOOK_URL', 'https://YOUR-POS-DOMAIN/api/webhooks/bdmpos-core' );
-define( 'BDMPOS_CORE_WEBHOOK_SECRET', 'USE_THE_SAME_LONG_RANDOM_SECRET_AS_THE_POS_ENV' );
-```
-
-Set the same secret as `BDMPOS_CORE_WEBHOOK_SECRET` in the POS server environment. The webhook URL must use HTTPS and the secret must be at least 32 characters. The authenticated `/sync/status` endpoint reports whether delivery is configured and the last attempt/result; it is an API endpoint, not a dashboard.
 
 ## Duplicate request protection
 
@@ -73,8 +59,6 @@ All endpoints require `X-BDM-POS-Secret`. Missing configuration fails closed wit
 - Keep the secret out of Git, frontend JavaScript, browser storage and logs.
 - Use HTTPS only and rotate the secret on both servers together.
 - The Core gateway is intentionally highly privileged. Protect the POS server environment and restrict access to the gateway secret.
-- Webhook events are signed with HMAC-SHA256; the receiver verifies the signature before storing or acting on an event.
-- The Core worker delivers queued webhook events and retries transient failures automatically (up to six attempts). Check `/wp-json/bdmpos/v1/sync/status` for queue depth and the last delivery result.
 - WooCommerce REST controllers continue to apply resource-specific permissions and validation.
 - Do not remove existing WooCommerce integrations until production behavior has been verified.
 
@@ -82,7 +66,7 @@ All endpoints require `X-BDM-POS-Secret`. Missing configuration fails closed wit
 
 Core routing is opt-in when both server-only environment variables are configured. Pickup order reads and completion require Core and no longer fall back to direct WooCommerce credentials. POS-side pickup/store authorization and offline pickup queue remain in the POS application. Order-linked points balance/earning/redemption and manual adjustments use Core when configured. The legacy WPCode Points & Rewards bridge must be deactivated after Core 0.9.0 is installed and verified; do not run both earning hooks unless relying on their shared metadata guard during the transition. Verify order creation, offline retries, pickup actions, points balances, earning and redemption before removing remaining legacy integrations.
 
-## Reverse Core API bridge (0.11.0)
+## Reverse Core API bridge (0.12.0)
 
 The POS host cannot open outbound TCP connections to bendemen.com in this deployment. Core API calls from the POS server are therefore transported through the existing authenticated command queue:
 
