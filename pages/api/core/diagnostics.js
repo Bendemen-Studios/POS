@@ -29,7 +29,11 @@ export default async function handler(req, res) {
     checks.push({ label: 'POS-opdrachtenendpoint', ok: false, status: 'Niet apart getest', detail: 'BDMPOS_CORE_COMMAND_URL ontbreekt. De WordPress-worker gebruikt de URL die in WooCommerce is ingesteld.' });
   } else {
     try {
-      const probe = await client.get(commandUrl, { params: { action: 'probe' } });
+      const probe = await axios.get(commandUrl, {
+        params: { action: 'probe' },
+        headers: { 'X-BDM-POS-Secret': secret },
+        timeout: 10000,
+      });
       checks.push({ label: 'POS-opdrachtenendpoint', ok: probe.status === 200 && probe.data?.authenticated === true, status: probe.status === 200 ? 'Authenticatie akkoord' : 'HTTP ' + probe.status, detail: 'Niet-mutatieve probe; er zijn geen opdrachten opgehaald.' });
     } catch (error) {
       checks.push({ label: 'POS-opdrachtenendpoint', ok: false, status: 'Niet bereikbaar', detail: error.code || error.message });
