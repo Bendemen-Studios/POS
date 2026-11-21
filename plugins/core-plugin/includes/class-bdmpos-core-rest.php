@@ -763,7 +763,7 @@ final class BDMPOS_Core_REST {
 		if ( is_array( $existing ) && isset( $existing['status'], $existing['response'] ) && 'complete' === $existing['status'] ) {
 			return rest_ensure_response( array_merge( $existing['response'], array( 'idempotent' => true ) ) );
 		}
-		if ( metadata_exists( 'post', $order_id, $lock_key ) ) {
+		if ( '' !== $order->get_meta( $lock_key, true ) ) {
 			return new WP_Error( 'bdmpos_core_points_processing', 'This points transaction is already being processed or has an uncertain result.', array( 'status' => 409 ) );
 		}
 		$order->update_meta_data( $lock_key, array( 'status' => 'processing' ) );
