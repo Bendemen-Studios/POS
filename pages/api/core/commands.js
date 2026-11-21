@@ -83,7 +83,10 @@ export default async function handler(req, res) {
       const [rows] = await db.query('SELECT command_id, status FROM pos_core_commands WHERE command_id = ? LIMIT 1', [commandId]);
       return res.status(202).json({ success: true, command: rows[0] });
     }
-    if (req.method === 'GET' && action === 'probe') {\n      return res.status(200).json({ success: true, authenticated: true, queue: 'reachable', destructive: false });\n    }\n    if (req.method === 'GET' && action === 'pull') {
+    if (req.method === 'GET' && action === 'probe') {
+      return res.status(200).json({ success: true, authenticated: true, queue: 'reachable', destructive: false });
+    }
+    if (req.method === 'GET' && action === 'pull') {
       const commands = await claimCommands();
       return res.status(200).json({ success: true, commands });
     }
