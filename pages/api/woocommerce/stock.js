@@ -28,8 +28,7 @@ export default async function handler(req, res) {
   const url = process.env.WOOCOMMERCE_URL || process.env.NEXT_PUBLIC_WOOCOMMERCE_URL || 'https://www.bendemen.com';
   const key = process.env.WOOCOMMERCE_CONSUMER_KEY || process.env.WOO_CONSUMER_KEY || process.env.WOOCOMMERCE_KEY || process.env.NEXT_PUBLIC_WOOCOMMERCE_KEY;
   const secret = process.env.WOOCOMMERCE_CONSUMER_SECRET || process.env.WOO_CONSUMER_SECRET || process.env.WOOCOMMERCE_SECRET || process.env.NEXT_PUBLIC_WOOCOMMERCE_SECRET;
-  if (!key || !secret) return res.status(500).json({ success: false, error: 'WooCommerce API sleutels ontbreken.' });
-  const headers = { Authorization: 'Basic ' + Buffer.from(`${key}:${secret}`).toString('base64'), 'User-Agent': 'BDM-POS-Client/1.0' };
+  const headers = { Authorization: 'Basic ' + Buffer.from(`${key || ''}:${secret || ''}`).toString('base64'), 'User-Agent': 'BDM-POS-Client/1.0' };
 
   try {
     const assignedStoreIds = String(session.store_id || '').split(',').map(id => id.trim()).filter(Boolean);
@@ -66,6 +65,9 @@ export default async function handler(req, res) {
         synced_at: new Date().toISOString()
       });
     }
+    // WooCommerce REST keys are only needed for the legacy direct API path.
+    // Core performs the authenticated WordPress-side WooCommerce request itself.
+    if (!key || !secret) return res.status(500).json({ success: false, error: 'WooCommerce API sleutels ontbreken en BDM POS Core is niet beschikbaar.' });
     let catalogCategories = [];
     try {
       catalogCategories = await fetchWithTimeout(url + '/wp-json/wc/v3/products/categories?per_page=100&hide_empty=false', { headers });
