@@ -2,6 +2,7 @@ import { createHash } from 'crypto';
 import { claimOrder, completeOrder, releaseOrder } from '../../../lib/orderIdempotency';
 import { redeemCustomerPoints } from '../../../lib/customerPoints';
 import { requireSession, requireStoreAccess } from '../../../lib/session';
+import { callBdmposWooApi } from '../../../lib/bdmpos-core';
 
 function getClientOrderId(req) {
   const headerId = req.headers['idempotency-key'];
@@ -25,35 +26,47 @@ async function fetchWithTimeout(url, options, timeoutMs = 15000) {
 
 async function findExistingWooOrder(url, authHeader, clientOrderId) {
   const targetId = String(clientOrderId).slice(0, 128);
-  // Inspect recent orders and their actual meta_data instead of relying on
-    // meta_key/meta_value query parameters supported differently by servers.
+  let orders;
+
+  // Prefer the authenticated Core gateway: the direct VPS-to-webshop route
+  // is currently timing out before an HTTP connection can be established.
+  if (process.env.BDMPOS_CORE_URL && process.env.BDMPOS_CORE_SECRET) {
+    const result = await callBdmposWooApi({
+      method: 'GET',
+      path: '/orders',
+      params: { per_page: 100, orderby: 'date', order: 'desc' }
+    });
+    orders = result.data;
+  } else {
     const query = new URLSearchParams({ per_page: '100', orderby: 'date', order: 'desc' });
     const response = await fetchWithTimeout(
-      `${url}/wp-json/wc/v3/orders?${query.toString()}`,
+      url + '/wp-json/wc/v3/orders?' + query.toString(),
       {
         method: 'GET',
         headers: {
           Authorization: authHeader,
-          'User-Agent': 'BDM-POS-Client/1.0 (Mozilla/5.0; Node.js)',
+          'User-Agent': 'BDM-POS-Server/1.0',
           Connection: 'close',
         },
       },
       20000
     );
     if (!response.ok) {
-      throw new Error(`WooCommerce kon bestaande bestellingen niet controleren (HTTP ${response.status}).`);
+      throw new Error('WooCommerce kon bestaande bestellingen niet controleren (HTTP ' + response.status + ').');
     }
-    const orders = await response.json();
-    if (!Array.isArray(orders)) {
-      throw new Error('WooCommerce gaf een ongeldige lijst met bestaande bestellingen terug.');
-    }
-    return orders.find(order =>
-      Array.isArray(order?.meta_data) &&
-      order.meta_data.some(meta =>
-        String(meta?.key || '') === '_pos_client_order_id' &&
-        String(meta?.value || '') === targetId
-      )
-    ) || null;
+    orders = await response.json();
+  }
+
+  if (!Array.isArray(orders)) {
+    throw new Error('WooCommerce gaf een ongeldige lijst met bestaande bestellingen terug.');
+  }
+  return orders.find(order =>
+    Array.isArray(order?.meta_data) &&
+    order.meta_data.some(meta =>
+      String(meta?.key || '') === '_pos_client_order_id' &&
+      String(meta?.value || '') === targetId
+    )
+  ) || null;
 }
 
 async function verifyWooOrder(url, authHeader, wooOrderId) {
@@ -285,14 +298,26 @@ export default async function handler(req, res) {
 
     let responseOrder;
     try {
-      const fetchRes = await fetchWithTimeout(`${url}/wp-json/wc/v3/orders`, {
-        method: 'POST',
-        headers: customHeaders,
-        body: JSON.stringify(orderData)
-      }, 60000);
-      const responseText = await fetchRes.text();
-      if (!fetchRes.ok) throw new Error(`HTTP ${fetchRes.status}: ${responseText}`);
-      responseOrder = JSON.parse(responseText);
+      if (process.env.BDMPOS_CORE_URL && process.env.BDMPOS_CORE_SECRET) {
+        // Use the same stable request ID on every retry. Core can replay a
+        // completed request rather than creating a duplicate WooCommerce order.
+        const result = await callBdmposWooApi({
+          method: 'POST',
+          path: '/orders',
+          data: orderData,
+          requestId: clientOrderId
+        });
+        responseOrder = result.data;
+      } else {
+        const fetchRes = await fetchWithTimeout(url + '/wp-json/wc/v3/orders', {
+          method: 'POST',
+          headers: customHeaders,
+          body: JSON.stringify(orderData)
+        }, 60000);
+        const responseText = await fetchRes.text();
+        if (!fetchRes.ok) throw new Error('HTTP ' + fetchRes.status + ': ' + responseText);
+        responseOrder = JSON.parse(responseText);
+      }
     } catch (fetchErr) {
       // Never issue a second WooCommerce POST after an uncertain timeout.
       // The original request may have reached WooCommerce successfully.
