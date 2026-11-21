@@ -127,7 +127,8 @@ export default async function handler(req, res) {
   const consumerKey = process.env.WOOCOMMERCE_CONSUMER_KEY || process.env.WOO_CONSUMER_KEY || process.env.WOOCOMMERCE_KEY || process.env.NEXT_PUBLIC_WOOCOMMERCE_KEY;
   const consumerSecret = process.env.WOOCOMMERCE_CONSUMER_SECRET || process.env.WOO_CONSUMER_SECRET || process.env.WOOCOMMERCE_SECRET || process.env.NEXT_PUBLIC_WOOCOMMERCE_SECRET;
 
-  if (!consumerKey || !consumerSecret) {
+  const useBdmposCore = Boolean(process.env.BDMPOS_CORE_URL && process.env.BDMPOS_CORE_SECRET);
+  if (!useBdmposCore && (!consumerKey || !consumerSecret)) {
     return res.status(500).json({ success: false, error: 'WooCommerce API sleutels zijn niet geconfigureerd in .env' });
   }
 
