@@ -77,35 +77,6 @@ function bdmpos_core_execute_command( $command ) {
 			$updated = wc_get_product( $product_id );
 			return array( 'product_id' => $product_id, 'stock_quantity' => $updated ? $updated->get_stock_quantity() : null );
 
-		case 'order.create':
-			$request_id = sanitize_text_field( $payload['request_id'] ?? $command['command_id'] );
-			$existing = wc_get_orders( array(
-				'limit' => 1,
-				'meta_key' => '_bdmpos_command_id',
-				'meta_value' => $request_id,
-				'return' => 'objects',
-			) );
-			if ( ! empty( $existing ) ) {
-				return array( 'order_id' => $existing[0]->get_id(), 'status' => $existing[0]->get_status(), 'idempotent' => true );
-			}
-			$order = wc_create_order();
-			if ( is_wp_error( $order ) ) { return $order; }
-			foreach ( (array) ( $payload['line_items'] ?? array() ) as $line ) {
-				$product_id = absint( $line['product_id'] ?? 0 );
-				$quantity = max( 1, absint( $line['quantity'] ?? 1 ) );
-				$product = $product_id ? wc_get_product( $product_id ) : false;
-				if ( ! $product ) {
-					$order->delete( true );
-					return new WP_Error( 'invalid_product', 'A line item references an unknown product.' );
-				}
-				$order->add_product( $product, $quantity );
-			}
-			$order->update_meta_data( '_bdmpos_command_id', $request_id );
-			$order->set_payment_method( sanitize_text_field( $payload['payment_method'] ?? 'pos_gateway' ) );
-			$order->set_status( 'completed' );
-			$order->calculate_totals();
-			$order->save();
-			return array( 'order_id' => $order->get_id(), 'status' => $order->get_status(), 'idempotent' => false );
 
 		default:
 			return new WP_Error( 'unsupported_action', 'Unsupported command action.' );
