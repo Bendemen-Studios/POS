@@ -2,10 +2,10 @@ import axios from 'axios';
 import db from '../../../lib/db';
 
 function coreBaseUrl() {
-  const configured = String(process.env.BDMPOS_CORE_URL || '').trim().replace(/\\/+$/, '');
+  const configured = String(process.env.BDMPOS_CORE_URL || '').trim().replace(/\/+$/, '');
   if (!configured) return '';
-  if (/\\/wp-json\\/bdmpos\\/v1$/i.test(configured)) return configured;
-  if (/\\/wp-json$/i.test(configured)) return configured + '/bdmpos/v1';
+  if (/\/wp-json\/bdmpos\/v1$/i.test(configured)) return configured;
+  if (/\/wp-json$/i.test(configured)) return configured + '/bdmpos/v1';
   return configured + '/wp-json/bdmpos/v1';
 }
 
