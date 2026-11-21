@@ -177,6 +177,23 @@ final class BDMPOS_Core_REST {
 
 		register_rest_route(
 			self::REST_NAMESPACE,
+			'/customers/(?P<id>\\d+)/points/transactions',
+			array(
+				'methods'              => WP_REST_Server::CREATABLE,
+				'callback'            => array( $this, 'customer_points_transaction' ),
+				'permission_callback' => array( $this, 'authenticate' ),
+				'args'                => array(
+					'id'         => array( 'sanitize_callback' => 'absint', 'validate_callback' => static function ( $value ) { return (int) $value > 0; } ),
+					'action'     => array( 'required' => true, 'sanitize_callback' => 'sanitize_key' ),
+					'points'     => array( 'required' => true, 'sanitize_callback' => 'absint' ),
+					'order_id'   => array( 'required' => true, 'sanitize_callback' => 'absint' ),
+					'request_id' => array( 'required' => true, 'sanitize_callback' => 'sanitize_text_field' ),
+				),
+			)
+		);
+
+		register_rest_route(
+			self::REST_NAMESPACE,
 			'/sync/status',
 			array(
 				'methods'             => WP_REST_Server::READABLE,
@@ -668,6 +685,106 @@ final class BDMPOS_Core_REST {
 				'read_only'      => true,
 			)
 		);
+	}
+
+	/**
+	 * Apply order-linked points earning or redemption through the native
+	 * WooCommerce Points & Rewards ledger. Both operations are order-idempotent.
+	 */
+	public function customer_points_transaction( WP_REST_Request $request ) {
+		$customer_id = absint( $request->get_param( 'id' ) );
+		$action      = sanitize_key( $request->get_param( 'action' ) );
+		$points      = absint( $request->get_param( 'points' ) );
+		$order_id    = absint( $request->get_param( 'order_id' ) );
+		$request_id  = sanitize_text_field( (string) $request->get_param( 'request_id' ) );
+
+		if ( ! in_array( $action, array( 'sync_earned', 'redeem' ), true ) || $points < 1 || $points > 1000000 || ! $order_id || '' === $request_id ) {
+			return new WP_Error( 'bdmpos_core_invalid_points_transaction', 'A supported action, customer, points, order_id and request_id are required.', array( 'status' => 400 ) );
+		}
+		if ( ! class_exists( 'WC_Points_Rewards_Manager' ) ) {
+			return new WP_Error( 'bdmpos_core_points_unavailable', 'WooCommerce Points & Rewards is not active.', array( 'status' => 503 ) );
+		}
+		$order = wc_get_order( $order_id );
+		if ( ! $order ) {
+			return new WP_Error( 'bdmpos_core_order_not_found', 'WooCommerce order not found.', array( 'status' => 404 ) );
+		}
+		if ( (int) $order->get_customer_id() !== $customer_id ) {
+			return new WP_Error( 'bdmpos_core_customer_mismatch', 'Order customer does not match the points customer.', array( 'status' => 400 ) );
+		}
+
+		$lock_key = '_bdmpos_core_points_tx_' . hash( 'sha256', $request_id );
+		$existing = $order->get_meta( $lock_key, true );
+		if ( is_array( $existing ) && isset( $existing['status'], $existing['response'] ) && 'complete' === $existing['status'] ) {
+			return rest_ensure_response( array_merge( $existing['response'], array( 'idempotent' => true ) ) );
+		}
+		if ( metadata_exists( 'post', $order_id, $lock_key ) ) {
+			return new WP_Error( 'bdmpos_core_points_processing', 'This points transaction is already being processed or has an uncertain result.', array( 'status' => 409 ) );
+		}
+		$order->update_meta_data( $lock_key, array( 'status' => 'processing' ) );
+		$order->save();
+
+		try {
+			if ( 'sync_earned' === $action ) {
+				$plugin_earned = max( 0, (int) $order->get_meta( '_wc_points_earned', true ) );
+				$pos_awarded   = max( 0, (int) $order->get_meta( '_bdm_pos_points_awarded', true ) );
+				$missing       = max( 0, $points - max( $plugin_earned, $pos_awarded ) );
+				if ( $missing > 0 ) {
+					$result = WC_Points_Rewards_Manager::increase_points(
+						$customer_id,
+						$missing,
+						'bdm-pos-order-earned',
+						array( 'source' => 'bendemen-pos', 'order_id' => $order_id, 'target_points' => $points, 'missing_points' => $missing, 'request_id' => $request_id ),
+						$order_id
+					);
+					if ( ! $result ) {
+						throw new Exception( 'WooCommerce Points & Rewards rejected the points increase.' );
+					}
+					$pos_awarded += $missing;
+				}
+				$order->update_meta_data( '_wc_points_earned', $points );
+				$order->update_meta_data( '_bdm_pos_points_awarded', $pos_awarded );
+				$order->update_meta_data( '_bdm_pos_points_source', 'bendemen-pos' );
+				$response = array( 'success' => true, 'points_target' => $points, 'points_added' => $missing, 'points_plugin_already_earned' => $plugin_earned );
+			} else {
+				$already_redeemed = max( 0, (int) $order->get_meta( '_bdm_points_redeemed', true ) );
+				if ( $already_redeemed > 0 ) {
+					$response = array( 'success' => true, 'idempotent' => true, 'points_redeemed' => $already_redeemed );
+				} else {
+					$current_points = max( 0, (int) WC_Points_Rewards_Manager::get_users_points( $customer_id ) );
+					if ( $points > $current_points ) {
+						throw new DomainException( sprintf( 'Insufficient points. Customer has %d points, requested %d.', $current_points, $points ) );
+					}
+					$result = WC_Points_Rewards_Manager::decrease_points(
+						$customer_id,
+						$points,
+						'bdm-pos-redeem',
+						array( 'source' => 'bendemen-pos', 'order_id' => $order_id, 'points_redeemed' => $points, 'request_id' => $request_id ),
+						$order_id
+					);
+					if ( ! $result ) {
+						throw new Exception( 'WooCommerce Points & Rewards rejected the points deduction.' );
+					}
+					$order->update_meta_data( '_wc_points_redeemed', $points );
+					$order->update_meta_data( '_bdm_points_redeemed', $points );
+					$order->update_meta_data( '_bdm_points_source', 'woocommerce-points-and-rewards' );
+					$response = array( 'success' => true, 'points_redeemed' => $points );
+				}
+			}
+			$response['customer_id'] = $customer_id;
+			$response['order_id'] = $order_id;
+			$response['points_balance'] = max( 0, (int) WC_Points_Rewards_Manager::get_users_points( $customer_id ) );
+			$order->update_meta_data( $lock_key, array( 'status' => 'complete', 'response' => $response ) );
+			$order->save();
+			return rest_ensure_response( $response );
+		} catch ( DomainException $error ) {
+			$order->delete_meta_data( $lock_key );
+			$order->save();
+			return new WP_Error( 'bdmpos_core_insufficient_points', $error->getMessage(), array( 'status' => 400 ) );
+		} catch ( Throwable $error ) {
+			// Keep the processing marker after an uncertain ledger result. A
+			// retry with the same request ID must not deduct or award twice.
+			return new WP_Error( 'bdmpos_core_points_transaction_failed', 'Points transaction failed or has an uncertain result. Do not retry with a new request ID.', array( 'status' => 500 ) );
+		}
 	}
 
 	private function serialize_customer( WC_Customer $customer ) {
