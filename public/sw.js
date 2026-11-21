@@ -1,7 +1,7 @@
-const CACHE_NAME = 'bendemen-pos-v29';
+const CACHE_NAME = 'bendemen-pos-v30';
 const OFFLINE_URL = '/login';
 const OFFLINE_FALLBACK_URL = '/offline.html';
-const NAVIGATION_TIMEOUT = 500;
+const NAVIGATION_TIMEOUT = 5000;
 const API_TIMEOUT = 5000;
 const PRODUCT_API_TIMEOUT = 180000;
 const CHECKOUT_TIMEOUT = 15000;
@@ -235,15 +235,21 @@ self.addEventListener('fetch', event => {
   if (request.mode === 'navigate') {
     event.respondWith((async () => {
       const cache = await caches.open(CACHE_NAME);
-      const cached = await cache.match(request, { ignoreSearch:true }) || await cache.match(url.pathname, { ignoreSearch:true });
-      if (cached) {
-        event.waitUntil((async () => { try { const fresh = await timeoutFetch(request, NAVIGATION_TIMEOUT); if (fresh.ok && fresh.type !== 'opaqueredirect') { await cache.put(request, fresh.clone()); await cacheDocumentAssets(cache, fresh); } } catch (_) {} })());
-        return cached;
-      }
+      // Online-first: always try the live POS server before showing a cached
+      // application shell. This prevents an online terminal from booting an
+      // old locally cached POS build and appearing to run in offline mode.
       try {
         const response = await timeoutFetch(request, NAVIGATION_TIMEOUT);
-        if (response.ok && response.type !== 'opaqueredirect') { await cache.put(request, response.clone()); await cacheDocumentAssets(cache, response); return response; }
+        if (response.ok && response.type !== 'opaqueredirect') {
+          await cache.put(request, response.clone());
+          await cache.put(url.pathname, response.clone());
+          await cacheDocumentAssets(cache, response);
+          return response;
+        }
       } catch (_) {}
+      // Only use the local shell after the live server actually failed.
+      const cached = await cache.match(request, { ignoreSearch:true }) || await cache.match(url.pathname, { ignoreSearch:true });
+      if (cached) return cached;
       const rootCached = await cache.match('/');
       if (rootCached) return rootCached;
       const loginCached = await cache.match(OFFLINE_URL);
