@@ -20,7 +20,10 @@ export default async function handler(req, res) {
   const client = axios.create({ timeout: 12000, httpsAgent: getWooHttpsAgent(), validateStatus: () => true, headers: { 'X-BDM-POS-Secret': secret, Accept: 'application/json', 'User-Agent': 'BDM-POS-Core-Diagnostics/1.0' } });
   try {
     const health = await client.get(baseUrl + '/health');
-    checks.push({ label: 'POS → WordPress/Core', ok: health.status === 200, status: health.status === 200 ? 'Verbonden — HTTP 200' : 'HTTP ' + health.status, detail: health.status === 401 ? 'WordPress weigert de POS-secret.' : '' });
+    const healthBody = typeof health.data === 'string' ? health.data : (health.data?.message || health.data?.error || health.data?.code || '');
+    const healthServer = health.headers?.server || '';
+    const healthRay = health.headers?.['cf-ray'] || '';
+    checks.push({ label: 'POS → WordPress/Core', ok: health.status === 200, status: health.status === 200 ? 'Verbonden — HTTP 200' : 'HTTP ' + health.status, detail: [health.status === 401 ? 'Core weigert de secret (401).' : '', health.status === 403 ? '403: verzoek geweigerd vóór of door WordPress. Controleer firewall/WAF/beveiligingsplugin.' : '', String(healthBody).slice(0, 240), healthServer ? 'Server: ' + healthServer : '', healthRay ? 'Cloudflare Ray: ' + healthRay : ''].filter(Boolean).join(' ') });
   } catch (error) {
     checks.push({ label: 'POS → WordPress/Core', ok: false, status: 'Niet bereikbaar', detail: error.code || error.message });
   }
