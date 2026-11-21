@@ -64,9 +64,16 @@ async function claimCommands() {
 
 export default async function handler(req, res) {
   if (!authorized(req)) return res.status(401).json({ success: false, error: 'Unauthorized' });
+  const action = String(req.query.action || '');
+
+  // A probe only validates the shared secret and endpoint availability.
+  // Keep it ahead of ensureTable() so diagnostics never run DDL or touch queue data.
+  if (req.method === 'GET' && action === 'probe') {
+    return res.status(200).json({ success: true, authenticated: true, endpoint: 'reachable', destructive: false });
+  }
+
   try {
     await ensureTable();
-    const action = String(req.query.action || '');
     if (req.method === 'POST' && action === 'enqueue') {
       const commandId = String(req.body?.command_id || '').slice(0, 128);
       const commandAction = String(req.body?.action || '');
@@ -83,9 +90,6 @@ export default async function handler(req, res) {
       );
       const [rows] = await db.query('SELECT command_id, status FROM pos_core_commands WHERE command_id = ? LIMIT 1', [commandId]);
       return res.status(202).json({ success: true, command: rows[0] });
-    }
-    if (req.method === 'GET' && action === 'probe') {
-      return res.status(200).json({ success: true, authenticated: true, queue: 'reachable', destructive: false });
     }
     if (req.method === 'GET' && action === 'pull') {
       const commands = await claimCommands();
