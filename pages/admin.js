@@ -9,8 +9,18 @@ function CoreDiagnosticsPanel() {
   const runTest = async () => {
     setBusy(true); setResult(null);
     try {
-      const response = await fetch('/api/core/diagnostics', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-      setResult(await response.json());
+      const response = await fetch('/api/core/diagnostics', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' }, body: '{}', cache: 'no-store' });
+      const responseText = await response.text();
+      let payload;
+      try {
+        payload = JSON.parse(responseText);
+      } catch (_) {
+        const contentType = response.headers.get('content-type') || 'onbekend content-type';
+        const preview = responseText.replace(/<[^>]*>/g, ' ').replace(/\\s+/g, ' ').trim().slice(0, 180);
+        throw new Error(`Diagnostiek-API gaf geen JSON terug (HTTP ${response.status}, ${contentType}). ${preview || 'Lege serverrespons'}`);
+      }
+      if (!response.ok && !payload.error) payload.error = 'Diagnostiek mislukt (HTTP ' + response.status + ').';
+      setResult(payload);
     } catch (error) { setResult({ success: false, error: error.message || 'Test kon niet worden uitgevoerd.' }); }
     finally { setBusy(false); }
   };
