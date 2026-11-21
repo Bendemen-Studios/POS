@@ -5,7 +5,8 @@
  * Install as a PHP snippet, run everywhere. Configure the two constants below.
  * WordPress initiates all network requests; the POS server never calls the shop.
  *
- * Supported actions: order.create, order.complete, stock.set.
+ * Supported actions: order.complete, stock.set. Order creation remains disabled
+ * until the existing checkout flow is migrated and verified end-to-end.
  * No arbitrary PHP, SQL, URL or WooCommerce REST paths are accepted.
  */
 
