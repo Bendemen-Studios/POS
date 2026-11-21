@@ -98,8 +98,7 @@ final class BDMPOS_Core_Worker {
 				$internal->set_query_params( isset( $payload['params'] ) && is_array( $payload['params'] ) ? $payload['params'] : array() );
 				if ( in_array( $method, array( 'POST', 'PUT', 'PATCH', 'DELETE' ), true ) ) {
 					$body = isset( $payload['body'] ) && is_array( $payload['body'] ) ? $payload['body'] : array();
-					$internal->set_body_params( $body );
-					$internal->set_json_params( $body );
+					$internal->set_body( wp_json_encode( $body ) );
 					$internal->set_header( 'content-type', 'application/json' );
 				}
 				$internal->set_header( 'x_bdm_pos_secret', BDMPOS_Core_Settings::get( 'core_secret' ) );
