@@ -26,6 +26,7 @@ final class BDMPOS_Core_REST {
 
 	private function __construct() {
 		add_action( 'rest_api_init', array( $this, 'register_routes' ) );
+		add_action( 'woocommerce_order_status_completed', array( $this, 'award_pos_order_points' ), 99, 1 );
 	}
 
 	public function register_routes() {
@@ -685,6 +686,51 @@ final class BDMPOS_Core_REST {
 				'read_only'      => true,
 			)
 		);
+	}
+
+	/**
+	 * Preserve the POS earning rule inside Core. Existing legacy bridge hooks
+	 * remain safe because both use the same order metadata as an idempotency guard.
+	 */
+	public function award_pos_order_points( $order_id ) {
+		if ( ! class_exists( 'WC_Points_Rewards_Manager' ) ) {
+			return;
+		}
+		$order = wc_get_order( $order_id );
+		if ( ! $order || 'true' !== (string) $order->get_meta( '_pos_direct_checkout', true ) ) {
+			return;
+		}
+		$customer_id = absint( $order->get_customer_id() );
+		$total       = (float) $order->get_total();
+		if ( ! $customer_id || $total <= 0 ) {
+			return;
+		}
+		$whole  = (int) floor( $total );
+		$cents  = (int) round( ( $total - $whole ) * 100 );
+		$target = $whole + ( $cents >= 51 ? 1 : 0 );
+		if ( $target <= 0 ) {
+			return;
+		}
+		$plugin_earned = max( 0, (int) $order->get_meta( '_wc_points_earned', true ) );
+		$pos_awarded   = max( 0, (int) $order->get_meta( '_bdm_pos_points_awarded', true ) );
+		$missing       = max( 0, $target - max( $plugin_earned, $pos_awarded ) );
+		if ( $missing > 0 ) {
+			$result = WC_Points_Rewards_Manager::increase_points(
+				$customer_id,
+				$missing,
+				'bdm-pos-order-earned',
+				array( 'source' => 'bendemen-pos', 'order_id' => absint( $order_id ), 'target_points' => $target, 'missing_points' => $missing ),
+				absint( $order_id )
+			);
+			if ( ! $result ) {
+				return;
+			}
+			$pos_awarded += $missing;
+		}
+		$order->update_meta_data( '_wc_points_earned', $target );
+		$order->update_meta_data( '_bdm_pos_points_awarded', $pos_awarded );
+		$order->update_meta_data( '_bdm_pos_points_source', 'bendemen-pos' );
+		$order->save();
 	}
 
 	/**
