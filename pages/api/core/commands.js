@@ -17,7 +17,8 @@ async function ensureTable() {
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       claimed_at TIMESTAMP NULL,
       completed_at TIMESTAMP NULL,
-      INDEX idx_status_created (status, created_at)
+      INDEX idx_status_created (status, created_at),
+      INDEX idx_status_claimed (status, claimed_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
 }
@@ -27,6 +28,38 @@ function authorized(req) {
   const supplied = String(req.headers['x-bdm-pos-secret'] || '');
   return secret.length >= 32 && supplied.length === secret.length &&
     crypto.timingSafeEqual(Buffer.from(secret), Buffer.from(supplied));
+}
+
+async function claimCommands() {
+  const connection = await db.getConnection();
+  try {
+    await connection.beginTransaction();
+    // Recover crashed workers after a two-minute lease. Limit retries.
+    await connection.query(`
+      UPDATE pos_core_commands
+      SET status = IF(attempts >= 5, 'failed', 'pending'),
+          last_error = IF(attempts >= 5, 'Worker lease expired after maximum attempts', last_error),
+          claimed_at = NULL
+      WHERE status = 'processing' AND claimed_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL 2 MINUTE)
+    `);
+    const [rows] = await connection.query(
+      "SELECT id, command_id, action, payload FROM pos_core_commands WHERE status = 'pending' AND attempts < 5 ORDER BY id ASC LIMIT 5 FOR UPDATE"
+    );
+    if (rows.length) {
+      const ids = rows.map(row => row.id);
+      await connection.query(
+        "UPDATE pos_core_commands SET status = 'processing', attempts = attempts + 1, claimed_at = UTC_TIMESTAMP() WHERE id IN (?) AND status = 'pending'",
+        [ids]
+      );
+    }
+    await connection.commit();
+    return rows;
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
 }
 
 export default async function handler(req, res) {
@@ -39,9 +72,9 @@ export default async function handler(req, res) {
       const commandAction = String(req.body?.action || '');
       const payload = req.body?.payload;
       if (!/^[a-zA-Z0-9._:-]{8,128}$/.test(commandId) ||
-          !['order.create', 'order.complete', 'stock.set'].includes(commandAction) ||
+          !['order.complete', 'stock.set'].includes(commandAction) ||
           !payload || typeof payload !== 'object' || Array.isArray(payload)) {
-        return res.status(400).json({ success: false, error: 'Invalid command' });
+        return res.status(400).json({ success: false, error: 'Invalid command. Order creation is intentionally disabled until checkout migration is separately tested.' });
       }
       await db.query(
         "INSERT IGNORE INTO pos_core_commands (command_id, action, payload) VALUES (?, ?, ?)",
@@ -51,16 +84,8 @@ export default async function handler(req, res) {
       return res.status(202).json({ success: true, command: rows[0] });
     }
     if (req.method === 'GET' && action === 'pull') {
-      const [rows] = await db.query(
-        "SELECT id, command_id, action, payload FROM pos_core_commands WHERE status = 'pending' ORDER BY id ASC LIMIT 5"
-      );
-      for (const row of rows) {
-        await db.query(
-          "UPDATE pos_core_commands SET status = 'processing', attempts = attempts + 1, claimed_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'pending'",
-          [row.id]
-        );
-      }
-      return res.status(200).json({ success: true, commands: rows });
+      const commands = await claimCommands();
+      return res.status(200).json({ success: true, commands });
     }
     if (req.method === 'POST' && action === 'ack') {
       const commandId = String(req.body?.command_id || '').slice(0, 128);
@@ -68,12 +93,11 @@ export default async function handler(req, res) {
       const result = req.body?.result ?? null;
       const error = String(req.body?.error || '').slice(0, 500);
       if (!commandId) return res.status(400).json({ success: false, error: 'command_id required' });
-      const [rows] = await db.query('SELECT status FROM pos_core_commands WHERE command_id = ? LIMIT 1', [commandId]);
-      if (!rows.length) return res.status(404).json({ success: false, error: 'Command not found' });
-      await db.query(
-        'UPDATE pos_core_commands SET status = ?, result = ?, last_error = ?, completed_at = CURRENT_TIMESTAMP WHERE command_id = ?',
+      const [update] = await db.query(
+        "UPDATE pos_core_commands SET status = ?, result = ?, last_error = ?, completed_at = UTC_TIMESTAMP() WHERE command_id = ? AND status = 'processing'",
         [success ? 'complete' : 'failed', JSON.stringify(result), error || null, commandId]
       );
+      if (!update.affectedRows) return res.status(409).json({ success: false, error: 'Command is not currently processing' });
       return res.status(200).json({ success: true });
     }
     if (req.method === 'GET' && action === 'status') {
