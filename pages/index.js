@@ -214,7 +214,7 @@ export default function POSHome() {
 
         // Preserve any failed item that was temporarily absent from the
         // latest snapshot; never turn a sync failure into data loss.
-        for (const [originalKey, order] of failedOrders.entries()) {
+        for (const order of failedOrders.values()) {
           const retainedKey = getQueueIdentity(order);
           if (!retainedKeys.has(retainedKey)) {
             retainedKeys.add(retainedKey);
