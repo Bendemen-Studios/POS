@@ -139,6 +139,16 @@ final class BDMPOS_Core_Settings {
 		echo '<hr><h2>Synchronisatiestatus</h2><table class="widefat striped" style="max-width:760px"><tbody>';
 		echo '<tr><td><strong>Opdrachtenworker</strong></td><td>' . ( self::has( 'pos_command_url' ) && self::has( 'core_secret' ) ? '<span style="color:green">Geconfigureerd</span>' : '<span style="color:#b32d2e">Nog niet geconfigureerd</span>' ) . '</td></tr>';
 		echo '<tr><td><strong>Laatste worker-run</strong></td><td>' . esc_html( isset( $worker_last_run['at'] ) ? $worker_last_run['at'] . ' — ' . ( ! empty( $worker_last_run['success'] ) ? 'Geslaagd' : 'Mislukt: ' . ( $worker_last_run['message'] ?? '' ) ) : 'Nog niet uitgevoerd' ) . '</td></tr>';
+		if ( ! empty( $worker_last_run['details'] ) && is_array( $worker_last_run['details'] ) ) {
+			echo '<tr><td><strong>Opdrachtfouten</strong></td><td><ul style="margin:0">';
+			foreach ( array_slice( $worker_last_run['details'], 0, 10 ) as $detail ) {
+				$label = isset( $detail['action'] ) ? $detail['action'] : 'onbekend';
+				$type  = isset( $detail['type'] ) ? $detail['type'] : 'fout';
+				$msg   = isset( $detail['message'] ) ? $detail['message'] : 'Geen foutdetails beschikbaar.';
+				echo '<li><code>' . esc_html( $label ) . '</code> (' . esc_html( $type ) . '): ' . esc_html( $msg ) . '</li>';
+			}
+			echo '</ul></td></tr>';
+		}
 		echo '</tbody></table></div>';
 	}
 }
