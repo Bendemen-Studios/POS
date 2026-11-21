@@ -30,8 +30,6 @@ final class BDMPOS_Core_Settings {
 		}
 		$constants = array(
 			'core_secret' => 'BDMPOS_CORE_SECRET',
-			'webhook_url' => 'BDMPOS_CORE_WEBHOOK_URL',
-			'webhook_secret' => 'BDMPOS_CORE_WEBHOOK_SECRET',
 		);
 		$constant = isset( $constants[ $key ] ) ? $constants[ $key ] : '';
 		return $constant && defined( $constant ) ? (string) constant( $constant ) : '';
@@ -63,26 +61,13 @@ final class BDMPOS_Core_Settings {
 		}
 		$core_secret = isset( $_POST['core_secret'] ) ? trim( sanitize_text_field( wp_unslash( $_POST['core_secret'] ) ) ) : '';
 		$pos_command_url = isset( $_POST['pos_command_url'] ) ? esc_url_raw( trim( wp_unslash( $_POST['pos_command_url'] ) ) ) : '';
-		$webhook_secret = isset( $_POST['webhook_secret'] ) ? trim( sanitize_text_field( wp_unslash( $_POST['webhook_secret'] ) ) ) : '';
-		$webhook_url = isset( $_POST['webhook_url'] ) ? esc_url_raw( trim( wp_unslash( $_POST['webhook_url'] ) ) ) : '';
 		if ( '' !== $pos_command_url && 0 !== strpos( $pos_command_url, 'https://' ) ) {
 			$this->redirect( 'invalid_pos_url' );
-		}
-		if ( '' !== $webhook_url && 0 !== strpos( $webhook_url, 'https://' ) ) {
-			$this->redirect( 'invalid_url' );
 		}
 		if ( '' !== $core_secret ) {
 			$settings['core_secret'] = $core_secret;
 		}
-		if ( '' !== $webhook_secret ) {
-			if ( strlen( $webhook_secret ) < 32 ) {
-				$this->redirect( 'short_webhook_secret' );
-			}
-			$settings['webhook_secret'] = $webhook_secret;
-		}
-		if ( '' !== $webhook_url ) {
-			$settings['webhook_url'] = $webhook_url;
-		}
+		unset( $settings['webhook_url'], $settings['webhook_secret'] );
 		if ( '' !== $pos_command_url ) {
 			$settings['pos_command_url'] = $pos_command_url;
 		}
@@ -122,20 +107,15 @@ final class BDMPOS_Core_Settings {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return;
 		}
-		$webhook_url = self::get( 'webhook_url' );
 		$pos_command_url = self::get( 'pos_command_url' );
 		$worker_last_run = get_option( 'bdmpos_core_worker_last_run', array() );
-		$sync_attempt = get_option( 'bdmpos_core_sync_last_attempt', array() );
-		$last_success = get_option( 'bdmpos_core_sync_last_success', '' );
 		$notice = isset( $_GET['bdmpos_notice'] ) ? sanitize_key( wp_unslash( $_GET['bdmpos_notice'] ) ) : '';
 		$messages = array(
 			'saved' => array( 'success', 'Instellingen opgeslagen.' ),
 			'connection_ok' => array( 'success', 'Verbinding met BDM POS Core werkt.' ),
 			'connection_failed' => array( 'error', 'Verbinding mislukt. Controleer de Core-secret en probeer opnieuw.' ),
 			'missing_secret' => array( 'warning', 'Vul eerst de Core API-secret in en sla de instellingen op.' ),
-			'invalid_url' => array( 'error', 'De webhook-URL moet een geldige HTTPS-URL zijn.' ),
 			'invalid_pos_url' => array( 'error', 'De POS-opdrachten-URL moet een geldige HTTPS-URL zijn.' ),
-			'short_webhook_secret' => array( 'error', 'De webhook-secret moet minimaal 32 tekens bevatten.' ),
 		);
 		echo '<div class="wrap"><h1>BDM POS Core</h1>';
 		echo '<p>Beheer hier de beveiligde verbinding tussen WooCommerce en Bendemen POS.</p>';
@@ -149,9 +129,6 @@ final class BDMPOS_Core_Settings {
 		echo '<tr><th scope="row"><label for="bdmpos-core-secret">Core API-secret</label></th><td><input id="bdmpos-core-secret" name="core_secret" type="password" class="regular-text" autocomplete="new-password" placeholder="' . esc_attr( self::has( 'core_secret' ) ? 'Secret opgeslagen — leeg laten om te behouden' : 'Plak hier de Core API-secret' ) . '"><p class="description">Gebruik exact dezelfde waarde als BDMPOS_CORE_SECRET in de POS-serveromgeving. De opgeslagen secret wordt niet opnieuw getoond.</p></td></tr>';
 		echo '</tbody></table><h2>POS-opdrachtenwachtrij</h2><table class="form-table" role="presentation"><tbody>';
 		echo '<tr><th scope="row"><label for="bdmpos-pos-command-url">POS opdrachten-URL</label></th><td><input id="bdmpos-pos-command-url" name="pos_command_url" type="url" class="regular-text" value="' . esc_attr( $pos_command_url ) . '" placeholder="https://jouw-pos-domein/api/core/commands"><p class="description">WordPress haalt opdrachten op bij de POS. De Core API-secret hierboven wordt hiervoor gebruikt. Order-aanmaak blijft uitgeschakeld.</p></td></tr>';
-		echo '</tbody></table><h2>Webhook-synchronisatie</h2><table class="form-table" role="presentation"><tbody>';
-		echo '<tr><th scope="row"><label for="bdmpos-webhook-url">Webhook-URL</label></th><td><input id="bdmpos-webhook-url" name="webhook_url" type="url" class="regular-text" value="' . esc_attr( $webhook_url ) . '" placeholder="https://jouw-pos-domein/api/webhooks/bdmpos-core"><p class="description">HTTPS-adres van de POS-webhookontvanger.</p></td></tr>';
-		echo '<tr><th scope="row"><label for="bdmpos-webhook-secret">Webhook-secret</label></th><td><input id="bdmpos-webhook-secret" name="webhook_secret" type="password" class="regular-text" autocomplete="new-password" placeholder="' . esc_attr( self::has( 'webhook_secret' ) ? 'Secret opgeslagen — leeg laten om te behouden' : 'Minimaal 32 tekens' ) . '"><p class="description">Moet overeenkomen met BDMPOS_CORE_WEBHOOK_SECRET in de POS-serveromgeving.</p></td></tr>';
 		echo '</tbody></table>';
 		submit_button( 'Instellingen opslaan' );
 		echo '</form>';
@@ -162,10 +139,6 @@ final class BDMPOS_Core_Settings {
 		echo '<hr><h2>Synchronisatiestatus</h2><table class="widefat striped" style="max-width:760px"><tbody>';
 		echo '<tr><td><strong>Opdrachtenworker</strong></td><td>' . ( self::has( 'pos_command_url' ) && self::has( 'core_secret' ) ? '<span style="color:green">Geconfigureerd</span>' : '<span style="color:#b32d2e">Nog niet geconfigureerd</span>' ) . '</td></tr>';
 		echo '<tr><td><strong>Laatste worker-run</strong></td><td>' . esc_html( isset( $worker_last_run['at'] ) ? $worker_last_run['at'] . ' — ' . ( ! empty( $worker_last_run['success'] ) ? 'Geslaagd' : 'Mislukt: ' . ( $worker_last_run['message'] ?? '' ) ) : 'Nog niet uitgevoerd' ) . '</td></tr>';
-		echo '<tr><td><strong>Webhook geconfigureerd</strong></td><td>' . ( self::has( 'webhook_url' ) && self::has( 'webhook_secret' ) ? '<span style="color:green">Ja</span>' : '<span style="color:#b32d2e">Nee</span>' ) . '</td></tr>';
-		echo '<tr><td><strong>Laatste succesvolle synchronisatie</strong></td><td>' . esc_html( $last_success ? $last_success : 'Nog geen succesvolle synchronisatie' ) . '</td></tr>';
-		echo '<tr><td><strong>Laatste poging</strong></td><td>' . esc_html( isset( $sync_attempt['at'] ) ? $sync_attempt['at'] : 'Nog geen poging geregistreerd' ) . '</td></tr>';
-		echo '<tr><td><strong>Resultaat laatste poging</strong></td><td>' . esc_html( isset( $sync_attempt['success'] ) ? ( $sync_attempt['success'] ? 'Geslaagd' : 'Mislukt' ) : 'Nog niet getest' ) . '</td></tr>';
 		echo '</tbody></table></div>';
 	}
 }
