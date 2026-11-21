@@ -14,6 +14,7 @@ BDM POS Core is the authenticated server-to-server integration layer between Ben
 | GET | `/wp-json/bdmpos/v1/customers?page=1&per_page=100` | Paginated customer directory; optional `search` |
 | GET | `/wp-json/bdmpos/v1/customers/{id}/points` | Read a customer's points balance |
 | POST | `/wp-json/bdmpos/v1/customers/{id}/points` | Audited manual points addition/removal |
+| POST | `/wp-json/bdmpos/v1/customers/{id}/points/transactions` | Idempotent order-linked points earning/redemption |
 | GET | `/wp-json/bdmpos/v1/stock?page=1&per_page=100` | Read-only stock snapshot for products and variations |
 | GET | `/wp-json/bdmpos/v1/orders?page=1&per_page=50` | Paginated existing orders |
 | POST | `/wp-json/bdmpos/v1/orders/{id}/complete` | Complete an existing order, including pickup completion |
@@ -48,7 +49,7 @@ Mutating requests through the full `/woocommerce` gateway can include a stable `
 - Existing order creation, manual order creation and offline order synchronization now use Core when `BDMPOS_CORE_URL` and `BDMPOS_CORE_SECRET` are configured.
 - Existing order status updates use Core; the pickup API continues to check pickup type and store assignment before completing an order.
 - Catalog, category, customer, stock and order read adapters remain available.
-- Manual points adjustments use WooCommerce Points & Rewards with an audit note and idempotency key. Checkout-linked earning/redemption remains in the existing order-linked flow.
+- Manual points adjustments and order-linked earning/redemption use WooCommerce Points & Rewards through Core. POS earning remains 1 point per full euro, plus 1 point when cents are 51–99. Earn/redeem operations are linked to the WooCommerce order and use stable request IDs and order metadata for idempotency. Core awards points for completed orders marked `_pos_direct_checkout=true`.
 - WooCommerce remains the source of truth. Store exclusions, category rules, POS permissions and checkout logic remain in the POS application.
 
 ## Install on bendemen.com
@@ -62,7 +63,8 @@ define( 'BDMPOS_CORE_SECRET', 'REPLACE_WITH_A_LONG_RANDOM_SECRET' );
 ```
 
 4. Configure `BDMPOS_CORE_URL=https://www.bendemen.com` and the same `BDMPOS_CORE_SECRET` only in the POS server environment.
-5. Test the authenticated health endpoint over HTTPS.
+5. Configure the POS command queue URL under WooCommerce → BDM POS Core if outbound commands are used.
+6. Test the authenticated health endpoint over HTTPS.
 
 All endpoints require `X-BDM-POS-Secret`. Missing configuration fails closed with HTTP 503; invalid credentials receive HTTP 401. The full WooCommerce gateway is server-to-server only and must never be exposed to frontend/browser clients.
 
@@ -78,4 +80,4 @@ All endpoints require `X-BDM-POS-Secret`. Missing configuration fails closed wit
 
 ## Migration
 
-Core routing is opt-in when both server-only environment variables are configured. Existing fallback behavior remains where applicable. Switch modules gradually and verify order creation, offline retries, status updates, stock operations, customer operations and points balances before removing legacy integrations.
+Core routing is opt-in when both server-only environment variables are configured. Pickup order reads and completion require Core and no longer fall back to direct WooCommerce credentials. POS-side pickup/store authorization and offline pickup queue remain in the POS application. Order-linked points balance/earning/redemption and manual adjustments use Core when configured. The legacy WPCode Points & Rewards bridge must be deactivated after Core 0.9.0 is installed and verified; do not run both earning hooks unless relying on their shared metadata guard during the transition. Verify order creation, offline retries, pickup actions, points balances, earning and redemption before removing remaining legacy integrations.
