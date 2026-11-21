@@ -5,6 +5,9 @@
  */
 if ( ! defined( 'ABSPATH' ) ) exit;
 
+// Core 0.10.0+ owns the POS points integration; prevent duplicate hooks/routes.
+if ( defined( 'BDMPOS_CORE_VERSION' ) && version_compare( BDMPOS_CORE_VERSION, '0.10.0', '>=' ) ) return;
+
 /* POS orders are awarded after they become completed. Priority 99 lets the
  * normal Points & Rewards order hook run first; we then top-up only the
  * difference needed to reach the POS earning rule. */
