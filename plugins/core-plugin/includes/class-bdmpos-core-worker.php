@@ -69,11 +69,20 @@ final class BDMPOS_Core_Worker {
 		return wp_remote_request( $url, $args );
 	}
 
+	private function command_payload( $command ) {
+		$payload = isset( $command['payload'] ) ? $command['payload'] : array();
+		if ( is_string( $payload ) ) {
+			$decoded = json_decode( $payload, true );
+			$payload = is_array( $decoded ) ? $decoded : array();
+		}
+		return is_array( $payload ) ? $payload : array();
+	}
+
 	private function execute( $command ) {
 		if ( ! function_exists( 'wc_get_order' ) || ! class_exists( 'WC_Order' ) || ! is_array( $command ) || empty( $command['action'] ) ) {
 			return new WP_Error( 'bdmpos_invalid_command', 'Ongeldige opdracht of WooCommerce niet beschikbaar.' );
 		}
-		$payload = isset( $command['payload'] ) && is_array( $command['payload'] ) ? $command['payload'] : array();
+		$payload = $this->command_payload( $command );
 		switch ( $command['action'] ) {
 			case 'order.complete':
 				$order_id = isset( $payload['order_id'] ) ? absint( $payload['order_id'] ) : 0;
@@ -98,19 +107,31 @@ final class BDMPOS_Core_Worker {
 				$internal->set_query_params( isset( $payload['params'] ) && is_array( $payload['params'] ) ? $payload['params'] : array() );
 				if ( in_array( $method, array( 'POST', 'PUT', 'PATCH', 'DELETE' ), true ) ) {
 					$body = isset( $payload['body'] ) && is_array( $payload['body'] ) ? $payload['body'] : array();
+					if ( isset( $payload['body'] ) && is_string( $payload['body'] ) ) {
+						$decoded_body = json_decode( $payload['body'], true );
+						if ( is_array( $decoded_body ) ) {
+							$body = $decoded_body;
+						}
+					}
+					// rest_do_request does not parse a raw body into get_param().
+					// Without these, the WooCommerce gateway never sees the order.
+					$internal->set_body_params( $body );
+					$internal->set_json_params( $body );
 					$internal->set_body( wp_json_encode( $body ) );
 					$internal->set_header( 'content-type', 'application/json' );
 				}
 				$internal->set_header( 'x_bdm_pos_secret', BDMPOS_Core_Settings::get( 'core_secret' ) );
 				$response = rest_do_request( $internal );
 				if ( is_wp_error( $response ) ) {
-					return new WP_Error( 'bdmpos_core_request_failed', $response->get_error_message() );
+					return array(
+						'http_status' => 500,
+						'data'        => array( 'message' => $response->get_error_message() ),
+					);
 				}
 				$status = $response instanceof WP_REST_Response ? (int) $response->get_status() : 200;
 				$data   = $response instanceof WP_REST_Response ? $response->get_data() : $response;
-				if ( $status < 200 || $status >= 300 ) {
-					$message = is_array( $data ) && ! empty( $data['message'] ) ? sanitize_text_field( $data['message'] ) : 'Interne Core-aanvraag gaf HTTP ' . $status . ' terug.';
-					return new WP_Error( 'bdmpos_core_http_error', $message, array( 'http_status' => $status ) );
+				if ( ! is_array( $data ) ) {
+					$data = array( 'message' => 'Interne Core-aanvraag gaf HTTP ' . $status . ' terug.' );
 				}
 				return array( 'http_status' => $status, 'data' => $data );
 

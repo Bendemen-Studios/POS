@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import db from '../../../lib/db';
 
-export const config = { api: { bodyParser: { sizeLimit: '256kb' } } };
+export const config = { api: { bodyParser: { sizeLimit: '8mb' } } };
 
 async function ensureTable() {
   await db.query(`

@@ -209,9 +209,12 @@ export default async function handler(req, res) {
 
     const { orderItems, paymentMethod, storeId, cashierId, customerId, totals, cashDetails, created_at } = req.body;
 
-    // A client may retry after a timeout even though WooCommerce already created
-    // the order. Always check WooCommerce before creating another order.
-    const existingOrder = await findExistingWooOrder(url, authHeader, clientOrderId);
+    // Queue transport already sends a stable request id. A pre-create search
+    // would wait for a second WordPress poll and blow the cashier timeout.
+    const queueTransport = String(process.env.BDMPOS_CORE_TRANSPORT || 'queue').trim().toLowerCase() !== 'direct';
+    const existingOrder = (useBdmposCore && queueTransport)
+      ? null
+      : await findExistingWooOrder(url, authHeader, clientOrderId);
     if (existingOrder?.id) {
       if (existingOrder.status !== 'completed') {
         throw new Error(`WooCommerce-bestelling #${existingOrder.id} bestaat, maar heeft status '${existingOrder.status || 'onbekend'}'. De bestelling blijft in de wachtrij voor controle.`);
@@ -332,15 +335,20 @@ export default async function handler(req, res) {
     } catch (fetchErr) {
       // Never issue a second WooCommerce POST after an uncertain timeout.
       // The original request may have reached WooCommerce successfully.
-      const existingAfterError = await findExistingWooOrder(url, authHeader, clientOrderId);
+      // On the queue path the same request id is the duplicate guard, so do
+      // not spend another worker cycle searching before telling the till to retry.
+      const existingAfterError = (useBdmposCore && queueTransport)
+        ? null
+        : await findExistingWooOrder(url, authHeader, clientOrderId);
       if (existingAfterError?.id) {
         responseOrder = existingAfterError;
       } else {
-        const message = fetchErr?.name === 'AbortError' || /aborted|abort/i.test(String(fetchErr?.message || ''))
+        const timedOut = fetchErr?.name === 'AbortError' || /aborted|abort|Timeout|nog niet verwerkt|niet bereikbaar|ECONN|ETIMEDOUT/i.test(String(fetchErr?.message || ''));
+        const message = timedOut
           ? 'WooCommerce reageerde te laat tijdens het aanmaken van de bestelling. De bestelling is niet bevestigd; de POS kan veilig opnieuw proberen.'
           : `WooCommerce checkout niet bevestigd: ${fetchErr.message}`;
         const timeoutError = new Error(message);
-        timeoutError.code = 'WOO_CHECKOUT_TIMEOUT';
+        if (timedOut) timeoutError.code = 'WOO_CHECKOUT_TIMEOUT';
         throw timeoutError;
       }
     }
@@ -379,7 +387,9 @@ export default async function handler(req, res) {
         console.error('[CHECKOUT IDEMPOTENCY RELEASE ERROR]:', releaseError.message);
       }
     }
-    console.error('[CHECKOUT API ERROR]:', error?.name || 'Error', error?.message || error, error?.stack || '');
-    return res.status(500).json({ success: false, error: error.message || 'Checkout mislukt.' });
+    const message = error.message || 'Checkout mislukt.';
+    const retryable = error.code === 'WOO_CHECKOUT_TIMEOUT' || /Timeout|nog niet verwerkt|niet bereikbaar|ECONN|ETIMEDOUT|aborted|al verwerkt/i.test(message);
+    console.error('[CHECKOUT API ERROR]:', error?.name || 'Error', message, error?.stack || '');
+    return res.status(retryable ? 503 : 500).json({ success: false, retryable, error: message });
   }
 }

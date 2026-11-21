@@ -1,13 +1,15 @@
 const { createServer } = require("http");
 const next = require("next");
 
-const app = next({ dev: true });
+const dev = process.env.NODE_ENV !== "production";
+const port = Number(process.env.PORT) || 3000;
+const app = next({ dev });
 const handle = app.getRequestHandler();
 
 app.prepare().then(() => {
   createServer((req, res) => {
     handle(req, res);
-  }).listen(3000, "0.0.0.0", () => {
-    console.log("> Live development server ready on http://localhost:3000");
+  }).listen(port, "0.0.0.0", () => {
+    console.log(`> POS server ready on http://localhost:${port} (${dev ? "development" : "production"})`);
   });
 });
