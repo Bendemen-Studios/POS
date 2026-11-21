@@ -81,3 +81,16 @@ All endpoints require `X-BDM-POS-Secret`. Missing configuration fails closed wit
 ## Migration
 
 Core routing is opt-in when both server-only environment variables are configured. Pickup order reads and completion require Core and no longer fall back to direct WooCommerce credentials. POS-side pickup/store authorization and offline pickup queue remain in the POS application. Order-linked points balance/earning/redemption and manual adjustments use Core when configured. The legacy WPCode Points & Rewards bridge must be deactivated after Core 0.9.0 is installed and verified; do not run both earning hooks unless relying on their shared metadata guard during the transition. Verify order creation, offline retries, pickup actions, points balances, earning and redemption before removing remaining legacy integrations.
+
+## Reverse Core API bridge (0.11.0)
+
+The POS host cannot open outbound TCP connections to bendemen.com in this deployment. Core API calls from the POS server are therefore transported through the existing authenticated command queue:
+
+1. The POS server inserts a `core.request` command into its local `pos_core_commands` table.
+2. WordPress polls the POS command endpoint over HTTPS every 15 seconds (WP-Cron), using the configured Core API secret.
+3. The plugin executes the requested internal `/bdmpos/v1/*` REST route inside WordPress with the Core secret attached to the internal request.
+4. WordPress acknowledges the command with the HTTP status and response data. The POS server waits for that acknowledgement and returns the original Core response to its caller.
+
+Only routes inside the `/bdmpos/v1/` namespace are accepted by the worker. The queue remains authenticated, claims are atomic, and the worker never creates WooCommerce orders. Existing `order.complete` and `stock.set` commands remain supported.
+
+The worker is scheduled at 15-second intervals through WP-Cron. As with all WP-Cron events, execution is traffic-triggered unless the site has a real system cron configured to call `wp-cron.php`. Requests waiting for a bridge response time out safely; an already queued command is not silently re-enqueued by the transport helper.
