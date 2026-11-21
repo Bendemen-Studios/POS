@@ -29,7 +29,7 @@ function CoreDiagnosticsPanel() {
     <button onClick={runTest} disabled={busy} className="bg-red-600 disabled:opacity-50 text-white font-bold px-4 py-2 rounded text-sm">{busy ? 'TESTEN...' : 'START CORE-VERBINDINGSTEST'}</button>
     {result && <div className="space-y-2">
       {(result.checks || []).map((row, index) => <div key={index} className="border rounded p-3 flex flex-col gap-1">
-        <span className="font-semibold text-sm">{row.label}</span><span className={row.ok ? 'text-green-700 text-sm font-bold' : 'text-red-700 text-sm font-bold'}>{row.status}</span>
+        <span className="font-semibold text-sm">{row.label}</span><span className={row.ok === null ? 'text-gray-600 text-sm font-bold' : row.ok ? 'text-green-700 text-sm font-bold' : 'text-red-700 text-sm font-bold'}>{row.status}</span>
         {row.detail && <span className="text-xs text-gray-500">{row.detail}</span>}
       </div>)}
       {result.error && <p className="text-red-700 text-sm">{result.error}</p>}
