@@ -144,6 +144,7 @@ final class BDMPOS_Core_Worker {
 			'failed'          => 0,
 			'ack_errors'      => 0,
 			'last_command_id' => '',
+			'details'         => array(),
 		);
 		$last = array(
 			'at'        => gmdate( 'c' ),
@@ -178,6 +179,7 @@ final class BDMPOS_Core_Worker {
 					continue;
 				}
 				$stats['last_command_id'] = $command_id;
+				$command_action = isset( $command['action'] ) ? sanitize_key( $command['action'] ) : 'unknown';
 
 				try {
 					$result = $this->execute( $command );
@@ -186,6 +188,14 @@ final class BDMPOS_Core_Worker {
 				}
 
 				$command_success = ! is_wp_error( $result );
+				if ( ! $command_success ) {
+					$stats['details'][] = array(
+						'command_id' => $command_id,
+						'action'     => $command_action,
+						'type'       => 'execution',
+						'message'    => sanitize_text_field( $result->get_error_message() ),
+					);
+				}
 				$ack = array(
 					'command_id' => $command_id,
 					'success'    => $command_success,
@@ -197,6 +207,12 @@ final class BDMPOS_Core_Worker {
 				$ack_response = $this->request( 'POST', $ack_url, $ack );
 				if ( is_wp_error( $ack_response ) ) {
 					$stats['ack_errors']++;
+					$stats['details'][] = array(
+						'command_id' => $command_id,
+						'action'     => $command_action,
+						'type'       => 'acknowledgement',
+						'message'    => sanitize_text_field( $ack_response->get_error_message() ),
+					);
 					continue;
 				}
 
@@ -204,6 +220,13 @@ final class BDMPOS_Core_Worker {
 				$ack_data = json_decode( wp_remote_retrieve_body( $ack_response ), true );
 				if ( $ack_code < 200 || $ack_code >= 300 || ! is_array( $ack_data ) || empty( $ack_data['success'] ) ) {
 					$stats['ack_errors']++;
+					$ack_message = is_array( $ack_data ) && ! empty( $ack_data['error'] ) ? sanitize_text_field( $ack_data['error'] ) : 'POS bevestigde de opdracht niet.';
+					$stats['details'][] = array(
+						'command_id' => $command_id,
+						'action'     => $command_action,
+						'type'       => 'acknowledgement',
+						'message'    => 'HTTP ' . $ack_code . ': ' . $ack_message,
+					);
 					continue;
 				}
 
@@ -227,6 +250,7 @@ final class BDMPOS_Core_Worker {
 						$stats['ack_errors']
 					),
 				'processed' => $stats,
+				'details'   => array_slice( $stats['details'], 0, 10 ),
 				'duration_ms' => (int) round( ( microtime( true ) - $started ) * 1000 ),
 			);
 		} catch ( Throwable $error ) {
@@ -235,6 +259,7 @@ final class BDMPOS_Core_Worker {
 				'success'     => false,
 				'message'     => sanitize_text_field( $error->getMessage() ),
 				'processed'   => $stats,
+				'details'     => array_slice( $stats['details'], 0, 10 ),
 				'duration_ms' => (int) round( ( microtime( true ) - $started ) * 1000 ),
 			);
 		} finally {
