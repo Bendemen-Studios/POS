@@ -11,7 +11,9 @@ function coreBaseUrl() {
 }
 
 export default async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).json({ success: false, error: 'Method not allowed' });
+  res.setHeader('Cache-Control', 'no-store');
+  if (req.method !== 'POST') { res.setHeader('Allow', 'POST'); return res.status(405).json({ success: false, error: 'Method not allowed' }); }
+  try {
   const baseUrl = coreBaseUrl();
   const secret = process.env.BDMPOS_CORE_SECRET || '';
   const checks = [];
@@ -19,7 +21,7 @@ export default async function handler(req, res) {
     return res.status(200).json({ success: false, checks: [{ label: 'POS-configuratie', ok: false, status: 'Niet goed ingesteld', detail: 'BDMPOS_CORE_URL ontbreekt of BDMPOS_CORE_SECRET is korter dan 32 tekens.' }], checkedAt: new Date().toISOString() });
   }
   try {
-    const health = await executeBdmposCoreViaQueue({ method: 'GET', route: '/bdmpos/v1/health', timeoutMs: 115000 });
+    const health = await executeBdmposCoreViaQueue({ method: 'GET', route: '/bdmpos/v1/health', timeoutMs: 18000 });
     checks.push({ label: 'POS → WordPress/Core via worker', ok: health.status === 200 && health.data?.success === true, status: health.status === 200 ? 'Verbonden via reverse bridge' : 'HTTP ' + health.status, detail: health.data?.service ? 'Core ' + health.data.service + ' v' + health.data.version : '' });
   } catch (error) {
     checks.push({ label: 'POS → WordPress/Core via worker', ok: false, status: 'Niet verwerkt', detail: error.message || 'WordPress-worker heeft de aanvraag niet bevestigd.' });
@@ -40,4 +42,8 @@ export default async function handler(req, res) {
     }
   }
   return res.status(200).json({ success: checks.every(check => check.ok), checks, checkedAt: new Date().toISOString() });
+  } catch (error) {
+    console.error('[CORE DIAGNOSTICS]', error);
+    return res.status(200).json({ success: false, error: error.message || 'Core-diagnostiek kon niet worden uitgevoerd.', checks: [], checkedAt: new Date().toISOString() });
+  }
 }
