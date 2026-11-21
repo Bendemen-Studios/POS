@@ -74,7 +74,7 @@ export default async function handler(req, res) {
       if (!/^[a-zA-Z0-9._:-]{8,128}$/.test(commandId) ||
           !['order.complete', 'stock.set', 'core.request'].includes(commandAction) ||
           !payload || typeof payload !== 'object' || Array.isArray(payload) ||
-          (commandAction === 'core.request' && (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(String(payload.method || 'GET').toUpperCase()) || !/^\\/bdmpos\\/v1\\/[a-zA-Z0-9_/-]+$/.test(String(payload.route || '')) || String(payload.route || '').includes('..')))) {
+          (commandAction === 'core.request' && (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(String(payload.method || 'GET').toUpperCase()) || !String(payload.route || '').startsWith('/bdmpos/v1/') || String(payload.route || '').includes('..')))) {
         return res.status(400).json({ success: false, error: 'Invalid command. Order creation is intentionally disabled until checkout migration is separately tested.' });
       }
       await db.query(
