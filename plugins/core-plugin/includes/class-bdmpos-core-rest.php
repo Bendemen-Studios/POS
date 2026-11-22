@@ -813,10 +813,15 @@ final class BDMPOS_Core_REST {
 		try {
 			$points_balance = max( 0, (int) WC_Points_Rewards_Manager::get_users_points( $customer_id ) );
 		} catch ( Throwable $error ) {
-			$this->log_error( 'Customer points lookup failed.', array(
-				'customer_id' => $customer_id,
-				'error' => $error->getMessage(),
-			) );
+			if ( function_exists( 'wc_get_logger' ) ) {
+				wc_get_logger()->error(
+					'Customer points lookup failed: ' . $error->getMessage(),
+					array(
+						'source' => 'bdmpos-core-customers',
+						'customer_id' => $customer_id,
+					)
+				);
+			}
 			return new WP_Error( 'bdmpos_core_points_lookup_failed', 'Unable to load customer points.', array( 'status' => 500 ) );
 		}
 		return rest_ensure_response(
