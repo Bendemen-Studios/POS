@@ -563,9 +563,28 @@ final class BDMPOS_Core_REST {
 		}
 
 		try {
-			$query = wc_get_customers( array_merge( $args, array( 'paginate' => true ) ) );
-			$customers = is_object( $query ) && isset( $query->customers ) ? $query->customers : array();
-			$total = is_object( $query ) && isset( $query->total ) ? (int) $query->total : count( $customers );
+			$query_args = array_merge( $args, array( 'paginate' => true ) );
+
+			// Some WooCommerce installations do not expose the wc_get_customers()
+			// wrapper even though the underlying customer query class is available.
+			if ( function_exists( 'wc_get_customers' ) ) {
+				$query = wc_get_customers( $query_args );
+				$customers = is_object( $query ) && isset( $query->customers )
+					? $query->customers
+					: ( is_array( $query ) ? $query : array() );
+				$total = is_object( $query ) && isset( $query->total )
+					? (int) $query->total
+					: count( $customers );
+			} elseif ( class_exists( 'WC_Customer_Query' ) ) {
+				$customer_query = new WC_Customer_Query( $query_args );
+				$customers = $customer_query->get_customers();
+				$total = method_exists( $customer_query, 'get_total' )
+					? (int) $customer_query->get_total()
+					: count( $customers );
+			} else {
+				throw new RuntimeException( 'Neither wc_get_customers() nor WC_Customer_Query is available.' );
+			}
+
 			$items = array();
 			foreach ( $customers as $customer ) {
 				if ( $customer instanceof WC_Customer ) {
@@ -585,6 +604,12 @@ final class BDMPOS_Core_REST {
 				)
 			);
 		} catch ( Throwable $error ) {
+			if ( function_exists( 'wc_get_logger' ) ) {
+				wc_get_logger()->error(
+					'Customer query failed: ' . $error->getMessage(),
+					array( 'source' => 'bdmpos-core-customers', 'page' => $page, 'per_page' => $per_page )
+				);
+			}
 			return new WP_Error(
 				'bdmpos_core_customers_failed',
 				'Unable to load WooCommerce customers.',
