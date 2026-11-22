@@ -116,7 +116,7 @@ final class BDMPOS_Core_Settings {
 		wp_nonce_field( 'bdmpos_core_save_settings' );
 		echo '<h2>API-verbinding</h2><table class="form-table" role="presentation"><tbody>';
 		echo '<tr><th scope="row"><label for="bdmpos-core-secret">Core API-secret</label></th><td><input id="bdmpos-core-secret" name="core_secret" type="password" class="regular-text" autocomplete="new-password" placeholder="' . esc_attr( self::has( 'core_secret' ) ? 'Secret opgeslagen — leeg laten om te behouden' : 'Plak hier de Core API-secret' ) . '"><p class="description">Gebruik exact dezelfde waarde als BDMPOS_CORE_SECRET in de POS-serveromgeving. De opgeslagen secret wordt niet opnieuw getoond.</p></td></tr>';
-		echo '</tbody></table>';
+		echo '</tbody></table></form>';
 		echo '<hr><h2>Verbindingscontrole</h2><p>Test of WordPress de Core API met de ingestelde secret kan bereiken.</p><form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '"><input type="hidden" name="action" value="bdmpos_core_test_connection">';
 		wp_nonce_field( 'bdmpos_core_test_connection' );
 		submit_button( 'Test verbinding', 'secondary', 'submit', false );
