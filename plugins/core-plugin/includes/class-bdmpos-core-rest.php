@@ -345,10 +345,10 @@ final class BDMPOS_Core_REST {
 			$internal = new WP_REST_Request( $method, '/wc/v3' . $path );
 			$internal->set_query_params( $params );
 			if ( in_array( $method, array( 'POST', 'PUT', 'PATCH' ), true ) ) {
-				$internal->set_body_params( $body );
+				// WP_REST_Request parses JSON lazily via get_json_params().
+				// parse_json_params() is protected and must not be called here.
 				$internal->set_body( wp_json_encode( $body ) );
 				$internal->set_header( 'content-type', 'application/json' );
-				$internal->parse_json_params();
 			}
 			$response = rest_do_request( $internal );
 			if ( is_wp_error( $response ) ) {
