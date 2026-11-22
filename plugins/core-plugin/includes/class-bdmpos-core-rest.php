@@ -801,18 +801,29 @@ final class BDMPOS_Core_REST {
 	/** Read-only customer points balance; no points can be earned or redeemed here. */
 	public function customer_points( WP_REST_Request $request ) {
 		$customer_id = absint( $request->get_param( 'id' ) );
-		$customer = $customer_id ? wc_get_customer( $customer_id ) : false;
-		if ( ! $customer ) {
+		// Points & Rewards stores balances against WordPress user IDs. A valid
+		// registered WordPress user does not need a WC_Customer object or a
+		// customer role to have a points balance.
+		if ( ! $customer_id || ! get_userdata( $customer_id ) ) {
 			return new WP_Error( 'bdmpos_core_customer_not_found', 'Customer not found.', array( 'status' => 404 ) );
 		}
 		if ( ! class_exists( 'WC_Points_Rewards_Manager' ) ) {
 			return new WP_Error( 'bdmpos_core_points_unavailable', 'WooCommerce Points & Rewards is not active.', array( 'status' => 503 ) );
 		}
+		try {
+			$points_balance = max( 0, (int) WC_Points_Rewards_Manager::get_users_points( $customer_id ) );
+		} catch ( Throwable $error ) {
+			$this->log_error( 'Customer points lookup failed.', array(
+				'customer_id' => $customer_id,
+				'error' => $error->getMessage(),
+			) );
+			return new WP_Error( 'bdmpos_core_points_lookup_failed', 'Unable to load customer points.', array( 'status' => 500 ) );
+		}
 		return rest_ensure_response(
 			array(
 				'success'        => true,
 				'customer_id'    => $customer_id,
-				'points_balance' => max( 0, (int) WC_Points_Rewards_Manager::get_users_points( $customer_id ) ),
+				'points_balance' => $points_balance,
 				'read_only'      => true,
 			)
 		);
