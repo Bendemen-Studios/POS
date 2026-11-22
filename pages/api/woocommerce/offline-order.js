@@ -172,17 +172,26 @@ export default async function handler(req, res) {
 
     return res.status(200).json({ success: true, order: responseOrder, pointsSyncPending, pointsResult });
   } catch (error) {
-    if (claimed) {
+    const httpStatus = Number(error?.response?.status || 0);
+    const uncertainRemoteResult = httpStatus === 409 || httpStatus >= 500 ||
+      ['ECONNABORTED', 'ETIMEDOUT', 'ECONNRESET'].includes(String(error?.code || '')) ||
+      /timeout|timed out|socket hang up|uncertain result|already being processed/i.test(String(error?.message || ''));
+
+    // Never release a claim after an uncertain remote write: WooCommerce may
+    // already have created the order. Keep the same clientOrderId for recovery.
+    if (claimed && !uncertainRemoteResult) {
       try { await releaseOrder(clientOrderId); } catch (releaseError) {
         console.error('[OFFLINE IDEMPOTENCY RELEASE ERROR]:', releaseError.message);
       }
     }
 
     console.error('[OFFLINE ORDER SYNC ERROR]:', error?.response?.data || error.message);
-    return res.status(500).json({
+    return res.status(uncertainRemoteResult ? 503 : 500).json({
       success: false,
       retryable: true,
-      error: error?.response?.data?.message || error.message || 'Fout bij verwerken van offline bestelling.'
+      error: uncertainRemoteResult
+        ? 'De status van de offline bestelling is onzeker. De opdracht blijft geblokkeerd om dubbele orders te voorkomen.'
+        : (error?.response?.data?.message || error.message || 'Fout bij verwerken van offline bestelling.')
     });
   }
 }
