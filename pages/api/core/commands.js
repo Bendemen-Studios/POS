@@ -34,13 +34,14 @@ async function claimCommands() {
   const connection = await db.getConnection();
   try {
     await connection.beginTransaction();
-    // Recover crashed workers after a two-minute lease. Limit retries.
+    // Recover crashed workers after a five-minute lease. This exceeds the worker lock
+    // and gives slow WooCommerce operations time to finish before a command is reclaimed.
     await connection.query(`
       UPDATE pos_core_commands
       SET status = IF(attempts >= 5, 'failed', 'pending'),
           last_error = IF(attempts >= 5, 'Worker lease expired after maximum attempts', last_error),
           claimed_at = NULL
-      WHERE status = 'processing' AND claimed_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL 2 MINUTE)
+      WHERE status = 'processing' AND claimed_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL 5 MINUTE)
     `);
     const [rows] = await connection.query(
       "SELECT id, command_id, action, payload FROM pos_core_commands WHERE status = 'pending' AND attempts < 5 ORDER BY id ASC LIMIT 5 FOR UPDATE"
