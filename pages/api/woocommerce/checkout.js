@@ -26,37 +26,70 @@ async function fetchWithTimeout(url, options, timeoutMs = 15000) {
 
 async function findExistingWooOrder(url, authHeader, clientOrderId) {
   const targetId = String(clientOrderId).slice(0, 128);
-  let orders;
 
-  // Prefer the authenticated Core gateway: the direct VPS-to-webshop route
-  // is currently timing out before an HTTP connection can be established.
+  // The Core REST adapter exposes a paginated orders endpoint. Its response
+  // is wrapped in { success, orders, total_pages }; the generic Woo gateway
+  // instead wraps the native wc/v3 response in { success, data }.
+  // Use the dedicated endpoint first so its response contract is explicit.
   if (process.env.BDMPOS_CORE_URL && process.env.BDMPOS_CORE_SECRET) {
-    const result = await callBdmposWooApi({
-      method: 'GET',
-      path: '/orders',
-      params: { per_page: 100, orderby: 'date', order: 'desc' }
-    });
-    orders = result.data;
-  } else {
-    const query = new URLSearchParams({ per_page: '100', orderby: 'date', order: 'desc' });
-    const response = await fetchWithTimeout(
-      url + '/wp-json/wc/v3/orders?' + query.toString(),
-      {
-        method: 'GET',
-        headers: {
-          Authorization: authHeader,
-          'User-Agent': 'BDM-POS-Server/1.0',
-          Connection: 'close',
+    const baseUrl = String(process.env.BDMPOS_CORE_URL).trim().replace(/\\/+$/, '');
+    const coreBase = /\\/wp-json\\/bdmpos\\/v1$/i.test(baseUrl)
+      ? baseUrl
+      : (/\\/wp-json$/i.test(baseUrl) ? baseUrl + '/bdmpos/v1' : baseUrl + '/wp-json/bdmpos/v1');
+
+    for (let page = 1; page <= 100; page += 1) {
+      const response = await fetchWithTimeout(
+        coreBase + '/orders?' + new URLSearchParams({ page: String(page), per_page: '100' }).toString(),
+        {
+          method: 'GET',
+          headers: {
+            'X-BDM-POS-Secret': process.env.BDMPOS_CORE_SECRET,
+            Accept: 'application/json',
+            'User-Agent': 'BDM-POS-Server/1.0',
+            Connection: 'close',
+          },
         },
-      },
-      20000
-    );
-    if (!response.ok) {
-      throw new Error('WooCommerce kon bestaande bestellingen niet controleren (HTTP ' + response.status + ').');
+        20000
+      );
+      const text = await response.text();
+      let payload;
+      try { payload = JSON.parse(text); } catch (_) {
+        throw new Error('BDM POS Core gaf geen geldige JSON terug bij het controleren van bestaande bestellingen.');
+      }
+      if (!response.ok || payload?.success !== true || !Array.isArray(payload.orders)) {
+        throw new Error(payload?.message || 'BDM POS Core kon bestaande bestellingen niet controleren (HTTP ' + response.status + ').');
+      }
+      const match = payload.orders.find(order =>
+        Array.isArray(order?.meta_data) &&
+        order.meta_data.some(meta =>
+          String(meta?.key || '') === '_pos_client_order_id' &&
+          String(meta?.value || '') === targetId
+        )
+      );
+      if (match) return match;
+      const totalPages = Math.max(1, Number(payload.total_pages || 1));
+      if (page >= totalPages || payload.orders.length === 0) break;
     }
-    orders = await response.json();
+    return null;
   }
 
+  const query = new URLSearchParams({ per_page: '100', orderby: 'date', order: 'desc' });
+  const response = await fetchWithTimeout(
+    url + '/wp-json/wc/v3/orders?' + query.toString(),
+    {
+      method: 'GET',
+      headers: {
+        Authorization: authHeader,
+        'User-Agent': 'BDM-POS-Server/1.0',
+        Connection: 'close',
+      },
+    },
+    20000
+  );
+  if (!response.ok) {
+    throw new Error('WooCommerce kon bestaande bestellingen niet controleren (HTTP ' + response.status + ').');
+  }
+  const orders = await response.json();
   if (!Array.isArray(orders)) {
     throw new Error('WooCommerce gaf een ongeldige lijst met bestaande bestellingen terug.');
   }
@@ -68,7 +101,6 @@ async function findExistingWooOrder(url, authHeader, clientOrderId) {
     )
   ) || null;
 }
-
 async function verifyWooOrder(url, authHeader, wooOrderId) {
   try {
     if (process.env.BDMPOS_CORE_URL && process.env.BDMPOS_CORE_SECRET) {
