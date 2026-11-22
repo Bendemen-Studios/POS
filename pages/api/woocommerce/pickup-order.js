@@ -24,9 +24,10 @@ function isPickupOrder(order) {
 function matchesPickupId(order, pickupId) {
   if (!pickupId) return false;
   const expected = String(pickupId);
+  const lines = [...(Array.isArray(order.shipping_lines) ? order.shipping_lines : []), ...(Array.isArray(order.line_items) ? order.line_items : [])];
   const metadata = [
     ...(Array.isArray(order.meta_data) ? order.meta_data : []),
-    ...(Array.isArray(order.shipping_lines) ? order.shipping_lines.flatMap(line => Array.isArray(line.meta_data) ? line.meta_data : []) : []),
+    ...lines.flatMap(line => Array.isArray(line.meta_data) ? line.meta_data : []),
   ];
   return metadata.some(meta => {
     const key = String(meta.key || '').toLowerCase();
@@ -34,29 +35,20 @@ function matchesPickupId(order, pickupId) {
   });
 }
 
-async function getOrdersForStatus(status) {
+async function getOpenPickupOrders() {
   if (!process.env.BDMPOS_CORE_URL || !process.env.BDMPOS_CORE_SECRET) {
     throw new Error('BDM POS Core is niet geconfigureerd; afhaalbestellingen worden niet rechtstreeks via WooCommerce benaderd.');
   }
-  const perPage = 100;
-  const first = await callBdmposWooApi({
+  // Paid online pickup orders wait in processing. One recent page is enough
+  // for the counter; walking every page is what made this list time out.
+  const statuses = ['processing', 'on-hold'];
+  const pages = await Promise.all(statuses.map(status => callBdmposWooApi({
     method: 'GET',
     path: '/orders',
-    params: { per_page: perPage, page: 1, status, orderby: 'date', order: 'desc' }
-  });
-  const firstOrders = Array.isArray(first.data) ? first.data : [];
-  const totalPages = Math.min(100, Math.max(1, Number(first.headers?.['x-wp-totalpages'] || 1)));
-  const pages = [];
-  for (let startPage = 2; startPage <= totalPages; startPage += 3) {
-    const batch = Array.from({ length: Math.min(3, totalPages - startPage + 1) }, (_, index) => startPage + index);
-    const responses = await Promise.all(batch.map(page => callBdmposWooApi({
-      method: 'GET',
-      path: '/orders',
-      params: { per_page: perPage, page, status, orderby: 'date', order: 'desc' }
-    })));
-    pages.push(...responses.map(response => Array.isArray(response.data) ? response.data : []));
-  }
-  return firstOrders.concat(...pages);
+    params: { per_page: 50, page: 1, status, orderby: 'date', order: 'desc' },
+    timeoutMs: 20000,
+  })));
+  return pages.flatMap(page => Array.isArray(page.data) ? page.data : []);
 }
 
 export default async function handler(req, res) {
@@ -104,14 +96,10 @@ export default async function handler(req, res) {
       const pickup_id = req.query?.pickup_id ? String(req.query.pickup_id) : null;
       res.setHeader('Cache-Control', 'private, no-store, max-age=0, must-revalidate');
 
-      const [pendingOrders, processingOrders, onHoldOrders] = await Promise.all([
-        getOrdersForStatus('pending'),
-        getOrdersForStatus('processing'),
-        getOrdersForStatus('on-hold'),
-      ]);
+      const openOrders = await getOpenPickupOrders();
 
       const byId = new Map();
-      [...pendingOrders, ...processingOrders, ...onHoldOrders].forEach((order) => {
+      openOrders.forEach((order) => {
         if (order?.id) byId.set(String(order.id), order);
       });
 
@@ -167,32 +155,21 @@ export default async function handler(req, res) {
         if (!allowed) return sendApiError(res, 403, 'Deze afhaalbestelling hoort niet bij jouw filiaal.');
       }
 
-      const paymentMethod = String((req.body || {}).payment_method || 'cash');
-      if (!['cash', 'manual_pin', 'sumup'].includes(paymentMethod)) {
-        return sendApiError(res, 400, 'Kies contant, pin of SumUp om deze afhaalbestelling af te rekenen.');
-      }
-      const paymentTitles = {
-        cash: 'Contant (Afhalen)',
-        manual_pin: 'Pin (Afhalen)',
-        sumup: 'SumUp (Afhalen)'
-      };
-      const paid = await callBdmposWooApi({
+      const collected = await callBdmposWooApi({
         method: 'PUT',
         path: `/orders/${encodeURIComponent(String(order_id))}`,
         data: {
-          status: 'completed',
-          set_paid: true,
-          payment_method: paymentMethod,
-          payment_method_title: paymentTitles[paymentMethod]
+          status: 'completed'
         },
-        requestId: `pickup-${order_id}-${paymentMethod}`
+        requestId: `pickup-collected-${order_id}`,
+        timeoutMs: 20000,
       });
-      const completedOrder = paid.data;
+      const completedOrder = collected.data;
 
       return res.status(200).json({
         success: true,
         order: completedOrder,
-        message: 'Afhaalbestelling succesvol afgerond!',
+        message: 'Afhaalbestelling gemarkeerd als opgehaald.',
       });
     } catch (error) {
       console.error('WooCommerce Update Order Error:', error.response?.data || error.message);

@@ -171,6 +171,10 @@ export default async function handler(req, res) {
       Math.round(discountAmount * 100) + Math.round(pointsDiscount * 100) > Math.round(subtotal * 100)) {
     return res.status(400).json({ success: false, error: 'De korting is ongeldig of hoger dan het bestelbedrag.' });
   }
+  const pointsUsed = Number(totals.pointsUsed || 0);
+  if (!Number.isInteger(pointsUsed) || pointsUsed < 0 || pointsUsed > 100) {
+    return res.status(400).json({ success: false, error: 'Je kunt per bestelling tussen 0 en 100 punten inwisselen. 100 punten is €5.' });
+  }
 
   try {
     const claim = await claimOrder(clientOrderId);
@@ -319,7 +323,8 @@ export default async function handler(req, res) {
           method: 'POST',
           path: '/orders',
           data: orderData,
-          requestId: clientOrderId
+          requestId: clientOrderId,
+          timeoutMs: 20000
         });
         responseOrder = result.data;
       } else {

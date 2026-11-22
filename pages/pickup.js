@@ -107,7 +107,7 @@ export default function PickupDashboard() {
     localStorage.setItem('pos_cached_pickup_orders_' + String(selectedStore?.id || selectedStore?.store_id || 1), JSON.stringify(updatedOrders));
 
     try {
-      await axios.put('/api/woocommerce/pickup-order', { order_id: orderId, status: 'completed' });
+      await axios.put('/api/woocommerce/pickup-order', { order_id: orderId, status: 'completed' }, { timeout: 25000 });
     } catch (err) {
       console.warn('Server niet bereikbaar. Actie opgeslagen in offline wachtrij.');
       
@@ -119,9 +119,24 @@ export default function PickupDashboard() {
     }
   };
 
-  const filteredOrders = orders.filter(o => {
+  const pickupMeta = (order) => {
+    const lines = [...(order?.shipping_lines || []), ...(order?.line_items || [])];
+    return [...(order?.meta_data || []), ...lines.flatMap(line => line?.meta_data || [])];
+  };
+  const pickupLocationId = (order) => {
+    const match = pickupMeta(order).find(meta => /pickup_location_id$/i.test(String(meta?.key || '')));
+    return match ? String(match.value ?? '') : '';
+  };
+  const pickupLocationName = (order) => {
+    const match = pickupMeta(order).find(meta => /pickup_location_name$|^pickup location$/i.test(String(meta?.key || '')));
+    if (match?.value) return String(match.value);
+    const id = pickupLocationId(order);
+    return id ? `Locatie ${id}` : (order?.shipping_lines?.[0]?.method_title || 'Lokale afhaling');
+  };
+  const filteredOrders = orders.filter(order => {
     if (!selectedStore?.pickup_id) return true;
-    return o.shipping_lines?.some(s => s.meta_data?.some(m => m.key === 'pickup_location_id' && String(m.value) === String(selectedStore.pickup_id)));
+    const id = pickupLocationId(order);
+    return !id || id === String(selectedStore.pickup_id);
   });
 
   return (
@@ -142,6 +157,7 @@ export default function PickupDashboard() {
             <tr className="bg-gray-50 text-left">
               <th className="p-3">Order</th>
               <th className="p-3">Klant</th>
+              <th className="p-3">Afhaallocatie</th>
               <th className="p-3">Artikelen</th>
               <th className="p-3 text-right">Actie</th>
             </tr>
@@ -149,7 +165,7 @@ export default function PickupDashboard() {
           <tbody className="divide-y">
             {filteredOrders.length === 0 ? (
               <tr>
-                <td colSpan="4" className="p-6 text-center text-gray-400">
+                <td colSpan="5" className="p-6 text-center text-gray-400">
                   Geen openstaande afhaalbestellingen gevonden.
                 </td>
               </tr>
@@ -161,6 +177,7 @@ export default function PickupDashboard() {
                     <div className="font-semibold">{o.billing?.first_name} {o.billing?.last_name}</div>
                     <div className="text-[10px] text-gray-400">{o.billing?.email}</div>
                   </td>
+                  <td className="p-3 font-semibold">📍 {pickupLocationName(o)}</td>
                   <td className="p-3 text-gray-600 max-w-xs truncate">
                     {o.line_items?.map(i => `${i.quantity}x ${i.name}`).join(', ')}
                   </td>
