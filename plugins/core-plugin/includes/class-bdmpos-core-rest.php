@@ -254,9 +254,6 @@ final class BDMPOS_Core_REST {
 				$replay->header( 'X-BDM-POS-Idempotent-Replay', 'true' );
 				return $replay;
 			}
-			if ( is_array( $stored ) && isset( $stored['status'] ) && 'processing' === $stored['status'] ) {
-				return new WP_Error( 'bdmpos_core_request_processing', 'This request ID is already being processed or had an uncertain result. Do not retry with a new request ID.', array( 'status' => 409 ) );
-			}
 		}
 		$service_users = get_users( array( 'role' => 'administrator', 'fields' => 'ID', 'number' => 20 ) );
 		$service_user_id = 0;
@@ -268,6 +265,68 @@ final class BDMPOS_Core_REST {
 		}
 		if ( ! $service_user_id ) {
 			return new WP_Error( 'bdmpos_core_service_user_missing', 'Create or enable a WordPress administrator account with WooCommerce management permissions for Core operations.', array( 'status' => 503 ) );
+		}
+
+		// Recover an order after a timed-out/failed response before returning 409.
+		// A lock is only reclaimed after five minutes and only after WooCommerce
+		// successfully confirms that no order with this client request ID exists.
+		if ( '' !== $idempotency_option ) {
+			$stored = get_option( $idempotency_option, false );
+			if ( is_array( $stored ) && isset( $stored['status'] ) && 'processing' === $stored['status'] ) {
+				$created_at = isset( $stored['created_at'] ) ? absint( $stored['created_at'] ) : time();
+				if ( time() - $created_at < 300 ) {
+					return new WP_Error( 'bdmpos_core_request_processing', 'This request ID is already being processed. Retry the same request ID after the current request finishes.', array( 'status' => 409 ) );
+				}
+				$previous_user_id = get_current_user_id();
+				try {
+					wp_set_current_user( $service_user_id );
+					$matches = wc_get_orders( array(
+						'limit' => 1,
+						'return' => 'objects',
+						'meta_query' => array(
+							array(
+								'key' => '_pos_client_order_id',
+							'value' => $request_id,
+							'compare' => '=',
+						),
+						),
+					) );
+					if ( ! is_array( $matches ) ) {
+						throw new RuntimeException( 'WooCommerce returned an invalid idempotency recovery query.' );
+					}
+					if ( ! empty( $matches ) && $matches[0] instanceof WC_Order ) {
+						$recovery_request = new WP_REST_Request( 'GET', '/wc/v3/orders/' . $matches[0]->get_id() );
+						$recovery_response = rest_do_request( $recovery_request );
+						if ( is_wp_error( $recovery_response ) ) {
+							throw new RuntimeException( $recovery_response->get_error_message() );
+						}
+						$recovery_status = $recovery_response instanceof WP_REST_Response ? $recovery_response->get_status() : 200;
+						$recovery_data = $recovery_response instanceof WP_REST_Response ? $recovery_response->get_data() : $recovery_response;
+						if ( $recovery_status < 200 || $recovery_status >= 300 || ! is_array( $recovery_data ) || empty( $recovery_data['id'] ) ) {
+							throw new RuntimeException( 'WooCommerce could not serialize the existing order during idempotency recovery.' );
+						}
+						$replay_data = array( 'success' => true, 'data' => $recovery_data );
+						update_option( $idempotency_option, array(
+							'status' => 'complete',
+							'http_status' => $recovery_status,
+							'data' => $replay_data,
+							'headers' => array(),
+							'completed_at' => time(),
+					), false );
+						$replay = rest_ensure_response( $replay_data );
+						$replay->set_status( $recovery_status );
+						$replay->header( 'X-BDM-POS-Idempotent-Replay', 'true' );
+						return $replay;
+					}
+					// The lookup completed successfully and found no matching order:
+					// releasing this expired lock is safe; the same request ID can retry.
+					delete_option( $idempotency_option );
+				} catch ( Throwable $recovery_error ) {
+					return new WP_Error( 'bdmpos_core_idempotency_recovery_failed', 'WooCommerce could not safely verify the previous order attempt. The request remains locked; retry with the same request ID.', array( 'status' => 503 ) );
+				} finally {
+					wp_set_current_user( $previous_user_id );
+				}
+			}
 		}
 		if ( '' !== $idempotency_option && ! add_option( $idempotency_option, array( 'status' => 'processing', 'created_at' => time() ), '', false ) ) {
 			$stored = get_option( $idempotency_option, false );
