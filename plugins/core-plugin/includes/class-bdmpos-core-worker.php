@@ -22,6 +22,9 @@ final class BDMPOS_Core_Worker {
 	private function __construct() {
 		add_filter( 'cron_schedules', array( $this, 'cron_schedules' ) );
 		add_action( 'init', array( $this, 'schedule' ) );
+		add_action( 'init', array( $this, 'kick_from_traffic' ), 20 );
+		add_action( 'wp_ajax_bdmpos_core_kick', array( $this, 'ajax_kick' ) );
+		add_action( 'wp_ajax_nopriv_bdmpos_core_kick', array( $this, 'ajax_kick' ) );
 		add_action( self::HOOK, array( $this, 'process' ) );
 	}
 
@@ -55,7 +58,7 @@ final class BDMPOS_Core_Worker {
 		}
 		$args = array(
 			'method'      => $method,
-			'timeout'     => 20,
+			'timeout'     => 45,
 			'redirection' => 0,
 			'headers'     => array(
 				'X-BDM-POS-Secret' => BDMPOS_Core_Settings::get( 'core_secret' ),
@@ -148,6 +151,38 @@ final class BDMPOS_Core_Worker {
 			default:
 				return new WP_Error( 'bdmpos_unsupported_command', 'Deze opdracht wordt niet ondersteund.' );
 		}
+	}
+
+	public function kick_from_traffic() {
+		if ( wp_doing_ajax() || wp_doing_cron() || ( defined( 'REST_REQUEST' ) && REST_REQUEST ) || ! $this->configured() ) {
+			return;
+		}
+		if ( get_transient( 'bdmpos_core_worker_kick' ) ) {
+			return;
+		}
+		set_transient( 'bdmpos_core_worker_kick', 1, 15 );
+		wp_remote_post(
+			admin_url( 'admin-ajax.php' ),
+			array(
+				'timeout'   => 0.01,
+				'blocking'  => false,
+				'sslverify' => false,
+				'headers'   => array(
+					'X-BDM-POS-Secret' => BDMPOS_Core_Settings::get( 'core_secret' ),
+				),
+				'body'      => array( 'action' => 'bdmpos_core_kick' ),
+			)
+		);
+	}
+
+	public function ajax_kick() {
+		$secret   = (string) BDMPOS_Core_Settings::get( 'core_secret' );
+		$supplied = isset( $_SERVER['HTTP_X_BDM_POS_SECRET'] ) ? (string) $_SERVER['HTTP_X_BDM_POS_SECRET'] : '';
+		if ( strlen( $secret ) < 32 || strlen( $secret ) !== strlen( $supplied ) || ! hash_equals( $secret, $supplied ) ) {
+			wp_die( 'Unauthorized', '', array( 'response' => 401 ) );
+		}
+		$this->process();
+		wp_die( 'ok' );
 	}
 
 	public function process() {

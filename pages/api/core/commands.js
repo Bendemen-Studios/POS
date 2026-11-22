@@ -52,7 +52,7 @@ async function claimCommands() {
           completed_at = UTC_TIMESTAMP()
       WHERE status = 'pending'
         AND action = 'core.request'
-        AND created_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL 30 SECOND)
+        AND created_at < DATE_SUB(NOW(), INTERVAL 3 MINUTE)
         AND JSON_UNQUOTE(JSON_EXTRACT(payload, '$.method')) = 'GET'
     `);
     const [rows] = await connection.query(
