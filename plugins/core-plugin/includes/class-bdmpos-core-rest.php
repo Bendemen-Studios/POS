@@ -239,7 +239,10 @@ final class BDMPOS_Core_REST {
 		}
 		if ( ! is_array( $params ) ) { $params = array(); }
 		if ( ! is_array( $body ) ) { $body = array(); }
-		$request_id = sanitize_text_field( (string) $request->get_param( 'request_id' ) );
+		$request_id = substr( sanitize_text_field( (string) $request->get_param( 'request_id' ) ), 0, 128 );
+		if ( 'POST' === $method && '/orders' === $path && '' === $request_id ) {
+			return new WP_Error( 'bdmpos_core_order_request_id_required', 'A stable request_id is required for order creation.', array( 'status' => 400 ) );
+		}
 		$idempotency_option = '';
 		if ( '' !== $request_id && in_array( $method, array( 'POST', 'PUT', 'PATCH', 'DELETE' ), true ) ) {
 			$idempotency_option = 'bdmpos_core_idem_' . hash( 'sha256', $method . '|' . $path . '|' . $request_id );
@@ -289,10 +292,11 @@ final class BDMPOS_Core_REST {
 			}
 			$response = rest_do_request( $internal );
 			if ( is_wp_error( $response ) ) {
-				// A WooCommerce REST validation/routing error is a known rejection,
-				// not an uncertain write. Release the idempotency key so a corrected
-				// request can be retried; 5xx responses below remain locked.
-				if ( '' !== $idempotency_option ) {
+				// Release only an explicit 4xx rejection. A WP_Error without a
+				// definite client-error status may have an uncertain write result.
+				$error_data = $response->get_error_data();
+				$error_status = is_array( $error_data ) && isset( $error_data['status'] ) ? absint( $error_data['status'] ) : 0;
+				if ( '' !== $idempotency_option && $error_status >= 400 && $error_status < 500 ) {
 					delete_option( $idempotency_option );
 				}
 				return $response;
@@ -309,8 +313,14 @@ final class BDMPOS_Core_REST {
 					$replay_headers[ $header_name ] = $header_value;
 				}
 			}
-			if ( '' !== $idempotency_option && $status < 500 ) {
-				update_option( $idempotency_option, array( 'status' => 'complete', 'http_status' => $status, 'data' => array( 'success' => $status >= 200 && $status < 300, 'data' => $data ), 'headers' => $replay_headers, 'completed_at' => time() ), false );
+			if ( '' !== $idempotency_option ) {
+				if ( $status >= 200 && $status < 300 ) {
+					update_option( $idempotency_option, array( 'status' => 'complete', 'http_status' => $status, 'data' => array( 'success' => true, 'data' => $data ), 'headers' => $replay_headers, 'completed_at' => time() ), false );
+				} elseif ( $status >= 400 && $status < 500 ) {
+					// A definite 4xx response means the create was rejected.
+					delete_option( $idempotency_option );
+				}
+				// Keep 5xx results marked as processing: the remote write may have succeeded.
 			}
 			return $wrapped;
 		} catch ( Throwable $error ) {
