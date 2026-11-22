@@ -32,10 +32,10 @@ async function findExistingWooOrder(url, authHeader, clientOrderId) {
   // instead wraps the native wc/v3 response in { success, data }.
   // Use the dedicated endpoint first so its response contract is explicit.
   if (process.env.BDMPOS_CORE_URL && process.env.BDMPOS_CORE_SECRET) {
-    const baseUrl = String(process.env.BDMPOS_CORE_URL).trim().replace(/\\/+$/, '');
-    const coreBase = /\\/wp-json\\/bdmpos\\/v1$/i.test(baseUrl)
-      ? baseUrl
-      : (/\\/wp-json$/i.test(baseUrl) ? baseUrl + '/bdmpos/v1' : baseUrl + '/wp-json/bdmpos/v1');
+    const configuredBase = String(process.env.BDMPOS_CORE_URL).trim().replace(/\/+$/, '');
+    const coreBase = /\/wp-json\/bdmpos\/v1$/i.test(configuredBase)
+      ? configuredBase
+      : (/\/wp-json$/i.test(configuredBase) ? configuredBase + '/bdmpos/v1' : configuredBase + '/wp-json/bdmpos/v1');
 
     for (let page = 1; page <= 100; page += 1) {
       const response = await fetchWithTimeout(
@@ -368,8 +368,15 @@ export default async function handler(req, res) {
       if (existingAfterError?.id) {
         responseOrder = existingAfterError;
       } else {
-        const message = fetchErr?.name === 'AbortError' || /aborted|abort/i.test(String(fetchErr?.message || ''))
-          ? 'WooCommerce reageerde te laat tijdens het aanmaken van de bestelling. De bestelling is niet bevestigd; de POS kan veilig opnieuw proberen.'
+        const httpStatus = Number(fetchErr?.response?.status || 0);
+        // Definite 4xx rejection (except 409) is not an uncertain order write.
+        // 409, 5xx and network timeouts stay locked to prevent duplicate orders.
+        if (httpStatus >= 400 && httpStatus < 500 && httpStatus !== 409) {
+          fetchErr.code = 'WOO_CHECKOUT_REJECTED';
+          throw fetchErr;
+        }
+        const message = fetchErr?.name === 'AbortError' || /aborted|abort|timeout/i.test(String(fetchErr?.message || ''))
+          ? 'WooCommerce reageerde niet tijdig. De uitkomst is onzeker; de bestelling blijft geblokkeerd voor controle.'
           : `WooCommerce checkout niet bevestigd: ${fetchErr.message}`;
         const timeoutError = new Error(message);
         timeoutError.code = 'WOO_CHECKOUT_TIMEOUT';
