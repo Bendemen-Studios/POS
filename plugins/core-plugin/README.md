@@ -1,61 +1,36 @@
 # BDM POS Core
 
-BDM POS Core is the authenticated server-to-server integration layer between Bendemen POS and WooCommerce. It centralizes WooCommerce transport while the POS application retains its existing business rules, permissions, checkout and order workflows.
+BDM POS Core is the authenticated server-to-server integration layer between Bendemen POS and WooCommerce. WooCommerce remains the source of truth; the POS retains its business rules, permissions and checkout workflows.
 
 ## API endpoints (v1)
+
+All endpoints require the `X-BDM-POS-Secret` header.
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
 | GET | `/wp-json/bdmpos/v1/health` | Authenticated connectivity and version |
-| GET | `/wp-json/bdmpos/v1/sync/status` | Webhook delivery configuration and last delivery result |
-| POST | `/wp-json/bdmpos/v1/woocommerce` | Authenticated gateway to WooCommerce's full `wc/v3` REST API |
-| GET | `/wp-json/bdmpos/v1/catalog?page=1&per_page=100` | Products, categories, images, attributes and variations |
-| GET | `/wp-json/bdmpos/v1/categories` | Product category tree |
-| GET | `/wp-json/bdmpos/v1/customers?page=1&per_page=100` | Paginated customer directory; optional `search` |
-| GET | `/wp-json/bdmpos/v1/customers/{id}/points` | Read a customer's points balance |
-| POST | `/wp-json/bdmpos/v1/customers/{id}/points` | Audited manual points addition/removal |
-| GET | `/wp-json/bdmpos/v1/stock?page=1&per_page=100` | Read-only stock snapshot for products and variations |
-| GET | `/wp-json/bdmpos/v1/orders?page=1&per_page=50` | Paginated existing orders |
-| POST | `/wp-json/bdmpos/v1/orders/{id}/complete` | Complete an existing order, including pickup completion |
+| POST | `/wp-json/bdmpos/v1/woocommerce` | Authenticated gateway to WooCommerce `wc/v3` |
+| GET | `/wp-json/bdmpos/v1/catalog` | Paginated products and variations |
+| GET | `/wp-json/bdmpos/v1/categories` | Product categories |
+| GET | `/wp-json/bdmpos/v1/customers` | Paginated customer directory |
+| GET/POST | `/wp-json/bdmpos/v1/customers/{id}/points` | Read or make audited points adjustments |
+| GET | `/wp-json/bdmpos/v1/stock` | Read-only stock snapshot |
+| GET | `/wp-json/bdmpos/v1/orders` | Read-only order listing |
+| POST | `/wp-json/bdmpos/v1/orders/{id}/complete` | Complete an existing order |
 
-## Full WooCommerce access
+## WooCommerce gateway
 
-The `/woocommerce` gateway forwards authenticated server-side requests to WooCommerce's native `/wp-json/wc/v3/` API. It supports `GET`, `POST`, `PUT`, `PATCH` and `DELETE` for WooCommerce REST resources, including products, variations, categories, customers, orders, refunds, coupons and other `wc/v3` resources. WooCommerce's own REST controllers validate each operation.
+The `/woocommerce` endpoint forwards server-side requests to WooCommerce's native `/wp-json/wc/v3/` API. It supports GET, POST, PUT, PATCH and DELETE for WooCommerce resources. WooCommerce's own REST controllers validate each operation.
 
-The gateway runs requests as a WordPress administrator service account with both `manage_options` and `manage_woocommerce`. Configure at least one active administrator account on the WordPress site. Requests are accepted only when the dedicated Core secret is valid. Enter the Core API secret in WooCommerce → BDM POS Core (or define it in `wp-config.php`); it is never sent to browser code.
+The gateway uses a WordPress administrator service account with `manage_options` and `manage_woocommerce`. Configure at least one active administrator account on WordPress. The Core secret is never sent to browser code.
 
-Core does not create a second order alongside the POS. Each existing POS order-creation flow makes its single order-creation request through the gateway. Offline order synchronization retains the existing POS idempotency claim and does not fall back to a direct WooCommerce request after a Core failure, avoiding an accidental second create after an uncertain response.
-
-## Automatic synchronization
-
-Core listens to WooCommerce product, variation, stock, category, customer profile and points, order status and refund changes. It queues signed webhook events for the POS backend using WooCommerce Action Scheduler (with WP-Cron fallback). Failed deliveries are retried with increasing delays, up to six attempts. The POS receiver stores event IDs in MySQL, safely accepts duplicate deliveries, and invalidates its product catalog cache when product, variation, stock or category data changes. The WordPress admin includes a settings page under WooCommerce → BDM POS Core.
-
-Configure the webhook URL and secret in WooCommerce → BDM POS Core. They can alternatively be defined in WordPress `wp-config.php` as fallback values:
-
-```php
-define( 'BDMPOS_CORE_WEBHOOK_URL', 'https://YOUR-POS-DOMAIN/api/webhooks/bdmpos-core' );
-define( 'BDMPOS_CORE_WEBHOOK_SECRET', 'USE_THE_SAME_LONG_RANDOM_SECRET_AS_THE_POS_ENV' );
-```
-
-Set the same secret as `BDMPOS_CORE_WEBHOOK_SECRET` in the POS server environment. The webhook URL must use HTTPS and the secret must be at least 32 characters. The authenticated `/sync/status` endpoint reports whether delivery is configured and the last attempt/result; it is an API endpoint, not a dashboard.
-
-## Duplicate request protection
-
-Mutating requests through the full `/woocommerce` gateway can include a stable `request_id` (the POS helper sends it as `requestId`). Core stores the completed response and replays it for repeated requests with the same method, resource path and request ID. Concurrent or uncertain in-flight requests return HTTP 409 instead of creating a second resource. Standard and manual order endpoints forward an `Idempotency-Key` when the caller supplies one; offline order sync always forwards its stable client order ID and keeps its MySQL idempotency lock as an additional layer. A caller should always reuse the same key when retrying the same write.
-
-## Existing POS behavior
-
-- Existing order creation, manual order creation and offline order synchronization now use Core when `BDMPOS_CORE_URL` and `BDMPOS_CORE_SECRET` are configured.
-- Existing order status updates use Core; the pickup API continues to check pickup type and store assignment before completing an order.
-- Catalog, category, customer, stock and order read adapters remain available.
-- Manual points adjustments use WooCommerce Points & Rewards with an audit note and idempotency key. Checkout-linked earning/redemption remains in the existing order-linked flow.
-- WooCommerce remains the source of truth. Store exclusions, category rules, POS permissions and checkout logic remain in the POS application.
+Mutating gateway requests should include a stable `request_id`. Core stores completed responses and replays them for retries with the same method, path and request ID. Concurrent or uncertain in-flight writes return HTTP 409; callers must reuse the same request ID when retrying and must not issue a new order-create request after an uncertain result.
 
 ## Install on bendemen.com
 
 1. Copy this directory to `wp-content/plugins/bdmpos-core/`, or package it as a ZIP and upload it through WordPress Plugins.
 2. Activate **BDM POS Core**.
-3. Add a long random secret and ensure an administrator service account exists:
+3. Add a long random secret in `wp-config.php`:
 
 ```php
 define( 'BDMPOS_CORE_SECRET', 'REPLACE_WITH_A_LONG_RANDOM_SECRET' );
@@ -64,18 +39,10 @@ define( 'BDMPOS_CORE_SECRET', 'REPLACE_WITH_A_LONG_RANDOM_SECRET' );
 4. Configure `BDMPOS_CORE_URL=https://www.bendemen.com` and the same `BDMPOS_CORE_SECRET` only in the POS server environment.
 5. Test the authenticated health endpoint over HTTPS.
 
-All endpoints require `X-BDM-POS-Secret`. Missing configuration fails closed with HTTP 503; invalid credentials receive HTTP 401. The full WooCommerce gateway is server-to-server only and must never be exposed to frontend/browser clients.
-
 ## Security
 
 - Keep the secret out of Git, frontend JavaScript, browser storage and logs.
 - Use HTTPS only and rotate the secret on both servers together.
-- The Core gateway is intentionally highly privileged. Protect the POS server environment and restrict access to the gateway secret.
-- Webhook events are signed with HMAC-SHA256; the receiver verifies the signature before storing or acting on an event.
-- Webhook delivery retries transient failures automatically. Check `/wp-json/bdmpos/v1/sync/status` when troubleshooting delivery.
-- WooCommerce REST controllers continue to apply resource-specific permissions and validation.
-- Do not remove existing WooCommerce integrations until production behavior has been verified.
-
-## Migration
-
-Core routing is opt-in when both server-only environment variables are configured. Existing fallback behavior remains where applicable. Switch modules gradually and verify order creation, offline retries, status updates, stock operations, customer operations and points balances before removing legacy integrations.
+- Protect the POS server environment and restrict access to the gateway secret.
+- The full WooCommerce gateway is highly privileged and server-to-server only.
+- Do not remove existing WooCommerce integrations until order creation, retries, order status updates, stock, customer and points operations have been verified.
