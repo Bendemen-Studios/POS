@@ -18,7 +18,6 @@ define( 'BDMPOS_CORE_PATH', plugin_dir_path( __FILE__ ) );
 
 require_once BDMPOS_CORE_PATH . 'includes/class-bdmpos-core-settings.php';
 require_once BDMPOS_CORE_PATH . 'includes/class-bdmpos-core-rest.php';
-require_once BDMPOS_CORE_PATH . 'includes/class-bdmpos-core-sync.php';
 
 add_action(
 	'plugins_loaded',
@@ -39,6 +38,5 @@ add_action(
 
 		BDMPOS_Core_Settings::instance();
 		BDMPOS_Core_REST::instance();
-		BDMPOS_Core_Sync::instance();
 	}
 );
