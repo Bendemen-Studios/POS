@@ -289,6 +289,12 @@ final class BDMPOS_Core_REST {
 			}
 			$response = rest_do_request( $internal );
 			if ( is_wp_error( $response ) ) {
+				// A WooCommerce REST validation/routing error is a known rejection,
+				// not an uncertain write. Release the idempotency key so a corrected
+				// request can be retried; 5xx responses below remain locked.
+				if ( '' !== $idempotency_option ) {
+					delete_option( $idempotency_option );
+				}
 				return $response;
 			}
 			$status = $response instanceof WP_REST_Response ? $response->get_status() : 200;
