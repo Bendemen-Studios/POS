@@ -351,10 +351,25 @@ final class BDMPOS_Core_REST {
 			}
 			$response = rest_do_request( $internal );
 			if ( is_wp_error( $response ) ) {
-				// Release only an explicit 4xx rejection. A WP_Error without a
-				// definite client-error status may have an uncertain write result.
+				// Log the upstream error code/message without request bodies, credentials,
+				// customer data, or payment details.
 				$error_data = $response->get_error_data();
 				$error_status = is_array( $error_data ) && isset( $error_data['status'] ) ? absint( $error_data['status'] ) : 0;
+				if ( function_exists( 'wc_get_logger' ) ) {
+					wc_get_logger()->error(
+						'WooCommerce REST proxy returned WP_Error: ' . $response->get_error_code() . ' - ' . $response->get_error_message(),
+						array(
+							'source' => 'bdmpos-core-proxy',
+							'method' => $method,
+							'path' => $path,
+							'request_id_hash' => '' !== $request_id ? hash( 'sha256', $request_id ) : '',
+						'http_status' => $error_status,
+						'error_data_keys' => is_array( $error_data ) ? array_keys( $error_data ) : array(),
+						)
+					);
+				}
+				// Release only an explicit 4xx rejection. A WP_Error without a
+				// definite client-error status may have an uncertain write result.
 				if ( '' !== $idempotency_option && $error_status >= 400 && $error_status < 500 ) {
 					delete_option( $idempotency_option );
 				}
@@ -383,7 +398,18 @@ final class BDMPOS_Core_REST {
 			}
 			return $wrapped;
 		} catch ( Throwable $error ) {
-			return new WP_Error( 'bdmpos_core_proxy_failed', 'WooCommerce operation failed.', array( 'status' => 500, 'reason' => $error->getMessage() ) );
+			if ( function_exists( 'wc_get_logger' ) ) {
+				wc_get_logger()->critical(
+					'WooCommerce REST proxy exception: ' . get_class( $error ) . ' - ' . $error->getMessage(),
+					array(
+						'source' => 'bdmpos-core-proxy',
+						'method' => $method,
+						'path' => $path,
+						'request_id_hash' => '' !== $request_id ? hash( 'sha256', $request_id ) : '',
+					)
+				);
+			}
+			return new WP_Error( 'bdmpos_core_proxy_failed', 'WooCommerce operation failed.', array( 'status' => 500 ) );
 		} finally {
 			wp_set_current_user( $previous_user_id );
 		}
