@@ -406,12 +406,27 @@ export default async function handler(req, res) {
 
     return res.status(200).json({ success: true, order: responseOrder, pointsSyncPending, pointsResult });
   } catch (error) {
-    if (claimed) {
+    // A Core/WooCommerce write can have an uncertain outcome (for example a
+    // timeout or HTTP 5xx after the remote order was created). Keep the claim
+    // in that case so retries cannot create a duplicate order. Release only
+    // when failure is known to have happened before the order-create request.
+    const uncertainRemoteResult = error?.code === 'WOO_CHECKOUT_TIMEOUT' ||
+      error?.response?.status >= 500 ||
+      /Core kon bestaande bestellingen niet controleren|WooCommerce kon bestaande bestellingen niet controleren|reeds verwerkt|uncertain result/i.test(String(error?.message || ''));
+
+    if (claimed && !uncertainRemoteResult) {
       try { await releaseOrder(clientOrderId); } catch (releaseError) {
         console.error('[CHECKOUT IDEMPOTENCY RELEASE ERROR]:', releaseError.message);
       }
     }
     console.error('[CHECKOUT API ERROR]:', error?.name || 'Error', error?.message || error, error?.stack || '');
-    return res.status(500).json({ success: false, error: error.message || 'Checkout mislukt.' });
+    const status = uncertainRemoteResult ? 503 : 500;
+    return res.status(status).json({
+      success: false,
+      retryable: Boolean(uncertainRemoteResult),
+      error: uncertainRemoteResult
+        ? 'De status van de WooCommerce-bestelling kon niet veilig worden vastgesteld. De opdracht blijft geblokkeerd voor controle; probeer geen nieuwe bestelling met een andere opdracht-ID.'
+        : (error.message || 'Checkout mislukt.')
+    });
   }
 }
