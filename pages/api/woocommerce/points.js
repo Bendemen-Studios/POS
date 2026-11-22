@@ -69,7 +69,7 @@ export default async function handler(req, res) {
     }
 
     if (action === 'redeem') {
-      const redeemPoints = Math.max(0, Number.parseInt(req.body?.pointsToRedeem, 10) || 0);
+      const redeemPoints = Math.max(0, Math.min(100, Number.parseInt(req.body?.pointsToRedeem, 10) || 0));
       if (redeemPoints <= 0) {
         return res.status(400).json({ success: false, message: 'Voer minimaal 1 punt in om in te wisselen.' });
       }
