@@ -346,8 +346,9 @@ final class BDMPOS_Core_REST {
 			$internal->set_query_params( $params );
 			if ( in_array( $method, array( 'POST', 'PUT', 'PATCH' ), true ) ) {
 				$internal->set_body_params( $body );
-				$internal->set_json_params( $body );
+				$internal->set_body( wp_json_encode( $body ) );
 				$internal->set_header( 'content-type', 'application/json' );
+				$internal->parse_json_params();
 			}
 			$response = rest_do_request( $internal );
 			if ( is_wp_error( $response ) ) {
