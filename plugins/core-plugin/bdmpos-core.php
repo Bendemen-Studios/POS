@@ -2,7 +2,7 @@
 /**
  * Plugin Name: BDM POS Core
  * Description: Secure, versioned integration layer between Bendemen POS and WooCommerce.
- * Version: 0.12.2
+ * Version: 0.12.3
  * Author: Bendemen
  * Requires Plugins: woocommerce
  * Text Domain: bdmpos-core
@@ -12,7 +12,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'BDMPOS_CORE_VERSION', '0.12.2' );
+define( 'BDMPOS_CORE_VERSION', '0.12.3' );
 define( 'BDMPOS_CORE_FILE', __FILE__ );
 define( 'BDMPOS_CORE_PATH', plugin_dir_path( __FILE__ ) );
 

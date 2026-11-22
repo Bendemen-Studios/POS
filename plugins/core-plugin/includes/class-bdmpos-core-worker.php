@@ -119,7 +119,6 @@ final class BDMPOS_Core_Worker {
 					// rest_do_request does not parse a raw body into get_param().
 					// Without these, the WooCommerce gateway never sees the order.
 					$internal->set_body_params( $body );
-					$internal->set_json_params( $body );
 					$internal->set_body( wp_json_encode( $body ) );
 					$internal->set_header( 'content-type', 'application/json' );
 				}
