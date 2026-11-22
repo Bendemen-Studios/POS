@@ -668,7 +668,38 @@ final class BDMPOS_Core_REST {
 					? (int) $customer_query->get_total()
 					: count( $customers );
 			} else {
-				throw new RuntimeException( 'Neither wc_get_customers() nor WC_Customer_Query is available.' );
+				// Last-resort compatibility path: registered WordPress users with the
+				// customer role are valid WooCommerce customer accounts. This avoids
+				// exposing administrators, staff, subscribers, or arbitrary users.
+				$user_args = array(
+					'role'         => 'customer',
+					'fields'       => 'ID',
+					'number'       => $per_page,
+					'paged'        => $page,
+					'orderby'      => 'ID',
+					'order'        => 'DESC',
+					'count_total'  => true,
+				);
+				if ( '' !== $search ) {
+					$user_args['search'] = '*' . esc_attr( $search ) . '*';
+					$user_args['search_columns'] = array( 'user_login', 'user_email', 'display_name' );
+				}
+				$user_query = new WP_User_Query( $user_args );
+				$user_ids = $user_query->get_results();
+				$total = (int) $user_query->get_total();
+				$customers = array();
+				foreach ( $user_ids as $user_id ) {
+					$customer = new WC_Customer( (int) $user_id );
+					if ( $customer->get_id() ) {
+						$customers[] = $customer;
+					}
+				}
+				if ( function_exists( 'wc_get_logger' ) ) {
+					wc_get_logger()->warning(
+						'Customer directory used the WordPress customer-role fallback.',
+						array( 'source' => 'bdmpos-core-customers', 'page' => $page, 'per_page' => $per_page )
+					);
+				}
 			}
 
 			$items = array();
