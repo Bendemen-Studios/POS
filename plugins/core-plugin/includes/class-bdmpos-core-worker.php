@@ -11,6 +11,9 @@ final class BDMPOS_Core_Worker {
 	const HOOK = 'bdmpos_core_process_outbound_commands';
 	const LOCK = 'bdmpos_core_worker_lock';
 
+	private $armed = false;
+	private $from_pageview = false;
+
 	public static function instance() {
 		static $instance = null;
 		if ( null === $instance ) {
@@ -22,6 +25,9 @@ final class BDMPOS_Core_Worker {
 	private function __construct() {
 		add_filter( 'cron_schedules', array( $this, 'cron_schedules' ) );
 		add_action( 'init', array( $this, 'schedule' ) );
+		add_action( 'init', array( $this, 'kick_from_traffic' ), 20 );
+		add_action( 'wp_ajax_bdmpos_core_kick', array( $this, 'ajax_kick' ) );
+		add_action( 'wp_ajax_nopriv_bdmpos_core_kick', array( $this, 'ajax_kick' ) );
 		add_action( self::HOOK, array( $this, 'process' ) );
 	}
 
@@ -55,7 +61,7 @@ final class BDMPOS_Core_Worker {
 		}
 		$args = array(
 			'method'      => $method,
-			'timeout'     => 20,
+			'timeout'     => 45,
 			'redirection' => 0,
 			'headers'     => array(
 				'X-BDM-POS-Secret' => BDMPOS_Core_Settings::get( 'core_secret' ),
@@ -116,7 +122,6 @@ final class BDMPOS_Core_Worker {
 					// rest_do_request does not parse a raw body into get_param().
 					// Without these, the WooCommerce gateway never sees the order.
 					$internal->set_body_params( $body );
-					$internal->set_json_params( $body );
 					$internal->set_body( wp_json_encode( $body ) );
 					$internal->set_header( 'content-type', 'application/json' );
 				}
@@ -150,6 +155,47 @@ final class BDMPOS_Core_Worker {
 		}
 	}
 
+	public function kick_from_traffic() {
+		if ( wp_doing_ajax() || wp_doing_cron() || ( defined( 'REST_REQUEST' ) && REST_REQUEST ) || ! $this->configured() ) {
+			return;
+		}
+		if ( get_transient( 'bdmpos_core_worker_kick' ) ) {
+			return;
+		}
+		set_transient( 'bdmpos_core_worker_kick', 1, 8 );
+		$this->from_pageview = true;
+		$this->arm();
+	}
+
+	public function arm() {
+		if ( ! $this->configured() || $this->armed ) {
+			return;
+		}
+		$this->armed = true;
+		ignore_user_abort( true );
+		add_action( 'shutdown', array( $this, 'run_after_response' ), 0 );
+	}
+
+	public function run_after_response() {
+		ignore_user_abort( true );
+		if ( function_exists( 'fastcgi_finish_request' ) ) {
+			fastcgi_finish_request();
+		} elseif ( $this->from_pageview ) {
+			return;
+		}
+		$this->process();
+	}
+
+	public function ajax_kick() {
+		$secret   = (string) BDMPOS_Core_Settings::get( 'core_secret' );
+		$supplied = isset( $_SERVER['HTTP_X_BDM_POS_SECRET'] ) ? (string) $_SERVER['HTTP_X_BDM_POS_SECRET'] : '';
+		if ( strlen( $secret ) < 32 || strlen( $secret ) !== strlen( $supplied ) || ! hash_equals( $secret, $supplied ) ) {
+			wp_die( 'Unauthorized', '', array( 'response' => 401 ) );
+		}
+		$this->process();
+		wp_die( 'ok' );
+	}
+
 	public function process() {
 		if ( ! $this->configured() || get_transient( self::LOCK ) ) {
 			return;
@@ -175,9 +221,14 @@ final class BDMPOS_Core_Worker {
 		);
 
 		try {
-			$base_url = BDMPOS_Core_Settings::get( 'pos_command_url' );
-			$pull_url = add_query_arg( 'action', 'pull', $base_url );
-			$pull     = $this->request( 'GET', $pull_url );
+			$base_url      = BDMPOS_Core_Settings::get( 'pos_command_url' );
+			$pull_url      = add_query_arg( 'action', 'pull', $base_url );
+			$hard_deadline = $started + 50;
+			$quiet_until   = 0;
+			$saw_work      = false;
+
+			while ( microtime( true ) < $hard_deadline ) {
+			$pull = $this->request( 'GET', $pull_url );
 			if ( is_wp_error( $pull ) ) {
 				throw new Exception( 'POS pull mislukt: ' . $pull->get_error_message() );
 			}
@@ -192,7 +243,23 @@ final class BDMPOS_Core_Worker {
 				throw new Exception( 'Ongeldig antwoord van de POS-opdrachtenwachtrij.' );
 			}
 
-			$stats['pulled'] = count( $data['commands'] );
+			if ( empty( $data['commands'] ) ) {
+				if ( ! $saw_work ) {
+					break;
+				}
+				if ( 0 === $quiet_until ) {
+					$quiet_until = microtime( true ) + 12;
+				}
+				if ( microtime( true ) >= $quiet_until ) {
+					break;
+				}
+				usleep( 400000 );
+				continue;
+			}
+
+			$saw_work    = true;
+			$quiet_until = 0;
+			$stats['pulled'] += count( $data['commands'] );
 			foreach ( $data['commands'] as $command ) {
 				$command_id = isset( $command['command_id'] ) ? sanitize_text_field( $command['command_id'] ) : '';
 				if ( '' === $command_id ) {
@@ -256,6 +323,7 @@ final class BDMPOS_Core_Worker {
 				} else {
 					$stats['failed']++;
 				}
+			}
 			}
 
 			$last = array(

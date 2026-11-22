@@ -43,6 +43,18 @@ async function claimCommands() {
           claimed_at = NULL
       WHERE status = 'processing' AND claimed_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL 5 MINUTE)
     `);
+    // Drop catalog and customer reads that have already missed the till's
+    // decision window. They were filling the queue in front of checkout.
+    await connection.query(`
+      UPDATE pos_core_commands
+      SET status = 'failed',
+          last_error = 'Read dropped because it waited too long',
+          completed_at = UTC_TIMESTAMP()
+      WHERE status = 'pending'
+        AND action = 'core.request'
+        AND created_at < DATE_SUB(NOW(), INTERVAL 3 MINUTE)
+        AND JSON_UNQUOTE(JSON_EXTRACT(payload, '$.method')) = 'GET'
+    `);
     const [rows] = await connection.query(
       "SELECT id, command_id, action, payload FROM pos_core_commands WHERE status = 'pending' AND attempts < 5 ORDER BY id ASC LIMIT 5 FOR UPDATE"
     );

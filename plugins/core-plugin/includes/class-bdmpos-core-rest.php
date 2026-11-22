@@ -52,6 +52,16 @@ final class BDMPOS_Core_REST {
 
 		register_rest_route(
 			self::REST_NAMESPACE,
+			'/wake',
+			array(
+				'methods'             => WP_REST_Server::READABLE,
+				'callback'            => array( $this, 'wake' ),
+				'permission_callback' => '__return_true',
+			)
+		);
+
+		register_rest_route(
+			self::REST_NAMESPACE,
 			'/catalog',
 			array(
 				'methods'             => WP_REST_Server::READABLE,
@@ -316,7 +326,7 @@ final class BDMPOS_Core_REST {
 			$internal->set_query_params( $params );
 			if ( in_array( $method, array( 'POST', 'PUT', 'PATCH' ), true ) ) {
 				$internal->set_body_params( $body );
-				$internal->set_json_params( $body );
+				$internal->set_body( wp_json_encode( $body ) );
 				$internal->set_header( 'content-type', 'application/json' );
 			}
 			$response = rest_do_request( $internal );
@@ -344,6 +354,14 @@ final class BDMPOS_Core_REST {
 		} finally {
 			wp_set_current_user( $previous_user_id );
 		}
+	}
+
+	public function wake() {
+		ignore_user_abort( true );
+		BDMPOS_Core_Worker::instance()->arm();
+		$response = rest_ensure_response( array( 'success' => true ) );
+		$response->header( 'Cache-Control', 'no-store, no-cache, must-revalidate' );
+		return $response;
 	}
 
 	public function health() {
@@ -566,45 +584,55 @@ final class BDMPOS_Core_REST {
 	public function customers( WP_REST_Request $request ) {
 		$page     = max( 1, (int) $request->get_param( 'page' ) );
 		$per_page = min( self::MAX_PAGE_SIZE, max( 1, (int) $request->get_param( 'per_page' ) ) );
+		$search   = trim( (string) $request->get_param( 'search' ) );
 		$args     = array(
-			'limit'   => $per_page,
-			'page'    => $page,
-			'orderby' => 'ID',
-			'order'   => 'DESC',
-			'return'  => 'objects',
+			'number'      => $per_page,
+			'paged'       => $page,
+			'role'        => 'customer',
+			'orderby'     => 'registered',
+			'order'       => 'DESC',
+			'count_total' => true,
+			'fields'      => 'ID',
 		);
-		$search = trim( (string) $request->get_param( 'search' ) );
 		if ( '' !== $search ) {
-			$args['search'] = '*' . $search . '*';
+			$args['search']         = '*' . $search . '*';
+			$args['search_columns'] = array( 'user_login', 'user_email', 'user_nicename', 'display_name' );
 		}
 
 		try {
-			$query = wc_get_customers( array_merge( $args, array( 'paginate' => true ) ) );
-			$customers = is_object( $query ) && isset( $query->customers ) ? $query->customers : array();
-			$total = is_object( $query ) && isset( $query->total ) ? (int) $query->total : count( $customers );
+			$query = new WP_User_Query( $args );
 			$items = array();
-			foreach ( $customers as $customer ) {
-				if ( $customer instanceof WC_Customer ) {
-					$items[] = $this->serialize_customer( $customer );
+			foreach ( (array) $query->get_results() as $user_id ) {
+				try {
+					$customer = new WC_Customer( (int) $user_id );
+					if ( $customer->get_id() ) {
+						$items[] = $this->serialize_customer( $customer );
+					}
+				} catch ( Throwable $customer_error ) {
+					continue;
 				}
 			}
+			$total = (int) $query->get_total();
 			return rest_ensure_response(
 				array(
-					'success'       => true,
-					'page'          => $page,
-					'per_page'      => $per_page,
-					'total'         => $total,
-					'total_pages'   => (int) ceil( $total / $per_page ),
-					'count'         => count( $items ),
-					'customers'     => $items,
-					'generated_at'  => gmdate( 'c' ),
+					'success'      => true,
+					'page'         => $page,
+					'per_page'     => $per_page,
+					'total'        => $total,
+					'total_pages'  => (int) ceil( $total / max( 1, $per_page ) ),
+					'count'        => count( $items ),
+					'customers'    => $items,
+					'generated_at' => gmdate( 'c' ),
 				)
 			);
 		} catch ( Throwable $error ) {
 			return new WP_Error(
 				'bdmpos_core_customers_failed',
 				'Unable to load WooCommerce customers.',
-				array( 'status' => 500 )
+				array(
+					'status'  => 500,
+					'details' => $error->getMessage(),
+				)
 			);
 		}
 	}
@@ -839,26 +867,20 @@ final class BDMPOS_Core_REST {
 
 	private function serialize_customer( WC_Customer $customer ) {
 		$data = $customer->get_data();
-		$data['date_created']  = $customer->get_date_created() ? $customer->get_date_created()->date( 'c' ) : null;
-		$data['date_modified'] = $customer->get_date_modified() ? $customer->get_date_modified()->date( 'c' ) : null;
-		$data['meta_data'] = array();
-		$data['points_balance'] = null;
-
-		foreach ( $customer->get_meta_data() as $meta ) {
-			$meta_data = $meta->get_data();
-			$key = isset( $meta_data['key'] ) ? (string) $meta_data['key'] : '';
-			$value = isset( $meta_data['value'] ) ? $meta_data['value'] : null;
-			$data['meta_data'][] = array(
-				'id'    => isset( $meta_data['id'] ) ? (int) $meta_data['id'] : 0,
-				'key'   => $key,
-				'value' => $value,
-			);
-			if ( null === $data['points_balance'] && in_array( $key, array( 'wc_points_balance', '_wc_points_balance', 'points_balance', '_points_balance' ), true ) ) {
-				$data['points_balance'] = max( 0, (int) $value );
+		unset( $data['meta_data'] );
+		foreach ( $data as $key => $value ) {
+			if ( $value instanceof DateTimeInterface ) {
+				$data[ $key ] = $value->format( 'c' );
 			}
 		}
-		if ( class_exists( 'WC_Points_Rewards_Manager' ) ) {
-			$data['points_balance'] = max( 0, (int) WC_Points_Rewards_Manager::get_users_points( $customer->get_id() ) );
+		$data['meta_data'] = array();
+		$data['points_balance'] = 0;
+		try {
+			if ( class_exists( 'WC_Points_Rewards_Manager' ) ) {
+				$data['points_balance'] = max( 0, (int) WC_Points_Rewards_Manager::get_users_points( $customer->get_id() ) );
+			}
+		} catch ( Throwable $error ) {
+			$data['points_balance'] = 0;
 		}
 		return $data;
 	}
