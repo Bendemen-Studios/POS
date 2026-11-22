@@ -4,6 +4,7 @@ import { useRouter } from 'next/router';
 import '../styles/globals.css';
 
 const SUMUP_GATEWAY = 'https://pos-sumup.vercel.app';
+const SHOP_WAKE_URL = (process.env.NEXT_PUBLIC_WOOCOMMERCE_URL || 'https://www.bendemen.com').replace(/\/+$/, '') + '/wp-json/bdmpos/v1/wake';
 const SUMUP_FINAL_STATUSES = new Set(['SUCCESSFUL', 'FAILED', 'CANCELLED', 'REFUNDED']);
 
 function jsonResponse(data, status = 200) {
@@ -11,6 +12,24 @@ function jsonResponse(data, status = 200) {
     status,
     headers: { 'Content-Type': 'application/json' },
   });
+}
+
+function installShopWorkerWake() {
+  if (typeof window === 'undefined') return () => {};
+  let stopped = false;
+  const ping = () => {
+    if (stopped || document.visibilityState === 'hidden') return;
+    fetch(SHOP_WAKE_URL + '?t=' + Date.now(), { mode: 'no-cors', cache: 'no-store', credentials: 'omit' }).catch(() => {});
+  };
+  ping();
+  const timer = window.setInterval(ping, 8000);
+  const onVisible = () => { if (document.visibilityState === 'visible') ping(); };
+  document.addEventListener('visibilitychange', onVisible);
+  return () => {
+    stopped = true;
+    window.clearInterval(timer);
+    document.removeEventListener('visibilitychange', onVisible);
+  };
 }
 
 function installAdminOfflineMutationGuard() {
@@ -319,6 +338,7 @@ export default function App({ Component, pageProps }) {
     const stopAdminOfflineMutationGuard = installAdminOfflineMutationGuard();
     registerNativePWA();
     const stopServerWatcher = installFastServerWatcher();
+    const stopShopWake = installShopWorkerWake();
     const stopOfflineBridge = installOfflineAjaxBridge((message) => {
       if (message) {
         setOfflineSyncMessage(message);
@@ -336,6 +356,7 @@ export default function App({ Component, pageProps }) {
     window.addEventListener('pos:admin-change-blocked', blockedHandler);
     return () => {
       stopServerWatcher();
+      stopShopWake();
       stopAdminOfflineMutationGuard();
       stopOfflineBridge();
       window.removeEventListener('pos:server-status', statusHandler);

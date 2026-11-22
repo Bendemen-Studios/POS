@@ -46,7 +46,7 @@ async function getOpenPickupOrders() {
     method: 'GET',
     path: '/orders',
     params: { per_page: 50, page: 1, status, orderby: 'date', order: 'desc' },
-    timeoutMs: 20000,
+    timeoutMs: 45000,
   })));
   return pages.flatMap(page => Array.isArray(page.data) ? page.data : []);
 }

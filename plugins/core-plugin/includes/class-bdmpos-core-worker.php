@@ -11,6 +11,9 @@ final class BDMPOS_Core_Worker {
 	const HOOK = 'bdmpos_core_process_outbound_commands';
 	const LOCK = 'bdmpos_core_worker_lock';
 
+	private $armed = false;
+	private $from_pageview = false;
+
 	public static function instance() {
 		static $instance = null;
 		if ( null === $instance ) {
@@ -159,19 +162,28 @@ final class BDMPOS_Core_Worker {
 		if ( get_transient( 'bdmpos_core_worker_kick' ) ) {
 			return;
 		}
-		set_transient( 'bdmpos_core_worker_kick', 1, 15 );
-		wp_remote_post(
-			admin_url( 'admin-ajax.php' ),
-			array(
-				'timeout'   => 0.01,
-				'blocking'  => false,
-				'sslverify' => false,
-				'headers'   => array(
-					'X-BDM-POS-Secret' => BDMPOS_Core_Settings::get( 'core_secret' ),
-				),
-				'body'      => array( 'action' => 'bdmpos_core_kick' ),
-			)
-		);
+		set_transient( 'bdmpos_core_worker_kick', 1, 8 );
+		$this->from_pageview = true;
+		$this->arm();
+	}
+
+	public function arm() {
+		if ( ! $this->configured() || $this->armed ) {
+			return;
+		}
+		$this->armed = true;
+		ignore_user_abort( true );
+		add_action( 'shutdown', array( $this, 'run_after_response' ), 0 );
+	}
+
+	public function run_after_response() {
+		ignore_user_abort( true );
+		if ( function_exists( 'fastcgi_finish_request' ) ) {
+			fastcgi_finish_request();
+		} elseif ( $this->from_pageview ) {
+			return;
+		}
+		$this->process();
 	}
 
 	public function ajax_kick() {
@@ -209,9 +221,14 @@ final class BDMPOS_Core_Worker {
 		);
 
 		try {
-			$base_url = BDMPOS_Core_Settings::get( 'pos_command_url' );
-			$pull_url = add_query_arg( 'action', 'pull', $base_url );
-			$pull     = $this->request( 'GET', $pull_url );
+			$base_url      = BDMPOS_Core_Settings::get( 'pos_command_url' );
+			$pull_url      = add_query_arg( 'action', 'pull', $base_url );
+			$hard_deadline = $started + 50;
+			$quiet_until   = 0;
+			$saw_work      = false;
+
+			while ( microtime( true ) < $hard_deadline ) {
+			$pull = $this->request( 'GET', $pull_url );
 			if ( is_wp_error( $pull ) ) {
 				throw new Exception( 'POS pull mislukt: ' . $pull->get_error_message() );
 			}
@@ -226,7 +243,23 @@ final class BDMPOS_Core_Worker {
 				throw new Exception( 'Ongeldig antwoord van de POS-opdrachtenwachtrij.' );
 			}
 
-			$stats['pulled'] = count( $data['commands'] );
+			if ( empty( $data['commands'] ) ) {
+				if ( ! $saw_work ) {
+					break;
+				}
+				if ( 0 === $quiet_until ) {
+					$quiet_until = microtime( true ) + 12;
+				}
+				if ( microtime( true ) >= $quiet_until ) {
+					break;
+				}
+				usleep( 400000 );
+				continue;
+			}
+
+			$saw_work    = true;
+			$quiet_until = 0;
+			$stats['pulled'] += count( $data['commands'] );
 			foreach ( $data['commands'] as $command ) {
 				$command_id = isset( $command['command_id'] ) ? sanitize_text_field( $command['command_id'] ) : '';
 				if ( '' === $command_id ) {
@@ -290,6 +323,7 @@ final class BDMPOS_Core_Worker {
 				} else {
 					$stats['failed']++;
 				}
+			}
 			}
 
 			$last = array(

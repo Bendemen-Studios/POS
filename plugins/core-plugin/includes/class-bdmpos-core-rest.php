@@ -52,6 +52,16 @@ final class BDMPOS_Core_REST {
 
 		register_rest_route(
 			self::REST_NAMESPACE,
+			'/wake',
+			array(
+				'methods'             => WP_REST_Server::READABLE,
+				'callback'            => array( $this, 'wake' ),
+				'permission_callback' => '__return_true',
+			)
+		);
+
+		register_rest_route(
+			self::REST_NAMESPACE,
 			'/catalog',
 			array(
 				'methods'             => WP_REST_Server::READABLE,
@@ -344,6 +354,14 @@ final class BDMPOS_Core_REST {
 		} finally {
 			wp_set_current_user( $previous_user_id );
 		}
+	}
+
+	public function wake() {
+		ignore_user_abort( true );
+		BDMPOS_Core_Worker::instance()->arm();
+		$response = rest_ensure_response( array( 'success' => true ) );
+		$response->header( 'Cache-Control', 'no-store, no-cache, must-revalidate' );
+		return $response;
 	}
 
 	public function health() {
